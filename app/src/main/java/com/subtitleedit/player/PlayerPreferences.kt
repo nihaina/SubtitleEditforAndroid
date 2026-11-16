@@ -16,6 +16,29 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) {
             .getOrDefault(PlayerPlayMode.REPEAT_ALL)
         set(value) = prefs.edit().putString(KEY_MODE, value.name).apply()
 
+    val endBehavior: PlayerEndBehavior
+        get() = PlayerEndBehavior(
+            enabled = prefs.getBoolean("end_behavior_enabled", false),
+            trackAction = runCatching {
+                PlayerTrackEndAction.valueOf(prefs.getString("track_end_action", "").orEmpty())
+            }.getOrDefault(PlayerTrackEndAction.FOLLOW_MODE),
+            queueAction = runCatching {
+                PlayerQueueEndAction.valueOf(prefs.getString("queue_end_action", "").orEmpty())
+            }.getOrDefault(PlayerQueueEndAction.STOP),
+            wrapQueues = prefs.getBoolean("queue_end_wrap", false),
+            reshuffle = prefs.getBoolean("queue_end_reshuffle", true)
+        )
+
+    fun savePlaybackBehavior(mode: PlayerPlayMode, behavior: PlayerEndBehavior) {
+        prefs.edit().putString(KEY_MODE, mode.name)
+            .putBoolean("end_behavior_enabled", behavior.enabled)
+            .putString("track_end_action", behavior.trackAction.name)
+            .putString("queue_end_action", behavior.queueAction.name)
+            .putBoolean("queue_end_wrap", behavior.wrapQueues)
+            .putBoolean("queue_end_reshuffle", behavior.reshuffle)
+            .apply()
+    }
+
     var defaultSpeed: Float
         get() = prefs.getFloat(KEY_SPEED, 1f).takeIf { it.isFinite() }?.coerceIn(MIN_SPEED, MAX_SPEED) ?: 1f
         set(value) = prefs.edit().putFloat(KEY_SPEED, value.takeIf { it.isFinite() }?.coerceIn(MIN_SPEED, MAX_SPEED) ?: 1f).apply()

@@ -186,7 +186,7 @@ internal fun ListeningStatsScreen(
                 if (!exists) {
                     Toast.makeText(context, context.getString(R.string.media_lib_file_missing), Toast.LENGTH_SHORT).show()
                 } else if (playerLauncher != null) {
-                    playerLauncher(listOf(path), 0, null)
+                    playerLauncher(listOf(path), 0, null, null)
                 } else {
                     context.startActivity(Intent(context, PlayerActivity::class.java).apply {
                         putStringArrayListExtra(PlayerActivity.EXTRA_PLAYLIST, arrayListOf(path))

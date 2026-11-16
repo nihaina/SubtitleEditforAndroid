@@ -70,14 +70,23 @@ class PlayerActivity : AppComposeActivity() {
         window.setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.hidePlayerSystemBars()
-        val tracks = intent.getStringArrayListExtra(EXTRA_PLAYLIST).orEmpty().map { path ->
+        val savedPaths = savedInstanceState?.getStringArrayList(EXTRA_PLAYLIST)
+        val tracks = (savedPaths ?: intent.getStringArrayListExtra(EXTRA_PLAYLIST)).orEmpty().map { path ->
             val file = File(path)
             PlayerTrack(path = path, name = file.name, isVideo = FileTypePolicy.isVideo(file))
         }
-        val initialMode = intent.getStringExtra(EXTRA_PLAY_MODE)?.let { value ->
+        val initialMode = (savedInstanceState?.getString(EXTRA_PLAY_MODE)
+            ?: intent.getStringExtra(EXTRA_PLAY_MODE))?.let { value ->
             runCatching { PlayerPlayMode.valueOf(value) }.getOrNull()
         }
-        viewModel.configure(tracks, intent.getIntExtra(EXTRA_START_INDEX, 0), initialMode)
+        if (savedInstanceState != null && savedPaths != null) {
+            viewModel.restoreSession(tracks, savedInstanceState.getInt(EXTRA_START_INDEX), initialMode,
+                savedInstanceState.getLong(STATE_POSITION), savedInstanceState.getBoolean(STATE_PLAYING),
+                expanded = true, queueSource = savedInstanceState.getPlayerQueueSource())
+        } else {
+            viewModel.configure(tracks, intent.getIntExtra(EXTRA_START_INDEX, 0), initialMode,
+                intent.getPlayerQueueSource())
+        }
         setContent {
             SubtitleEditComposeTheme {
                 val background = MaterialTheme.colorScheme.background
@@ -159,6 +168,15 @@ class PlayerActivity : AppComposeActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         subtitlePickerTrackPath?.let { outState.putString(STATE_SUBTITLE_PICKER_TRACK, it) }
+        val state = viewModel.state.value
+        if (state.currentTrack != null) {
+            outState.putStringArrayList(EXTRA_PLAYLIST, ArrayList(state.playlist.map { it.path }))
+            outState.putInt(EXTRA_START_INDEX, state.currentIndex)
+            outState.putString(EXTRA_PLAY_MODE, state.mode.name)
+            outState.putLong(STATE_POSITION, state.positionMs)
+            outState.putBoolean(STATE_PLAYING, state.playing)
+            outState.putPlayerQueueSource(state.queueSource)
+        }
         super.onSaveInstanceState(outState)
     }
 
@@ -174,6 +192,8 @@ class PlayerActivity : AppComposeActivity() {
         const val EXTRA_START_INDEX = "player_start_index"
         const val EXTRA_PLAY_MODE = "player_play_mode"
         private const val STATE_SUBTITLE_PICKER_TRACK = "player_subtitle_picker_track"
+        private const val STATE_POSITION = "player_position"
+        private const val STATE_PLAYING = "player_playing"
         private val SUBTITLE_EXTENSIONS = setOf("srt", "lrc", "vtt", "ass", "ssa")
     }
 }

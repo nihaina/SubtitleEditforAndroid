@@ -148,12 +148,7 @@ private fun PlayerPlaylistPanel(state: PlayerUiState, viewModel: PlayerViewModel
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    painter = painterResource(if (track.isVideo) R.drawable.ic_file_video else R.drawable.ic_file_audio),
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                    tint = if (current) PlayerColors.Accent else PlayerColors.OnDarkVariant
-                )
+                PlayerPlaylistArtwork(track = track, highlighted = current)
                 Spacer(Modifier.width(10.dp))
                 Text(
                     text = track.name,

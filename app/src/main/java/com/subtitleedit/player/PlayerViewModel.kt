@@ -38,6 +38,9 @@ internal data class PlayerUiState(
     val error: String? = null,
     val speed: Float = 1f,
     val mode: PlayerPlayMode = PlayerPlayMode.REPEAT_ALL,
+    val endBehavior: PlayerEndBehavior = PlayerEndBehavior(),
+    val queueSource: PlayerQueueSource? = null,
+    val showEndBehaviorDialog: Boolean = false,
     val volumePercent: Int = 100,
     val volumeGestureActive: Boolean = false,
     val equalizer: PlayerEqualizerState = PlayerEqualizerState(),
@@ -74,10 +77,16 @@ internal data class PlayerUiState(
     val trackContainedPlaylistIds: Set<Long> = emptySet()
 ) {
     val currentTrack: PlayerTrack? get() = playlist.getOrNull(currentIndex)
+    val movesBetweenQueues: Boolean get() = endBehavior.enabled && endBehavior.queueAction == PlayerQueueEndAction.NEXT_QUEUE
     val hasPrevious: Boolean get() = currentTrack != null && (positionMs > 5_000L ||
-        PlayerPlaylistOrder.manualPrevious(currentIndex, playlist.size, mode, shuffleOrder) != null)
-    val hasNext: Boolean get() =
-        PlayerPlaylistOrder.manualNext(currentIndex, playlist.size, mode, shuffleOrder) != null
+        if (movesBetweenQueues) queueSource != null || adjacentTrack(forward = false) != null
+        else PlayerPlaylistOrder.manualPrevious(currentIndex, playlist.size, mode, shuffleOrder) != null)
+    val hasNext: Boolean get() = if (movesBetweenQueues)
+        currentTrack != null && (queueSource != null || adjacentTrack(forward = true) != null)
+        else PlayerPlaylistOrder.manualNext(currentIndex, playlist.size, mode, shuffleOrder) != null
+
+    fun adjacentTrack(forward: Boolean): Int? = PlayerEndBehaviorPolicy.adjacentIndex(
+        currentIndex, playlist.size, shuffleOrder, mode == PlayerPlayMode.SHUFFLE, forward)
 }
 
 /** Owns one surface session and folds engine events into a single main-thread UI state. */
@@ -89,8 +98,10 @@ internal class PlayerViewModel @JvmOverloads constructor(
     private val preferences = PlayerPreferences.getInstance(application)
     private val bookmarkStore = PlayerBookmarkStore.create(application.filesDir)
     private val volumeController = PlayerVolumeController(systemVolume)
+    private val volumeGesture = PlayerVolumeGesture()
     private val _state = MutableStateFlow(PlayerUiState(
         mode = preferences.defaultPlayMode,
+        endBehavior = preferences.endBehavior,
         speed = preferences.defaultSpeed,
         equalizer = preferences.equalizer,
         showLoudnessWaveform = preferences.showLoudnessWaveform,
@@ -115,6 +126,9 @@ internal class PlayerViewModel @JvmOverloads constructor(
     private var engineJob: Job? = null
     private var tickerJob: Job? = null
     private var loadId = 0L
+    private var nextQueueJob: Job? = null
+    private var nextQueueVersion = 0L
+    private val queueSourceResolver = PlayerQueueSourceResolver(application, libraryRepository)
     private var handledEndId = -1L
     private var trackEnded = false
     private var configured = false
@@ -149,30 +163,34 @@ internal class PlayerViewModel @JvmOverloads constructor(
         showHint = ::hint
     )
 
-    fun configure(playlist: List<PlayerTrack>, startIndex: Int, initialMode: PlayerPlayMode? = null) {
+    fun configure(playlist: List<PlayerTrack>, startIndex: Int, initialMode: PlayerPlayMode? = null,
+        queueSource: PlayerQueueSource? = null) {
         if (configured) return
         configured = true
-        configureQueue(playlist, startIndex, initialMode)
+        configureQueue(playlist, startIndex, initialMode, queueSource)
     }
 
     fun restoreSession(playlist: List<PlayerTrack>, startIndex: Int, mode: PlayerPlayMode?,
-        positionMs: Long, playing: Boolean, expanded: Boolean) {
+        positionMs: Long, playing: Boolean, expanded: Boolean, queueSource: PlayerQueueSource? = null) {
         if (configured) return
-        configure(playlist, startIndex, mode)
+        configure(playlist, startIndex, mode, queueSource)
         detachedPosition = positionMs.coerceAtLeast(0L)
         playOnAttach = playing
         _expanded.value = expanded
     }
 
     /** A new library selection replaces the queue without replacing the output view. */
-    fun openQueue(playlist: List<PlayerTrack>, startIndex: Int, initialMode: PlayerPlayMode? = null) {
+    fun openQueue(playlist: List<PlayerTrack>, startIndex: Int, initialMode: PlayerPlayMode? = null,
+        queueSource: PlayerQueueSource? = null) {
         if (playlist.none { it.file.isFile }) {
             hint(R.string.player_playlist_empty)
             return
         }
+        cancelNextQueue()
         val selected = playlist.getOrNull(startIndex)?.path
         if (selected == _state.value.currentTrack?.path &&
             playlist.map { it.path } == _state.value.playlist.map { it.path } && initialMode == null) {
+            _state.value = _state.value.copy(queueSource = queueSource)
             expand()
             return
         }
@@ -184,11 +202,11 @@ internal class PlayerViewModel @JvmOverloads constructor(
         detachedSubtitle = null
         playOnAttach = true
         configured = true
-        configureQueue(playlist, startIndex, initialMode ?: preferences.defaultPlayMode)
+        configureQueue(playlist, startIndex, initialMode ?: preferences.defaultPlayMode, queueSource)
         _state.value = _state.value.copy(positionMs = 0L, durationMs = 0L, ready = false,
             playing = false, seekPreviewMs = null, panel = PlayerPanel.NONE,
             controlsLocked = false, controlsVisible = true, lyricsVisible = false,
-            showTrackInfoDialog = false, showPlaylistPickerDialog = false)
+            showTrackInfoDialog = false, showPlaylistPickerDialog = false, showEndBehaviorDialog = false)
         loadCurrent(resume = _state.value.resumePlayback, autoplay = true)
         expand()
     }
@@ -204,12 +222,14 @@ internal class PlayerViewModel @JvmOverloads constructor(
         closePanel()
         closeTrackInfoDialog()
         closePlaylistPickerDialog()
+        closeEndBehaviorDialog()
         _expanded.value = false
         saveProgress()
     }
 
     /** Leaving audio mode must not leave an invisible player or its timers running. */
     fun closeSession() {
+        cancelNextQueue()
         collapse()
         cancelScheduledStart()
         clearSleepTimer()
@@ -222,7 +242,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         detachedSubtitle = null
         loadedTrackPath = null
         configured = false
-        _state.value = _state.value.copy(playlist = emptyList(), currentIndex = -1,
+        _state.value = _state.value.copy(playlist = emptyList(), currentIndex = -1, queueSource = null,
             ready = false, playing = false, positionMs = 0L, durationMs = 0L, error = null,
             controlsLocked = false, lyricsVisible = false, lyricLines = emptyList(),
             subtitleOptions = emptyList(), subtitleText = "", gestureHint = null)
@@ -240,13 +260,16 @@ internal class PlayerViewModel @JvmOverloads constructor(
         _outputSuspended.value = false
     }
 
-    private fun configureQueue(playlist: List<PlayerTrack>, startIndex: Int, initialMode: PlayerPlayMode?) {
+    private fun configureQueue(playlist: List<PlayerTrack>, startIndex: Int, initialMode: PlayerPlayMode?,
+        queueSource: PlayerQueueSource?) {
+        cancelNextQueue()
         val selectedPath = playlist.getOrNull(startIndex)?.path
         val tracks = playlist.filter { it.file.isFile }.distinctBy { it.path }
         val index = if (tracks.isEmpty()) -1 else tracks.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
         val currentTrack = tracks.getOrNull(index)
         _state.value = _state.value.copy(
             playlist = tracks,
+            queueSource = queueSource,
             currentIndex = index,
             // A launch action can request shuffle without changing the user's default mode.
             mode = initialMode ?: _state.value.mode,
@@ -330,6 +353,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
 
     fun detach(view: PlayerMpvView) {
         if (host !== view) return
+        cancelNextQueue()
         detachedPosition = _state.value.positionMs
         detachedSubtitle = _state.value.subtitleOptions.firstOrNull { it.id == _state.value.selectedSubtitleId }
         stopListening()
@@ -349,6 +373,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
     fun togglePlay() { if (_state.value.playing) pause() else play() }
 
     fun play() {
+        cancelNextQueue()
         if (_state.value.currentTrack == null || engine == null) return
         cancelScheduledStart()
         if (tagEditResume != null) {
@@ -373,6 +398,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
     }
 
     fun pause() {
+        cancelNextQueue()
         playOnAttach = false
         stopListening()
         engine?.pause()
@@ -383,6 +409,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
 
     /** A drag is only a preview; one seek is sent on commit. */
     fun seekTo(positionMs: Long, fromGesture: Boolean = false) {
+        cancelNextQueue()
         val current = _state.value
         if (current.currentTrack == null) return
         val target = positionMs.coerceIn(0L, current.durationMs.coerceAtLeast(0L))
@@ -409,19 +436,32 @@ internal class PlayerViewModel @JvmOverloads constructor(
     }
 
     fun next() {
+        cancelNextQueue()
         val current = _state.value
+        if (current.movesBetweenQueues) {
+            val target = current.adjacentTrack(forward = true)
+            if (target != null) jumpTo(target) else advanceToNextQueue(current, autoplay = true, naturalEnd = false)
+            return
+        }
         val target = PlayerPlaylistOrder.manualNext(current.currentIndex, current.playlist.size, current.mode, current.shuffleOrder)
         if (target != null) jumpTo(target) else hint(R.string.player_queue_end)
     }
 
     fun previous() {
+        cancelNextQueue()
         val current = _state.value
         if (current.positionMs > 5_000L) { seekTo(0L); return }
+        if (current.movesBetweenQueues) {
+            val target = current.adjacentTrack(forward = false)
+            if (target != null) jumpTo(target) else advanceToNextQueue(current, autoplay = true, forward = false, naturalEnd = false)
+            return
+        }
         val target = PlayerPlaylistOrder.manualPrevious(current.currentIndex, current.playlist.size, current.mode, current.shuffleOrder)
         if (target != null) jumpTo(target) else seekTo(0L)
     }
 
     fun playIndex(index: Int) {
+        cancelNextQueue()
         if (index !in _state.value.playlist.indices) return
         if (index == _state.value.currentIndex) togglePlay() else jumpTo(index)
     }
@@ -441,6 +481,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         subtitle: PlayerSubtitleOption? = null,
         preservePlayback: Boolean = false
     ) {
+        cancelNextQueue()
         stopListening()
         refreshSystemVolume()
         val current = _state.value
@@ -448,6 +489,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         val session = engine ?: return
         val app = getApplication<Application>()
         if (loadedTrackPath != track.path) {
+            volumeGesture.reset()
             loadedTrackPath = track.path
             subtitleImportVersion++
             subtitleImportJob?.cancel()
@@ -483,6 +525,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         )
         refreshFavorite()
         val shouldPlay = autoplay && audioFocus.request()
+        if (!shouldPlay) audioFocus.abandon()
         playOnAttach = shouldPlay
         session.start(File(app.filesDir, "player/config"), app.cacheDir, track.file, shouldPlay, loadId,
             fallbackSubtitle = externalSubtitles.firstOrNull())
@@ -511,6 +554,18 @@ internal class PlayerViewModel @JvmOverloads constructor(
         current.currentTrack?.let { preferences.saveLastPosition(it.path, 0L) }
         trackEnded = true
         rememberPosition()
+        if (!playOnAttach) return
+        if (PlayerSleepTimerPolicy.isExpired(current.sleepTimer, SystemClock.elapsedRealtime())) {
+            tickTimers()
+            return
+        }
+        if (current.endBehavior.enabled) {
+            val decision = PlayerEndBehaviorPolicy.decide(current.currentIndex, current.playlist.size,
+                current.shuffleOrder, current.mode, current.endBehavior)
+            if (decision.moveToNextQueue) advanceToNextQueue(current, decision.autoplay)
+            else applyEndDecision(decision)
+            return
+        }
         val target = PlayerPlaylistOrder.afterEnd(current.currentIndex, current.playlist.size, current.mode, current.shuffleOrder)
         if (target == null) {
             playOnAttach = false
@@ -520,6 +575,82 @@ internal class PlayerViewModel @JvmOverloads constructor(
         }
         _state.value = current.copy(currentIndex = target)
         loadCurrent(resume = false, autoplay = true)
+    }
+
+    private fun applyEndDecision(decision: PlayerEndDecision) {
+        val current = _state.value
+        _state.value = current.copy(currentIndex = decision.targetIndex ?: current.currentIndex,
+            shuffleOrder = decision.newShuffleOrder ?: current.shuffleOrder)
+        if (decision.targetIndex != null) {
+            loadCurrent(resume = false, autoplay = decision.autoplay)
+        } else {
+            playOnAttach = false
+            audioFocus.abandon()
+        }
+        if (decision.targetIndex == null) hint(R.string.player_queue_end)
+    }
+
+    private fun advanceToNextQueue(ended: PlayerUiState, autoplay: Boolean, forward: Boolean = true,
+        naturalEnd: Boolean = true) {
+        cancelNextQueue()
+        if (!naturalEnd) cancelScheduledStart()
+        if (autoplay && !audioFocus.request()) { pause(); return }
+        rememberPosition()
+        stopListening()
+        playOnAttach = false
+        engine?.pause()
+        _state.value = _state.value.copy(playing = false, loudness = 0f)
+        val version = nextQueueVersion
+        val generation = loadId
+        nextQueueJob = viewModelScope.launch {
+            val queue = try {
+                withContext(Dispatchers.IO) {
+                    ended.queueSource?.let {
+                        if (forward) queueSourceResolver.next(it, ended.endBehavior.wrapQueues)
+                        else queueSourceResolver.previous(it, ended.endBehavior.wrapQueues)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            ensureActive()
+            if (version != nextQueueVersion || generation != loadId || engine == null ||
+                _state.value.queueSource != ended.queueSource || _state.value.endBehavior != ended.endBehavior) return@launch
+            nextQueueJob = null
+            if (PlayerSleepTimerPolicy.isExpired(_state.value.sleepTimer, SystemClock.elapsedRealtime())) {
+                tickTimers()
+                return@launch
+            }
+            if (queue == null) {
+                if (naturalEnd) applyEndDecision(PlayerEndBehaviorPolicy.decide(ended.currentIndex,
+                    ended.playlist.size, ended.shuffleOrder, ended.mode,
+                    ended.endBehavior.copy(queueAction = PlayerQueueEndAction.STOP)))
+                else {
+                    if (ended.playing) play()
+                    else audioFocus.abandon()
+                    hint(R.string.player_queue_end)
+                }
+            } else {
+                val index = if (ended.mode == PlayerPlayMode.SHUFFLE) queue.tracks.indices.random()
+                    else if (forward) 0 else queue.tracks.lastIndex
+                configureQueue(queue.tracks, index, ended.mode, queue.source)
+                if (!forward && ended.mode == PlayerPlayMode.SHUFFLE) {
+                    val current = _state.value
+                    _state.value = current.copy(shuffleOrder = current.shuffleOrder.filterNot { it == index } + index)
+                }
+                loadCurrent(resume = false, autoplay = autoplay)
+                hint(queue.title)
+            }
+        }
+    }
+
+    private fun cancelNextQueue() {
+        nextQueueVersion++
+        if (nextQueueJob != null) audioFocus.abandon()
+        nextQueueJob?.cancel()
+        nextQueueJob = null
     }
 
     private fun rememberPosition() {
@@ -575,6 +706,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         if (current.controlsLocked) return null
         val track = current.currentTrack ?: return null
         if (tagEditResume != null) return null
+        cancelNextQueue()
         stopListening()
         rememberPosition()
         tagEditResume = TagEditResume(track.path, current.positionMs,
@@ -634,12 +766,30 @@ internal class PlayerViewModel @JvmOverloads constructor(
     }
 
     fun setMode(mode: PlayerPlayMode) {
+        val behavior = _state.value.endBehavior
+        applyEndBehavior(mode, if (behavior.enabled) behavior.copy(trackAction = PlayerTrackEndAction.FOLLOW_MODE)
+            else PlayerEndBehavior.fromMode(mode))
+    }
+
+    fun applyEndBehavior(mode: PlayerPlayMode, behavior: PlayerEndBehavior) {
+        cancelNextQueue()
         val current = _state.value
-        preferences.defaultPlayMode = mode
-        _state.value = current.copy(mode = mode, shuffleOrder =
+        preferences.savePlaybackBehavior(mode, behavior)
+        _state.value = current.copy(mode = mode, endBehavior = behavior, showEndBehaviorDialog = false, shuffleOrder =
             if (mode == PlayerPlayMode.SHUFFLE && current.mode != mode)
                 PlayerPlaylistOrder.newShuffleOrder(current.playlist.size, current.currentIndex)
             else current.shuffleOrder)
+    }
+
+    fun openEndBehaviorDialog() {
+        if (_state.value.controlsLocked) return
+        closeTrackInfoDialog()
+        closePlaylistPickerDialog()
+        _state.value = _state.value.copy(showEndBehaviorDialog = true, panel = PlayerPanel.NONE, controlsVisible = true)
+    }
+
+    fun closeEndBehaviorDialog() {
+        _state.value = _state.value.copy(showEndBehaviorDialog = false)
     }
 
     fun cycleMode() {
@@ -654,6 +804,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
     }
 
     fun setVolume(percent: Int) {
+        volumeGesture.reset()
         applyVolume(volumeController.setVolume(percent))
     }
 
@@ -661,7 +812,10 @@ internal class PlayerViewModel @JvmOverloads constructor(
     fun refreshSystemVolume(resetBoost: Boolean = false): Int {
         val previous = volumeController.snapshot
         val current = if (resetBoost) volumeController.resetBoost() else volumeController.refresh()
-        if (current != previous) applyVolume(current)
+        if (resetBoost || current != previous) volumeGesture.reset()
+        if (current != previous) {
+            applyVolume(current)
+        }
         return current.percent
     }
 
@@ -679,6 +833,26 @@ internal class PlayerViewModel @JvmOverloads constructor(
         setVolume(percent)
     }
 
+    fun beginVolumeGesture() {
+        volumeGesture.begin(refreshSystemVolume())
+    }
+
+    fun adjustVolumeGesture(deltaPercent: Float): PlayerVolumeGestureResult {
+        _state.value = _state.value.copy(volumeGestureActive = true)
+        val result = volumeGesture.adjust(deltaPercent, _state.value.volumePercent) { requested ->
+            val accepted = volumeController.setVolume(requested)
+            applyVolume(accepted)
+            accepted.percent
+        }
+        if (result.blockedAtUnity) {
+            val text = applicationText(R.string.player_volume_boost_warning)
+            if (_state.value.gestureHint?.text != text) {
+                _state.value = _state.value.copy(gestureHint = PlayerGestureHint(text, ++hintToken, R.drawable.ic_player_volume))
+            }
+        }
+        return result
+    }
+
     private fun showVolumeHint(volume: PlayerVolumeSnapshot) {
         val text = getApplication<Application>().getString(
             if (volume.softwarePercent > 100) R.string.player_volume_boost_percent else R.string.player_volume_percent,
@@ -689,7 +863,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
         )
     }
 
-    fun endVolumeGesture() {
+    fun endVolumeGesture(completed: Boolean = false) {
+        volumeGesture.end(completed)
         if (_state.value.volumeGestureActive) _state.value = _state.value.copy(volumeGestureActive = false)
     }
 
@@ -873,11 +1048,17 @@ internal class PlayerViewModel @JvmOverloads constructor(
     private fun refreshFavorite() = libraryController.refreshFavorite()
     fun toggleFavorite() = libraryController.toggleFavorite()
     fun openTrackInfoDialog() {
-        if (!_state.value.controlsLocked) libraryController.openTrackInfoDialog()
+        if (!_state.value.controlsLocked) {
+            closeEndBehaviorDialog()
+            libraryController.openTrackInfoDialog()
+        }
     }
     fun closeTrackInfoDialog() = libraryController.closeTrackInfoDialog()
     fun openPlaylistPickerDialog() {
-        if (!_state.value.controlsLocked) libraryController.openPlaylistPickerDialog()
+        if (!_state.value.controlsLocked) {
+            closeEndBehaviorDialog()
+            libraryController.openPlaylistPickerDialog()
+        }
     }
     fun closePlaylistPickerDialog() = libraryController.closePlaylistPickerDialog()
     fun createUserPlaylist(name: String, onCreated: (Long?) -> Unit) = libraryController.createUserPlaylist(name, onCreated)
@@ -888,6 +1069,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         val current = _state.value
         if (current.controlsLocked == locked || (locked && !current.isVideo)) return
         if (locked) {
+            closeEndBehaviorDialog()
             closeTrackInfoDialog()
             closePlaylistPickerDialog()
         }
@@ -907,7 +1089,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
     fun openPanel(panel: PlayerPanel) {
         val current = _state.value
         if (current.controlsLocked) return
-        _state.value = current.copy(panel = panel, controlsVisible = true)
+        _state.value = current.copy(panel = panel, controlsVisible = true, showEndBehaviorDialog = false)
     }
     fun closePanel() { _state.value = _state.value.copy(panel = PlayerPanel.NONE) }
     fun hint(textRes: Int) { hint(applicationText(textRes)) }
@@ -916,6 +1098,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
     private fun applicationText(res: Int) = getApplication<Application>().getString(res)
 
     override fun onCleared() {
+        cancelNextQueue()
         stopListening()
         rememberPosition()
         engineJob?.cancel()

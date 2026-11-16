@@ -7,12 +7,13 @@ import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.widget.ScrollView
+import com.subtitleedit.ui.components.AppScrollbarStyle
 
 /**
  * 带可拖拽滚动条的 ScrollView。
  *
  * 特性：
- * - 右侧触摸区比视觉滚动条更宽（TOUCH_ZONE_DP），保证易于点中
+ * - 右侧触摸区比视觉滚动条更宽，保证易于点中
  * - 手指落入触摸区时立即终止惯性（反射 mScroller.abortAnimation），优先级最高
  * - 拦截发生在 onInterceptTouchEvent，惯性动画期间也能即时响应
  * - 拖拽期间 requestDisallowInterceptTouchEvent 防止父布局抢事件
@@ -24,30 +25,15 @@ open class DraggableScrollView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : ScrollView(context, attrs, defStyleAttr) {
 
-    companion object {
-        /** 视觉滚动条宽度 dp */
-        private const val THUMB_WIDTH_DP       = 8f
-        /** 滚动条距右边缘间距 dp */
-        private const val THUMB_MARGIN_DP      = 3f
-        /** 可触摸区域宽度 dp（比视觉更宽，方便点中） */
-        private const val TOUCH_ZONE_DP        = 24f
-        /** 滚动条最小高度 dp */
-        private const val THUMB_MIN_HEIGHT_DP  = 48f
-        /** 滚动条淡出延迟 ms */
-        private const val FADE_DELAY_MS        = 1200L
-        /** 淡出动画时长 ms */
-        private const val FADE_DURATION_MS     = 300L
-    }
-
     private val density          = context.resources.displayMetrics.density
-    private val thumbWidthPx     = THUMB_WIDTH_DP      * density
-    private val thumbMarginPx    = THUMB_MARGIN_DP     * density
-    private val touchZonePx      = TOUCH_ZONE_DP       * density
-    private val thumbMinHeightPx = THUMB_MIN_HEIGHT_DP * density
+    private val thumbWidthPx     = AppScrollbarStyle.ThumbWidth * density
+    private val thumbMarginPx    = AppScrollbarStyle.EdgeMargin * density
+    private val touchZonePx      = AppScrollbarStyle.TouchWidth * density
+    private val thumbMinHeightPx = AppScrollbarStyle.MinThumbHeight * density
 
     // 滚动条绘制
     private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xAAA0A0A0.toInt()
+        color = AppScrollbarStyle.ThumbColorArgb
     }
     private val thumbRect   = RectF()
     private val thumbRadius = thumbWidthPx / 2f
@@ -72,7 +58,7 @@ open class DraggableScrollView @JvmOverloads constructor(
     private val fadeRunnable = object : Runnable {
         override fun run() {
             val elapsed  = System.currentTimeMillis() - fadeStartTime
-            val fraction = (elapsed.toFloat() / FADE_DURATION_MS).coerceIn(0f, 1f)
+            val fraction = (elapsed.toFloat() / AppScrollbarStyle.FadeDurationMs).coerceIn(0f, 1f)
             thumbAlpha   = (fadeStartAlpha * (1f - fraction)).toInt()
             if (fraction < 1f) postDelayed(this, 16)
         }
@@ -152,16 +138,16 @@ open class DraggableScrollView @JvmOverloads constructor(
     private fun showThumb() {
         removeCallbacks(startFadeRunnable)
         removeCallbacks(fadeRunnable)
-        thumbAlpha = 220
+        thumbAlpha = AppScrollbarStyle.VisibleAlpha
         if (!isDraggingThumb) {
-            postDelayed(startFadeRunnable, FADE_DELAY_MS)
+            postDelayed(startFadeRunnable, AppScrollbarStyle.FadeDelayMs)
         }
     }
 
     private fun scheduleFadeOut() {
         removeCallbacks(startFadeRunnable)
         removeCallbacks(fadeRunnable)
-        postDelayed(startFadeRunnable, FADE_DELAY_MS)
+        postDelayed(startFadeRunnable, AppScrollbarStyle.FadeDelayMs)
     }
 
     // ──────────────────────────────────────────────

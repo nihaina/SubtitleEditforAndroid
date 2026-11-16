@@ -94,7 +94,7 @@ internal fun MainPlayerHost(
                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                 val snapshot = currentState
                 val blocked = snapshot.controlsLocked || snapshot.panel != PlayerPanel.NONE ||
-                    snapshot.showTrackInfoDialog || snapshot.showPlaylistPickerDialog
+                    snapshot.showTrackInfoDialog || snapshot.showPlaylistPickerDialog || snapshot.showEndBehaviorDialog
                 val startProgress = currentProgress
                 val fromMini = startProgress < 0.01f && currentMini?.contains(down.position) == true
                 val fromTop = startProgress >= 0.01f && down.position.y <= topDragHeight

@@ -93,6 +93,9 @@ import com.subtitleedit.library.PlayerTrackMetadataReader
 import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.player.PlayerActivity
 import com.subtitleedit.player.LocalPlayerLauncher
+import com.subtitleedit.player.PlayerQueueSource
+import com.subtitleedit.player.PlayerQueueSourceKind
+import com.subtitleedit.player.putPlayerQueueSource
 import com.subtitleedit.player.formatPlaybackTime
 import com.subtitleedit.ui.components.AppAlertDialog
 import com.subtitleedit.ui.components.AppDialog
@@ -289,7 +292,8 @@ internal fun MediaLibraryScreen(
         }
     }
 
-    fun playTracks(tracks: List<MediaLibraryTrack>, startIndex: Int, playAll: Boolean = false) {
+    fun playTracks(tracks: List<MediaLibraryTrack>, startIndex: Int, playAll: Boolean = false,
+        queueSource: PlayerQueueSource? = null) {
         val paths = tracks.map { it.path }
         scope.launch {
             try {
@@ -299,11 +303,12 @@ internal fun MediaLibraryScreen(
                 if (selection == null) {
                     Toast.makeText(context, context.getString(R.string.media_lib_file_missing), Toast.LENGTH_SHORT).show()
                 } else if (playerLauncher != null) {
-                    playerLauncher(selection.paths, selection.startIndex, null)
+                    playerLauncher(selection.paths, selection.startIndex, null, queueSource)
                 } else {
                     context.startActivity(Intent(context, PlayerActivity::class.java).apply {
                         putStringArrayListExtra(PlayerActivity.EXTRA_PLAYLIST, ArrayList(selection.paths))
                         putExtra(PlayerActivity.EXTRA_START_INDEX, selection.startIndex)
+                        putPlayerQueueSource(queueSource)
                     })
                 }
             } catch (cancelled: CancellationException) {
@@ -320,11 +325,12 @@ internal fun MediaLibraryScreen(
             .background(settingsPageBackground())
     ) {
         if (openedPlaylist != null) {
+            val queueSource = PlayerQueueSource(PlayerQueueSourceKind.PLAYLIST, openedPlaylist.id.toString())
             if (openedPlaylist.id == MediaLibraryRepository.FAVORITES_PLAYLIST_ID) {
                 FavoritesTabContent(
                     tracks = favorites,
-                    onPlay = { idx -> playTracks(favorites, idx) },
-                    onPlayAll = { playTracks(favorites, 0, playAll = true) },
+                    onPlay = { idx -> playTracks(favorites, idx, queueSource = queueSource) },
+                    onPlayAll = { playTracks(favorites, 0, playAll = true, queueSource = queueSource) },
                     onToggleFavorite = { track -> mutate({ repository.removeFavorite(track.path) }) },
                     onAddToPlaylist = { pickingPlaylistForTracks = listOf(it) },
                     onRemoveFavorites = { tracks ->
@@ -345,8 +351,8 @@ internal fun MediaLibraryScreen(
                 PlaylistDetailContent(
                     playlist = openedPlaylist,
                     tracks = openedPlaylistTracks,
-                    onPlayTrack = { idx -> playTracks(openedPlaylistTracks, idx) },
-                    onPlayAll = { playTracks(openedPlaylistTracks, 0, playAll = true) },
+                    onPlayTrack = { idx -> playTracks(openedPlaylistTracks, idx, queueSource = queueSource) },
+                    onPlayAll = { playTracks(openedPlaylistTracks, 0, playAll = true, queueSource = queueSource) },
                     onRemoveTrack = { track ->
                         mutate({ repository.removeTrackFromPlaylist(openedPlaylist.id, track.path) })
                     }
@@ -418,7 +424,10 @@ internal fun MediaLibraryScreen(
                         onPlayFile = { entry ->
                             val queue = mediaFolderPlaybackQueue(folderEntries)
                             val index = queue.indexOfFirst { it.path == entry.path }
-                            if (index >= 0) playTracks(queue, index)
+                            if (index >= 0) playTracks(queue, index, queueSource =
+                                File(entry.path).absoluteFile.parent?.let {
+                                    PlayerQueueSource(PlayerQueueSourceKind.DIRECTORY, it)
+                                })
                         },
                         onLongPressFolder = { pendingFolderRemoval = it },
                         onLongPressFile = { selectedFilePaths = selectedFilePaths + it },

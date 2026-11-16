@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_end_simple_heading">播放模式</string>
+    <string name="player_end_track_heading">当歌曲结束时…</string>
+    <string name="player_end_queue_heading">当前队列结束时…</string>
+    <string name="player_end_stop">停止播放</string>
+    <string name="player_end_continue">继续播放</string>
+    <string name="player_end_load_next_paused">载入下一首歌曲并暂停</string>
+    <string name="player_end_wrap_queues">当最后队列结束时，跳到第一队列，反之亦然</string>
+    <string name="player_end_reshuffle">重新随机播放队列（如果启用随机播放模式）</string>
+    <string name="player_end_settings">歌曲与队列结束设置</string>
+    <string name="player_end_action_description">歌曲结束：%1$s；队列结束：%2$s</string>
+    <string name="player_end_then">然后…</string>
+    <string name="player_end_next_queue">跳到下一队列</string>
+    <string name="player_end_repeat_queue">重复同一队列</string>
+    <string name="player_end_simple">简单</string>
+    <string name="player_end_advanced">高级</string>
+    <string name="player_end_reset">恢复默认设置</string>
+</resources>

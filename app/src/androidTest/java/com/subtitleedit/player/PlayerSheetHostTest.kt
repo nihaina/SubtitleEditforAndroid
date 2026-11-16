@@ -79,10 +79,15 @@ class PlayerSheetHostTest {
                     SharedFileCache.attributes.get(second)?.cacheKey)
                 assertSame(output, main { findOutput(activity.window.decorView) })
                 clickTag("mini-player-play-pause")
-                await("mini bar pauses audio") { !model.state.value.playing }
-                val pausedAt = main { model.state.value.positionMs }
+                await("mini bar pauses the native output") {
+                    !model.state.value.playing && MPVLib.getPropertyBoolean("pause") == true
+                }
+                // UI pause is optimistic; use the native acknowledgement as the position baseline.
+                val pausedAt = main { (requireNotNull(MPVLib.getPropertyDouble("time-pos")) * 1000).toLong() }
                 Thread.sleep(400)
-                assertTrue(main { kotlin.math.abs(model.state.value.positionMs - pausedAt) < 200 })
+                assertTrue("Paused progress must stay at the native position: $pausedAt -> " +
+                    main { model.state.value.positionMs },
+                    main { kotlin.math.abs(model.state.value.positionMs - pausedAt) < 200 })
                 capture("player-sheet-main-audio.png")
                 scenario.recreate()
                 scenario.onActivity {

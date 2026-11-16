@@ -88,6 +88,22 @@ class PlayerSystemVolumeTest {
         }
     }
 
+    @Test fun aSameLevelOutputChangeClearsAnEarlierBoostWarningAcknowledgement() = Fixture().use { fixture ->
+        onMain {
+            fixture.model.setVolume(100)
+            fixture.model.beginVolumeGesture()
+            assertTrue(fixture.model.adjustVolumeGesture(1f).blockedAtUnity)
+            fixture.model.endVolumeGesture(completed = true)
+            assertEquals(100, fixture.model.refreshSystemVolume(resetBoost = true))
+            fixture.model.beginVolumeGesture()
+            val result = fixture.model.adjustVolumeGesture(1f)
+            assertTrue(result.blockedAtUnity)
+            assertEquals(PlayerVolumeFeedback.NONE, result.feedback)
+            assertEquals(100, fixture.model.state.value.volumePercent)
+            assertEquals(app.getString(R.string.player_volume_boost_warning), fixture.model.state.value.gestureHint?.text)
+        }
+    }
+
     private inner class Fixture : Closeable {
         private val databaseName = "player-system-volume-${System.nanoTime()}.db"
         private val repository = MediaLibraryRepository.open(app, databaseName) { snapshot, duration ->

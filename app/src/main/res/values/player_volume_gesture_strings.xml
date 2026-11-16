@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_volume_boost_warning">继续调节可能会导致破音</string>
+</resources>

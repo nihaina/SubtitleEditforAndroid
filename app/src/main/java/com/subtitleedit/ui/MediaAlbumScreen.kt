@@ -21,6 +21,9 @@ import com.subtitleedit.library.*
 import com.subtitleedit.player.PlayerActivity
 import com.subtitleedit.player.PlayerPlayMode
 import com.subtitleedit.player.LocalPlayerLauncher
+import com.subtitleedit.player.PlayerQueueSource
+import com.subtitleedit.player.PlayerQueueSourceKind
+import com.subtitleedit.player.putPlayerQueueSource
 import com.subtitleedit.ui.settings.settingsPageBackground
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -158,7 +161,9 @@ internal fun MediaAlbumScreen(
         pageState.prepared = MediaAlbumPreparedSnapshot(source, history, loaded)
     }
 
-    fun playAlbum(album: MediaAlbum, clickedPath: String?, shuffle: Boolean = false) {
+    fun playAlbum(album: MediaAlbum, clickedPath: String?, shuffle: Boolean = false,
+        queueSource: PlayerQueueSource = PlayerQueueSource(PlayerQueueSourceKind.ALBUM, album.key)) {
+        val source = queueSource.copy(roots = roots)
         scope.launch {
             try {
                 val paths = album.tracks.map { it.track.path }
@@ -172,12 +177,13 @@ internal fun MediaAlbumScreen(
                     val startIndex = if (shuffle) selection.paths.indices.random() else selection.startIndex
                     val initialMode = if (shuffle) PlayerPlayMode.SHUFFLE else null
                     if (playerLauncher != null) {
-                        playerLauncher(selection.paths, startIndex, initialMode)
+                        playerLauncher(selection.paths, startIndex, initialMode, source)
                     } else {
                         context.startActivity(Intent(context, PlayerActivity::class.java).apply {
                             putStringArrayListExtra(PlayerActivity.EXTRA_PLAYLIST, ArrayList(selection.paths))
                             putExtra(PlayerActivity.EXTRA_START_INDEX, startIndex)
                             initialMode?.let { putExtra(PlayerActivity.EXTRA_PLAY_MODE, it.name) }
+                            putPlayerQueueSource(source)
                         })
                     }
                 }
@@ -206,6 +212,8 @@ internal fun MediaAlbumScreen(
         onGenreOptionsChanged = { updateCreditOptions(MediaCreditRole.GENRE, it) },
         onPlay = { album, path -> playAlbum(album, path) },
         onShuffle = { album -> playAlbum(album, null, shuffle = true) },
+        onPlayFromSource = { album, path, source -> playAlbum(album, path, queueSource = source) },
+        onShuffleFromSource = { album, source -> playAlbum(album, null, shuffle = true, queueSource = source) },
         onFavoriteSelection = { selected, onComplete ->
             val unique = selected.distinctBy { it.path }
             mutate({
@@ -277,7 +285,9 @@ internal fun MediaAlbumPageContent(
     onComposerOptionsChanged: (MediaSingerViewOptions) -> Unit = {},
     genreOptions: MediaSingerViewOptions = MediaSingerViewOptions(),
     onGenreOptionsChanged: (MediaSingerViewOptions) -> Unit = {},
-    metadataRefreshKey: Any? = null
+    metadataRefreshKey: Any? = null,
+    onPlayFromSource: ((MediaAlbum, String?, PlayerQueueSource) -> Unit)? = null,
+    onShuffleFromSource: ((MediaAlbum, PlayerQueueSource) -> Unit)? = null
 ) {
     var category by rememberSaveable { mutableStateOf(MediaCategory.ALBUMS) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -351,8 +361,16 @@ internal fun MediaAlbumPageContent(
                 onOptionsChanged = changeCreditOptions,
                 isActive = isActive,
                 onBack = { openedCreditKey = null },
-                onPlay = { displayed, path -> onPlay(MediaAlbum(openedCredit.name, displayed), path) },
-                onShuffle = { displayed -> onShuffle(MediaAlbum(openedCredit.name, displayed)) },
+                onPlay = { displayed, path ->
+                    val album = MediaAlbum(openedCredit.name, displayed)
+                    val source = PlayerQueueSource(creditRole.queueSourceKind, openedCredit.key)
+                    onPlayFromSource?.invoke(album, path, source) ?: onPlay(album, path)
+                },
+                onShuffle = { displayed ->
+                    val album = MediaAlbum(openedCredit.name, displayed)
+                    val source = PlayerQueueSource(creditRole.queueSourceKind, openedCredit.key)
+                    onShuffleFromSource?.invoke(album, source) ?: onShuffle(album)
+                },
                 onFavoriteSelection = onFavoriteSelection,
                 onAddSelectionToPlaylist = onAddSelectionToPlaylist,
                 onShowInfo = onShowInfo,
@@ -368,8 +386,16 @@ internal fun MediaAlbumPageContent(
                 onTrackSortChanged = { onOptionsChanged(options.copy(trackSort = it)) },
                 isActive = isActive,
                 onBack = { openedAlbumKey = null },
-                onPlay = { displayed, path -> onPlay(openedAlbum.copy(tracks = displayed), path) },
-                onShuffle = { displayed -> onShuffle(openedAlbum.copy(tracks = displayed)) },
+                onPlay = { displayed, path ->
+                    val album = openedAlbum.copy(tracks = displayed)
+                    val source = PlayerQueueSource(PlayerQueueSourceKind.ALBUM, openedAlbum.key)
+                    onPlayFromSource?.invoke(album, path, source) ?: onPlay(album, path)
+                },
+                onShuffle = { displayed ->
+                    val album = openedAlbum.copy(tracks = displayed)
+                    val source = PlayerQueueSource(PlayerQueueSourceKind.ALBUM, openedAlbum.key)
+                    onShuffleFromSource?.invoke(album, source) ?: onShuffle(album)
+                },
                 onFavoriteSelection = onFavoriteSelection,
                 onAddSelectionToPlaylist = onAddSelectionToPlaylist,
                 onShowInfo = onShowInfo
@@ -470,5 +496,13 @@ private val MediaCategory.creditRole: MediaCreditRole?
         MediaCategory.COMPOSERS -> MediaCreditRole.COMPOSER
         MediaCategory.GENRES -> MediaCreditRole.GENRE
         else -> null
+    }
+
+private val MediaCreditRole.queueSourceKind: PlayerQueueSourceKind
+    get() = when (this) {
+        MediaCreditRole.SINGER -> PlayerQueueSourceKind.SINGER
+        MediaCreditRole.ARTIST -> PlayerQueueSourceKind.ARTIST
+        MediaCreditRole.COMPOSER -> PlayerQueueSourceKind.COMPOSER
+        MediaCreditRole.GENRE -> PlayerQueueSourceKind.GENRE
     }
 

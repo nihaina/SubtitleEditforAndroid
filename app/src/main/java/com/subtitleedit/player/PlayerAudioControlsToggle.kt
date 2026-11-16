@@ -8,6 +8,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import com.subtitleedit.R
@@ -19,7 +20,8 @@ internal fun PlayerAudioControlsToggle(
     controlsVisible: Boolean,
     revealActivity: Long,
     onToggleControls: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onBoundsChanged: (Rect?) -> Unit = {}
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
@@ -48,7 +50,8 @@ internal fun PlayerAudioControlsToggle(
             ),
             onClick = onToggleControls,
             modifier = Modifier.testTag(if (controlsVisible) "player-audio-hide-controls" else "player-lyrics-restore-controls"),
-            interactionSource = interactionSource
+            interactionSource = interactionSource,
+            onBoundsChanged = onBoundsChanged
         )
     }
 }

@@ -12,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import com.subtitleedit.R
@@ -23,7 +24,8 @@ internal fun PlayerVideoLockControl(
     controlsVisible: Boolean,
     revealActivity: Long,
     onToggleLock: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onBoundsChanged: (Rect?) -> Unit = {}
 ) {
     var temporarilyVisible by remember { mutableStateOf(false) }
     LaunchedEffect(locked, revealActivity) {
@@ -44,7 +46,8 @@ internal fun PlayerVideoLockControl(
             onClick = onToggleLock,
             modifier = Modifier.testTag("player-video-lock"),
             background = if (locked) Color.Black.copy(alpha = 0.65f) else Color.LightGray.copy(alpha = 0.85f),
-            tint = if (locked) Color.White else Color.Black
+            tint = if (locked) Color.White else Color.Black,
+            onBoundsChanged = onBoundsChanged
         )
     }
 }

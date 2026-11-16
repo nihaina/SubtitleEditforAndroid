@@ -67,7 +67,8 @@ internal class MainPlayerController(
                 savedInstanceState.getString("main_player_mode")?.let { value ->
                     PlayerPlayMode.entries.firstOrNull { it.name == value }
                 }, savedInstanceState.getLong("main_player_position"),
-                savedInstanceState.getBoolean("main_player_playing"), savedInstanceState.getBoolean("main_player_expanded"))
+                savedInstanceState.getBoolean("main_player_playing"), savedInstanceState.getBoolean("main_player_expanded"),
+                savedInstanceState.getPlayerQueueSource())
         }
     }
 
@@ -81,6 +82,7 @@ internal class MainPlayerController(
             outState.putLong("main_player_position", state.positionMs)
             outState.putBoolean("main_player_playing", state.playing)
             outState.putBoolean("main_player_expanded", viewModel.expanded.value)
+            outState.putPlayerQueueSource(state.queueSource)
         }
     }
 

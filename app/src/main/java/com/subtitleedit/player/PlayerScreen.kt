@@ -74,11 +74,10 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import android.content.res.Configuration
-import android.os.Build
 import android.os.SystemClock
-import android.view.HapticFeedbackConstants
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -90,7 +89,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.subtitleedit.R
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 @Composable
 internal fun PlayerScreen(
@@ -106,10 +104,13 @@ internal fun PlayerScreen(
     val configuration = LocalConfiguration.current
     val landscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val density = LocalDensity.current
-    val hapticView by rememberUpdatedState(LocalView.current)
+    val view = LocalView.current
+    val volumeHaptics = remember(view) { PlayerVolumeHaptics(view) }
     var playerHeightPx by remember { mutableStateOf(0) }
     var topOverlayBounds by remember { mutableStateOf<Rect?>(null) }
     var bottomOverlayBounds by remember { mutableStateOf<Rect?>(null) }
+    var audioEdgeBounds by remember { mutableStateOf<Rect?>(null) }
+    var videoEdgeBounds by remember { mutableStateOf<Rect?>(null) }
     var expandedAudioTopInset by remember(configuration.screenWidthDp, configuration.screenHeightDp,
         landscape, configuration.fontScale, density.density) {
         mutableStateOf<Float?>(null)
@@ -121,6 +122,8 @@ internal fun PlayerScreen(
     var gestureOrigin by remember { mutableStateOf(Offset.Zero) }
     val currentTopOverlay by rememberUpdatedState(topOverlayBounds)
     val currentBottomOverlay by rememberUpdatedState(bottomOverlayBounds)
+    val currentAudioEdge by rememberUpdatedState(audioEdgeBounds)
+    val currentVideoEdge by rememberUpdatedState(videoEdgeBounds)
     val currentGestureOrigin by rememberUpdatedState(gestureOrigin)
     val collapseGestureHeightPx = with(density) { if (embedded) 112.dp.toPx() else 0f }
     var videoLockActivity by remember(state.currentTrack?.path) { mutableStateOf(0L) }
@@ -137,11 +140,11 @@ internal fun PlayerScreen(
     val audioContentTopPadding = if (state.controlsVisible) audioButtonTopPadding else 0.dp
     val audioContentBottomPadding = if (state.controlsVisible) audioButtonBottomPadding else 0.dp
     BackHandler(enabled = embedded && interactionsEnabled && onCollapse != null && !state.controlsLocked &&
-        state.panel == PlayerPanel.NONE && !state.showTrackInfoDialog && !state.showPlaylistPickerDialog) {
+        state.panel == PlayerPanel.NONE && !state.showTrackInfoDialog && !state.showPlaylistPickerDialog && !state.showEndBehaviorDialog) {
         onCollapse?.invoke()
     }
     BackHandler(enabled = !embedded && interactionsEnabled && state.lyricsVisible && !state.isVideo && state.panel == PlayerPanel.NONE &&
-        !state.showTrackInfoDialog && !state.showPlaylistPickerDialog) {
+        !state.showTrackInfoDialog && !state.showPlaylistPickerDialog && !state.showEndBehaviorDialog) {
         viewModel.setLyricsVisible(false)
     }
     BackHandler(enabled = interactionsEnabled && state.isVideo && state.controlsLocked) {
@@ -168,8 +171,7 @@ internal fun PlayerScreen(
                     interactionsEnabled, collapseGestureHeightPx) {
                     if (!interactionsEnabled) return@pointerInput
                     var axis: Int? = null
-                    var dragVolume = 0f
-                    var appliedVolume = 0
+                    var volumeGestureStarted = false
                     var lastVolumeHapticAt = 0L
                     var canSeek = false
                     var canAdjustVolume = false
@@ -184,8 +186,7 @@ internal fun PlayerScreen(
                             onDragStart = { down, _, _ ->
                                 axis = null
                                 val current = viewModel.state.value
-                                dragVolume = viewModel.refreshSystemVolume().toFloat()
-                                appliedVolume = dragVolume.roundToInt()
+                                volumeGestureStarted = false
                                 lastVolumeHapticAt = 0L
                                 // Only the initial press is excluded by the controls; an accepted
                                 // video drag keeps ownership as it crosses into either overlay.
@@ -193,11 +194,14 @@ internal fun PlayerScreen(
                                 canSeek = outsideCollapseHandle && current.isVideo && !current.controlsLocked && current.ready && current.panel == PlayerPanel.NONE &&
                                     outsideOverlays(down.position)
                                 // Vertical swipes in the audio lyric list belong to the list.
+                                val point = down.position + currentGestureOrigin
                                 canAdjustVolume = outsideCollapseHandle && !current.controlsLocked && current.panel == PlayerPanel.NONE &&
-                                    (current.isVideo || !current.lyricsVisible)
+                                    !current.showTrackInfoDialog && !current.showPlaylistPickerDialog && !current.showEndBehaviorDialog &&
+                                    outsideOverlays(down.position) && currentAudioEdge?.contains(point) != true &&
+                                    currentVideoEdge?.contains(point) != true && (current.isVideo || !current.lyricsVisible)
                             },
                             onDragEnd = {
-                                viewModel.endVolumeGesture()
+                                viewModel.endVolumeGesture(completed = true)
                                 if (axis == AXIS_SEEK) {
                                     if (canSeek) {
                                         viewModel.state.value.seekPreviewMs?.let { viewModel.seekTo(it) }
@@ -227,18 +231,16 @@ internal fun PlayerScreen(
                                 }
                                 AXIS_VOLUME -> if (canAdjustVolume) {
                                     change.consume()
-                                    // Keep fractional movement across system steps, but follow external key changes.
-                                    if (current.volumePercent != appliedVolume) dragVolume = current.volumePercent.toFloat()
-                                    dragVolume = (dragVolume - amount.y / 14f).coerceIn(0f, 200f)
-                                    viewModel.setVolumeFromGesture(dragVolume.roundToInt())
-                                    appliedVolume = viewModel.state.value.volumePercent
+                                    if (!volumeGestureStarted) {
+                                        viewModel.beginVolumeGesture()
+                                        volumeGestureStarted = true
+                                    }
+                                    val result = viewModel.adjustVolumeGesture(-amount.y / 14f)
                                     val now = SystemClock.uptimeMillis()
-                                    if (appliedVolume != current.volumePercent &&
-                                        (lastVolumeHapticAt == 0L || now - lastVolumeHapticAt >= 60L)) {
-                                        hapticView.performHapticFeedback(
-                                            if (Build.VERSION.SDK_INT >= 34) HapticFeedbackConstants.SEGMENT_FREQUENT_TICK
-                                            else HapticFeedbackConstants.CLOCK_TICK
-                                        )
+                                    if (result.feedback == PlayerVolumeFeedback.BOUNDARY ||
+                                        result.feedback == PlayerVolumeFeedback.LIGHT &&
+                                        (lastVolumeHapticAt == 0L || now - lastVolumeHapticAt >= 90L)) {
+                                        volumeHaptics.perform(result.feedback)
                                         lastVolumeHapticAt = now
                                     }
                                 }
@@ -336,7 +338,7 @@ internal fun PlayerScreen(
             )
 
             if (!state.isVideo && state.panel == PlayerPanel.NONE &&
-                !state.showTrackInfoDialog && !state.showPlaylistPickerDialog) {
+                !state.showTrackInfoDialog && !state.showPlaylistPickerDialog && !state.showEndBehaviorDialog) {
                 if (!state.controlsVisible && playerHeightPx > 0 &&
                     (expandedAudioTopInset == null || expandedAudioBottomInset == null)) {
                     MeasurePlayerAudioControls(state, viewModel, landscape) { topHeight, bottomHeight ->
@@ -353,7 +355,8 @@ internal fun PlayerScreen(
                             viewModel.setControlsVisible(!visible)
                             if (visible) audioRestoreActivity++
                         },
-                        modifier = Modifier.align(Alignment.CenterEnd)
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                        onBoundsChanged = { audioEdgeBounds = it }
                     )
                 }
             }
@@ -398,6 +401,14 @@ internal fun PlayerScreen(
             }
 
             if (interactionsEnabled) {
+                if (state.showEndBehaviorDialog) {
+                    PlayerEndBehaviorDialog(
+                        mode = state.mode,
+                        behavior = state.endBehavior,
+                        onDismiss = viewModel::closeEndBehaviorDialog,
+                        onConfirm = viewModel::applyEndBehavior
+                    )
+                }
                 PlayerPanelSheet(state, viewModel, onPickSubtitle = onPickSubtitle)
 
                 PlayerTrackInfoDialog(
@@ -429,13 +440,14 @@ internal fun PlayerScreen(
                 })
             }
             if (state.isVideo && state.panel == PlayerPanel.NONE &&
-                !state.showTrackInfoDialog && !state.showPlaylistPickerDialog) {
+                !state.showTrackInfoDialog && !state.showPlaylistPickerDialog && !state.showEndBehaviorDialog) {
                 PlayerVideoLockControl(
                     locked = state.controlsLocked,
                     controlsVisible = state.controlsVisible,
                     revealActivity = videoLockActivity,
                     onToggleLock = { viewModel.setVideoControlsLocked(!viewModel.state.value.controlsLocked) },
-                    modifier = Modifier.align(Alignment.CenterEnd)
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                    onBoundsChanged = { videoEdgeBounds = it }
                 )
             }
         }
@@ -629,6 +641,8 @@ private fun PlayerQuickActionsRow(
 ) {
     val enabled = state.currentTrack != null
     val iconButtonSize = if (compact) 38.dp else 40.dp
+    val endBehaviorLabel = stringResource(R.string.player_end_settings)
+    val endBehaviorActions = playerEndBehaviorActionDescription(state.mode, state.endBehavior)
     Row(
         modifier = modifier.testTag("player-quick-actions-row"),
         horizontalArrangement = if (compact) Arrangement.spacedBy(0.dp) else Arrangement.Start,
@@ -673,6 +687,19 @@ private fun PlayerQuickActionsRow(
                 modifier = Modifier.size(21.dp),
                 tint = PlayerControlColors.Secondary
             )
+        }
+        IconButton(
+            onClick = viewModel::openEndBehaviorDialog,
+            enabled = enabled,
+            modifier = Modifier.size(if (compact) 48.dp else 52.dp, iconButtonSize)
+                .testTag("player-quick-end-behavior")
+                .semantics {
+                    contentDescription = endBehaviorLabel
+                    stateDescription = endBehaviorActions
+                }
+        ) {
+            PlayerEndBehaviorIcon(mode = state.mode, behavior = state.endBehavior,
+                tint = if (state.endBehavior.enabled) PlayerControlColors.Accent else PlayerControlColors.Secondary)
         }
     }
 }

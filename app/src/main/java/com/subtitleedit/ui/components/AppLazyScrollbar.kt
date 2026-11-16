@@ -1,6 +1,9 @@
 package com.subtitleedit.ui.components
 
 import androidx.compose.foundation.ScrollIndicatorState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -15,8 +18,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -25,6 +28,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -37,6 +42,7 @@ import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
+import kotlinx.coroutines.delay
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.roundToInt
@@ -135,12 +141,18 @@ private fun AppLazyScrollbar(
     var dragging by remember { mutableStateOf(false) }
     var draggedProgress by remember { mutableFloatStateOf(progress) }
     var draggedVisibleFraction by remember { mutableFloatStateOf(visibleFraction) }
-    val thumbColor = if (dragging) MaterialTheme.colorScheme.primary
-        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
-    val trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f)
+    val thumbAlpha = remember { Animatable(AppScrollbarStyle.VisibleAlpha / 255f) }
+    LaunchedEffect(indicator.scrollOffset, contentSize, viewportSize, dragging) {
+        thumbAlpha.snapTo(AppScrollbarStyle.VisibleAlpha / 255f)
+        if (!dragging) {
+            delay(AppScrollbarStyle.FadeDelayMs)
+            thumbAlpha.animateTo(0f, tween(AppScrollbarStyle.FadeDurationMs, easing = LinearEasing))
+        }
+    }
+    val thumbColor = Color(AppScrollbarStyle.ThumbColorArgb).copy(alpha = 1f)
 
     BoxWithConstraints(
-        modifier = modifier.width(24.dp).fillMaxHeight().padding(vertical = 4.dp)
+        modifier = modifier.width(AppScrollbarStyle.TouchWidth.dp).fillMaxHeight()
             .testTag("app-lazy-scrollbar")
             .semantics {
                 contentDescription = description
@@ -152,14 +164,14 @@ private fun AppLazyScrollbar(
             }
     ) {
         val trackPx = with(density) { maxHeight.toPx() }
-        val minThumbPx = with(density) { 36.dp.toPx() }
+        val minThumbPx = with(density) { AppScrollbarStyle.MinThumbHeight.dp.toPx() }
         val displayedFraction = if (dragging) draggedVisibleFraction else visibleFraction
         val thumbPx = (trackPx * displayedFraction).coerceIn(minThumbPx.coerceAtMost(trackPx), trackPx)
         val travelPx = (trackPx - thumbPx).coerceAtLeast(0f)
         val thumbTop = travelPx * if (dragging) draggedProgress else progress
 
         Box(
-            Modifier.width(24.dp).fillMaxHeight().pointerInput(trackPx, minThumbPx, reverseLayout) {
+            Modifier.width(AppScrollbarStyle.TouchWidth.dp).fillMaxHeight().pointerInput(trackPx, minThumbPx, reverseLayout) {
                 if (trackPx <= 0f) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -190,11 +202,12 @@ private fun AppLazyScrollbar(
                 }
             }
         ) {
-            Box(Modifier.align(Alignment.Center).width(2.dp).fillMaxHeight()
-                .background(trackColor, RoundedCornerShape(2.dp)))
-            Box(Modifier.align(Alignment.TopCenter).offset { IntOffset(0, thumbTop.roundToInt()) }
-                .width(4.dp).height(with(density) { thumbPx.toDp() })
-                .background(thumbColor, RoundedCornerShape(4.dp)).testTag("app-lazy-scrollbar-thumb"))
+            Box(Modifier.align(Alignment.TopEnd).padding(end = AppScrollbarStyle.EdgeMargin.dp)
+                .offset { IntOffset(0, thumbTop.roundToInt()) }
+                .width(AppScrollbarStyle.ThumbWidth.dp).height(with(density) { thumbPx.toDp() })
+                .graphicsLayer { alpha = thumbAlpha.value }
+                .background(thumbColor, RoundedCornerShape((AppScrollbarStyle.ThumbWidth / 2).dp))
+                .testTag("app-lazy-scrollbar-thumb"))
         }
     }
 }

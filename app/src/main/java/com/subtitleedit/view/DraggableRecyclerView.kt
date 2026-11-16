@@ -8,6 +8,7 @@ import android.util.AttributeSet
 import android.view.MotionEvent
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.subtitleedit.ui.components.AppScrollbarStyle
 import kotlin.math.roundToInt
 
 /**
@@ -23,20 +24,11 @@ open class DraggableRecyclerView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : RecyclerView(context, attrs, defStyleAttr) {
 
-    companion object {
-        private const val THUMB_WIDTH_DP       = 8f
-        private const val THUMB_MARGIN_DP      = 3f
-        private const val TOUCH_ZONE_DP        = 24f
-        private const val THUMB_MIN_HEIGHT_DP  = 48f
-        private const val FADE_DELAY_MS        = 1200L
-        private const val FADE_DURATION_MS     = 300L
-    }
-
     private val density          = context.resources.displayMetrics.density
-    private val thumbWidthPx     = THUMB_WIDTH_DP      * density
-    private val thumbMarginPx    = THUMB_MARGIN_DP     * density
-    private val touchZonePx      = TOUCH_ZONE_DP       * density
-    private val thumbMinHeightPx = THUMB_MIN_HEIGHT_DP * density
+    private val thumbWidthPx     = AppScrollbarStyle.ThumbWidth * density
+    private val thumbMarginPx    = AppScrollbarStyle.EdgeMargin * density
+    private val touchZonePx      = AppScrollbarStyle.TouchWidth * density
+    private val thumbMinHeightPx = AppScrollbarStyle.MinThumbHeight * density
 
     /** Use a stable drag handle when visible-row counts cannot describe the content height. */
     protected open val useFixedSizeScrollThumb: Boolean
@@ -71,7 +63,7 @@ open class DraggableRecyclerView @JvmOverloads constructor(
     }
 
     private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xAAA0A0A0.toInt()
+        color = AppScrollbarStyle.ThumbColorArgb
     }
     private val thumbRect   = RectF()
     private val thumbRadius = thumbWidthPx / 2f
@@ -109,7 +101,7 @@ open class DraggableRecyclerView @JvmOverloads constructor(
     private val fadeRunnable = object : Runnable {
         override fun run() {
             val elapsed  = System.currentTimeMillis() - fadeStartTime
-            val fraction = (elapsed.toFloat() / FADE_DURATION_MS).coerceIn(0f, 1f)
+            val fraction = (elapsed.toFloat() / AppScrollbarStyle.FadeDurationMs).coerceIn(0f, 1f)
             thumbAlpha   = (fadeStartAlpha * (1f - fraction)).toInt()
             if (fraction < 1f) postDelayed(this, 16)
         }
@@ -244,10 +236,10 @@ open class DraggableRecyclerView @JvmOverloads constructor(
     private fun showThumb() {
         removeCallbacks(startFadeRunnable)
         removeCallbacks(fadeRunnable)
-        if (isDraggingThumb && thumbAlpha == 220) return
-        thumbAlpha = 220
+        if (isDraggingThumb && thumbAlpha == AppScrollbarStyle.VisibleAlpha) return
+        thumbAlpha = AppScrollbarStyle.VisibleAlpha
         if (!isDraggingThumb) {
-            postDelayed(startFadeRunnable, FADE_DELAY_MS)
+            postDelayed(startFadeRunnable, AppScrollbarStyle.FadeDelayMs)
         }
     }
 
@@ -258,7 +250,7 @@ open class DraggableRecyclerView @JvmOverloads constructor(
     private fun scheduleFadeOut() {
         removeCallbacks(startFadeRunnable)
         removeCallbacks(fadeRunnable)
-        postDelayed(startFadeRunnable, FADE_DELAY_MS)
+        postDelayed(startFadeRunnable, AppScrollbarStyle.FadeDelayMs)
     }
 
     // ──────────────────────────────────────────────

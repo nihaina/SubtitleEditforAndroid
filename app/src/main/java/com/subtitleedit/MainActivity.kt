@@ -27,8 +27,11 @@ import com.subtitleedit.player.MainPlayerController
 import com.subtitleedit.player.MainPlayerHost
 import com.subtitleedit.player.LocalPlayerLauncher
 import com.subtitleedit.player.PlayerPlayMode
+import com.subtitleedit.player.PlayerQueueSource
+import com.subtitleedit.player.PlayerQueueSourceKind
 import com.subtitleedit.player.PlayerTrack
 import com.subtitleedit.player.PlayerViewModel
+import com.subtitleedit.player.putPlayerQueueSource
 import com.subtitleedit.player.hidePlayerSystemBars
 import com.subtitleedit.player.updatePlayerCutoutMode
 import androidx.lifecycle.lifecycleScope
@@ -2089,15 +2092,18 @@ class MainActivity : AppComposeActivity() {
         val queue = screenState.files.filter(::isAudioOrVideoFile)
         if (queue.isEmpty()) return
         val startIndex = queue.indexOfFirst { it.absolutePath == file.absolutePath }.coerceAtLeast(0)
-        openPlayerQueue(queue.map { it.absolutePath }, startIndex, null)
+        openPlayerQueue(queue.map { it.absolutePath }, startIndex, null,
+            file.absoluteFile.parent?.let { PlayerQueueSource(PlayerQueueSourceKind.DIRECTORY, it) })
     }
 
-    private fun openPlayerQueue(paths: List<String>, startIndex: Int, mode: PlayerPlayMode?) {
+    private fun openPlayerQueue(paths: List<String>, startIndex: Int, mode: PlayerPlayMode?,
+        queueSource: PlayerQueueSource?) {
         if (!com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled) {
             startActivity(Intent(this, com.subtitleedit.player.PlayerActivity::class.java).apply {
                 putStringArrayListExtra(com.subtitleedit.player.PlayerActivity.EXTRA_PLAYLIST, ArrayList(paths))
                 putExtra(com.subtitleedit.player.PlayerActivity.EXTRA_START_INDEX, startIndex)
                 mode?.let { putExtra(com.subtitleedit.player.PlayerActivity.EXTRA_PLAY_MODE, it.name) }
+                putPlayerQueueSource(queueSource)
             })
             return
         }
@@ -2105,7 +2111,7 @@ class MainActivity : AppComposeActivity() {
             val file = File(path)
             PlayerTrack(path, file.name, FileTypePolicy.isVideo(file))
         }
-        playerModel.openQueue(tracks, startIndex, mode)
+        playerModel.openQueue(tracks, startIndex, mode, queueSource)
     }
 
     private fun openMediaFileForEdit(

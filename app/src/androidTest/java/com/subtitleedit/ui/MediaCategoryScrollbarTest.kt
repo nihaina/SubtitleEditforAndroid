@@ -39,6 +39,7 @@ import com.subtitleedit.library.MediaLibraryTrack
 import com.subtitleedit.library.buildMediaAlbums
 import com.subtitleedit.ui.components.AppLazyGridScrollbar
 import com.subtitleedit.ui.components.AppLazyListScrollbar
+import com.subtitleedit.ui.components.AppScrollbarStyle
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -163,6 +164,7 @@ class MediaCategoryScrollbarTest {
             compose.onNodeWithTag("media-category-tabs").performScrollToNode(hasTestTag(categoryTag))
             compose.onNodeWithTag(categoryTag).performClick()
             compose.onNodeWithTag(RAIL).assertIsDisplayed()
+            assertScrollbarAtRightEdge("$prefix-list")
             dragThumbToEnd(bottom = true)
             compose.onNodeWithTag("$prefix-item:$prefix 079").assertIsDisplayed()
             dragThumbToEnd(bottom = false)
@@ -198,6 +200,7 @@ class MediaCategoryScrollbarTest {
         }
 
         compose.onNodeWithTag(RAIL).assertIsDisplayed()
+        assertScrollbarAtRightEdge("album-grid")
         dragThumbToEnd(bottom = true)
         compose.onNodeWithTag("album-item:album 079").assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals("Album 079", opened) }
@@ -249,6 +252,18 @@ class MediaCategoryScrollbarTest {
             swipe(start, Offset(start.x, endY), durationMillis = 500L)
         }
         compose.waitForIdle()
+    }
+
+    private fun assertScrollbarAtRightEdge(viewportTag: String) {
+        val viewport = compose.onNodeWithTag(viewportTag).fetchSemanticsNode().boundsInRoot
+        val rail = compose.onNodeWithTag(RAIL).fetchSemanticsNode().boundsInRoot
+        val thumb = compose.onNodeWithTag(THUMB, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val density = compose.activity.resources.displayMetrics.density
+        assertEquals("The touch rail stays on the viewport edge", viewport.right, rail.right, 1f)
+        assertEquals("The thumb uses the existing View scrollbar margin",
+            AppScrollbarStyle.EdgeMargin * density, viewport.right - thumb.right, 1f)
+        assertEquals(AppScrollbarStyle.ThumbWidth * density, thumb.width, 1f)
+        assertEquals(AppScrollbarStyle.TouchWidth * density, rail.width, 1f)
     }
 
     private fun categoryTracks(count: Int) = List(count) { index ->
