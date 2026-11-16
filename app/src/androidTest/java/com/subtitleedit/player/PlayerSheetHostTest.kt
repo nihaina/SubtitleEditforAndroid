@@ -82,7 +82,8 @@ class PlayerSheetHostTest {
                 await("mini bar pauses the native output") {
                     !model.state.value.playing && MPVLib.getPropertyBoolean("pause") == true
                 }
-                // UI pause is optimistic; use the native acknowledgement as the position baseline.
+                // The final audio position can follow mpv's pause flag; let that callback settle.
+                Thread.sleep(300L)
                 val pausedAt = main { (requireNotNull(MPVLib.getPropertyDouble("time-pos")) * 1000).toLong() }
                 Thread.sleep(400)
                 assertTrue("Paused progress must stay at the native position: $pausedAt -> " +

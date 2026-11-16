@@ -24,6 +24,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import android.view.WindowManager
 import com.subtitleedit.player.MainPlayerController
+import com.subtitleedit.player.PlayerMediaNotifications
 import com.subtitleedit.player.MainPlayerHost
 import com.subtitleedit.player.LocalPlayerLauncher
 import com.subtitleedit.player.PlayerPlayMode
@@ -228,6 +229,7 @@ class MainActivity : AppComposeActivity() {
             it.restoreState(savedInstanceState)
             lifecycle.addObserver(it)
         }
+        openPlayerFromNotification(intent)
         activeInstance = WeakReference(this)
         directorySnapshotLoader = DirectorySnapshotLoader(
             lifecycleScope, stateModel.directoryCache, ::applyDirectorySnapshot
@@ -448,6 +450,18 @@ class MainActivity : AppComposeActivity() {
         )
         checkPermissions()
         observeSharedLibraryCache()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        openPlayerFromNotification(intent)
+    }
+
+    private fun openPlayerFromNotification(intent: Intent?) {
+        if (intent?.getBooleanExtra(PlayerMediaNotifications.EXTRA_OPEN_PLAYER, false) != true) return
+        intent.removeExtra(PlayerMediaNotifications.EXTRA_OPEN_PLAYER)
+        if (com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled &&
+            playerModel.state.value.currentTrack != null) playerModel.expand()
     }
 
     private fun setupBackNavigation() {

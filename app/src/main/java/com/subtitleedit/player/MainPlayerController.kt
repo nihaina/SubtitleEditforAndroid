@@ -29,7 +29,10 @@ internal class MainPlayerController(
         if (PlayerOutputHandoff.hasExclusiveOwner) viewModel.suspendOutput()
         else if (activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) viewModel.resumeOutput()
     }
-    init { PlayerOutputHandoff.addListener(playbackOwnerChanged) }
+    init {
+        PlayerOutputHandoff.addListener(playbackOwnerChanged)
+        viewModel.connectMediaNotifications()
+    }
     private val audioManager = activity.getSystemService(AudioManager::class.java)
     private var outputDeviceIds: Set<Int>? = null
     private var audioDevicesRegistered = false

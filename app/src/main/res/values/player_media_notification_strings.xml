@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_media_notification_channel">音声播放</string>
+    <string name="player_media_notification_channel_description">当前音声曲目、播放进度和播放控制</string>
+</resources>

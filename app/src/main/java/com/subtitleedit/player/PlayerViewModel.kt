@@ -120,6 +120,12 @@ internal class PlayerViewModel @JvmOverloads constructor(
     val outputSuspended: StateFlow<Boolean> = _outputSuspended.asStateFlow()
     private val _outputGeneration = MutableStateFlow(0L)
     val outputGeneration: StateFlow<Long> = _outputGeneration.asStateFlow()
+    private var mediaNotifications: PlayerMediaNotificationConnection? = null
+
+    fun connectMediaNotifications() {
+        if (mediaNotifications == null) mediaNotifications =
+            PlayerMediaNotificationConnection(getApplication(), this, viewModelScope)
+    }
 
     private var engine: PlayerEngine? = null
     private var host: PlayerMpvView? = null
@@ -229,6 +235,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
 
     /** Leaving audio mode must not leave an invisible player or its timers running. */
     fun closeSession() {
+        mediaNotifications?.invalidate()
         cancelNextQueue()
         collapse()
         cancelScheduledStart()
@@ -250,6 +257,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
 
     /** Release the global mpv context before an editor Activity claims it. */
     fun suspendOutput() {
+        mediaNotifications?.invalidate()
         _outputSuspended.value = true
         host?.let(::detach)
     }
@@ -1098,6 +1106,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
     private fun applicationText(res: Int) = getApplication<Application>().getString(res)
 
     override fun onCleared() {
+        mediaNotifications?.close()
         cancelNextQueue()
         stopListening()
         rememberPosition()
