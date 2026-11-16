@@ -62,7 +62,12 @@ class MediaLibraryFilesSelectionTest {
         val harness = showFiles(4)
         row(harness.files[0]).performTouchInput { longClick() }
         row(harness.files[2]).performClick()
-        advanced(R.string.media_lib_selection_range)
+        compose.onNodeWithTag("library-selection-advanced").performClick()
+        compose.onNodeWithText("全选").assertIsDisplayed()
+        compose.onNodeWithText("区间选择").assertIsDisplayed()
+        compose.onNodeWithText("反选").assertIsDisplayed()
+        compose.onNodeWithText("不选择这个列表的所有项目").assertDoesNotExist()
+        compose.onNodeWithText("区间选择").performClick()
         compose.runOnIdle {
             assertEquals(harness.files.take(3).map { it.absolutePath }.toSet(), harness.selected.value)
         }
@@ -73,7 +78,7 @@ class MediaLibraryFilesSelectionTest {
             assertEquals(harness.files.map { it.absolutePath }.toSet(), harness.selected.value)
             assertTrue(harness.playedPaths.isEmpty())
         }
-        advanced(R.string.media_lib_selection_none)
+        compose.onNodeWithTag("library-selection-cancel").performClick()
         compose.runOnIdle { assertTrue(harness.selected.value.isEmpty()) }
         compose.onNodeWithTag("library-selection-panel").assertDoesNotExist()
     }

@@ -41,6 +41,7 @@ import com.subtitleedit.util.AppThemeMode
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.DraftManager
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.FavoriteDirectoryStore
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SettingsBackupManager
 import com.subtitleedit.util.ModelDirectoryManager
@@ -55,6 +56,7 @@ import kotlinx.coroutines.launch
 /** State retained by the main Compose navigation while a top-level page is hidden. */
 internal class MainTopLevelPagesState {
     var favoriteDirectories by mutableStateOf(emptyList<File>())
+    var mediaLibraryDirectoryPaths by mutableStateOf(emptySet<String>())
     var pendingFavoriteRemoval by mutableStateOf<File?>(null)
     var currentDraftFolder by mutableStateOf("")
     var drafts by mutableStateOf(emptyList<DraftsActivity.DraftItem>())
@@ -82,11 +84,13 @@ internal fun MainTopLevelPages(
     val toolbarCallback by rememberUpdatedState(onToolbarChanged)
     val context = LocalContext.current
     val resources = LocalResources.current
-    val preferences = context.getSharedPreferences(FAVORITES_PREFERENCES_NAME, Context.MODE_PRIVATE)
+    val directoryStore = remember(context) { FavoriteDirectoryStore(context) }
     val settings = SettingsManager.getInstance(context)
     val settingsScope = rememberCoroutineScope()
     var previousSelectedPage by remember { mutableIntStateOf(R.id.nav_directory) }
     var previousSelectionVersion by remember { mutableIntStateOf(selectionVersion) }
+
+    fun loadFavoriteDirectories() = refreshFavoriteDirectoryState(directoryStore, state)
 
     fun switchSoftwareDirectory(targetRoot: File, migrateModels: Boolean) {
         val currentRoot = settings.getSoftwareDirectory().absoluteFile
@@ -124,7 +128,7 @@ internal fun MainTopLevelPages(
     }
 
     val directoryPicker = rememberLauncherForActivityResult(AppFilePickerContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) addFavoriteDirectory(context, preferences, state, uri)
+        if (uri != null) addFavoriteDirectory(context, directoryStore, state, uri)
     }
     var libraryScanPickerPending by remember { mutableStateOf(false) }
     val libraryScanRunning by MediaLibraryScanCoordinator.scanning.collectAsState()
@@ -140,11 +144,8 @@ internal fun MainTopLevelPages(
                     showTopLevelToast(context, context.getString(R.string.favorite_directory_access_failed))
                     return@rememberLauncherForActivityResult
                 }
-                val paths = preferences.getStringSet(FAVORITES_PATHS_KEY, emptySet())
-                    ?.toMutableSet() ?: mutableSetOf()
-                paths.add(dir.absolutePath)
-                preferences.edit().putStringSet(FAVORITES_PATHS_KEY, paths).apply()
-                state.favoriteDirectories = paths.map(::File).sortedBy { it.name.lowercase(Locale.getDefault()) }
+                directoryStore.addMediaLibrary(dir)
+                loadFavoriteDirectories()
                 MediaLibraryScanCoordinator.scan(context, listOf(dir))
             } catch (error: Exception) {
                 showLibraryError(context, error)
@@ -169,14 +170,6 @@ internal fun MainTopLevelPages(
     }
     val draftExporter = rememberLauncherForActivityResult(AppFilePickerContracts.CreateDocument("*/*")) { uri ->
         exportDraft(context, state, uri)
-    }
-
-    fun loadFavoriteDirectories() {
-        state.favoriteDirectories = preferences.getStringSet(FAVORITES_PATHS_KEY, emptySet())
-            ?.toSet()
-            .orEmpty()
-            .map(::File)
-            .sortedBy { it.name.lowercase(Locale.getDefault()) }
     }
 
     LaunchedEffect(state.favoriteDirectories, playerModeEnabled) {
@@ -329,10 +322,7 @@ internal fun MainTopLevelPages(
             isActive = isActive,
             scanPickerPending = libraryScanPickerPending,
             onRemoveFavoriteDirectory = { directory ->
-                val paths = preferences.getStringSet(FAVORITES_PATHS_KEY, emptySet())
-                    ?.toMutableSet() ?: mutableSetOf()
-                paths.remove(directory.absolutePath)
-                preferences.edit().putStringSet(FAVORITES_PATHS_KEY, paths).apply()
+                directoryStore.remove(directory)
                 loadFavoriteDirectories()
             }
         )
@@ -344,6 +334,7 @@ internal fun MainTopLevelPages(
 
         R.id.nav_favorites -> FavoritesScreen(
             directories = state.favoriteDirectories,
+            mediaLibraryDirectoryPaths = state.mediaLibraryDirectoryPaths,
             metadataRefreshKey = refreshVersion,
             viewMode = viewMode,
             pendingRemoval = state.pendingFavoriteRemoval,
@@ -352,10 +343,7 @@ internal fun MainTopLevelPages(
             onRequestRemoval = { state.pendingFavoriteRemoval = it },
             onConfirmRemoval = {
                 val directory = state.pendingFavoriteRemoval ?: return@FavoritesScreen
-                val paths = preferences.getStringSet(FAVORITES_PATHS_KEY, emptySet())
-                    ?.toMutableSet() ?: mutableSetOf()
-                paths.remove(directory.absolutePath)
-                preferences.edit().putStringSet(FAVORITES_PATHS_KEY, paths).apply()
+                directoryStore.remove(directory)
                 state.pendingFavoriteRemoval = null
                 loadFavoriteDirectories()
             },
@@ -502,9 +490,15 @@ internal fun MainTopLevelPages(
     }
 }
 
+private fun refreshFavoriteDirectoryState(store: FavoriteDirectoryStore, state: MainTopLevelPagesState) {
+    val snapshot = store.load()
+    state.favoriteDirectories = snapshot.directories
+    state.mediaLibraryDirectoryPaths = snapshot.mediaLibraryPaths
+}
+
 private fun addFavoriteDirectory(
     context: Context,
-    preferences: android.content.SharedPreferences,
+    store: FavoriteDirectoryStore,
     state: MainTopLevelPagesState,
     uri: Uri
 ) {
@@ -521,13 +515,11 @@ private fun addFavoriteDirectory(
         return
     }
 
-    val paths = preferences.getStringSet(FAVORITES_PATHS_KEY, emptySet())?.toMutableSet() ?: mutableSetOf()
-    if (!paths.add(directory.absolutePath)) {
+    if (!store.addCommon(directory)) {
         showTopLevelToast(context, context.getString(R.string.favorite_directory_already_added))
         return
     }
-    preferences.edit().putStringSet(FAVORITES_PATHS_KEY, paths).apply()
-    state.favoriteDirectories = paths.map(::File).sortedBy { it.name.lowercase(Locale.getDefault()) }
+    refreshFavoriteDirectoryState(store, state)
 }
 
 private fun exportDraft(context: Context, state: MainTopLevelPagesState, uri: Uri?) {
@@ -691,6 +683,3 @@ private fun formatTopLevelSize(bytes: Long): String = when {
 private fun showTopLevelToast(context: Context, message: String) {
     Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
 }
-
-private const val FAVORITES_PREFERENCES_NAME = "favorite_directories"
-private const val FAVORITES_PATHS_KEY = "paths"

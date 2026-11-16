@@ -12,8 +12,6 @@ import java.io.File
 /** JSON export/import for user settings and references to locally selected resources. */
 object SettingsBackupManager {
     private const val SCHEMA_VERSION = 1
-    private const val FAVORITES_PREFS = "favorite_directories"
-    private const val FAVORITES_KEY = "paths"
 
     data class RestoreResult(val skippedPaths: Int = 0, val skippedFavorites: Int = 0) {
         val skippedCount: Int get() = skippedPaths + skippedFavorites
@@ -35,10 +33,10 @@ object SettingsBackupManager {
         settings.exportAiApiKeys().forEach { (provider, key) -> credentials.put(provider, key) }
         root.put("credentials", JSONObject().put("aiApiKeys", credentials))
 
-        val favorites = context.getSharedPreferences(FAVORITES_PREFS, Context.MODE_PRIVATE)
-            .getStringSet(FAVORITES_KEY, emptySet())
-            .orEmpty()
-        root.put("favorites", JSONObject().put("directories", JSONArray(favorites.toList())))
+        val favorites = FavoriteDirectoryStore(context).load()
+        root.put("favorites", JSONObject()
+            .put("directories", JSONArray(favorites.paths.toList()))
+            .put("mediaLibraryDirectories", JSONArray(favorites.mediaLibraryPaths.toList())))
         return root.toString(2)
     }
 
@@ -91,7 +89,8 @@ object SettingsBackupManager {
         }
 
         var skippedFavorites = 0
-        root.optJSONObject("favorites")?.optJSONArray("directories")?.let { directories ->
+        val favorites = root.optJSONObject("favorites")
+        favorites?.optJSONArray("directories")?.let { directories ->
             val valid = linkedSetOf<String>()
             for (index in 0 until directories.length()) {
                 val path = directories.optString(index).trim()
@@ -101,8 +100,14 @@ object SettingsBackupManager {
                     skippedFavorites++
                 }
             }
-            context.getSharedPreferences(FAVORITES_PREFS, Context.MODE_PRIVATE)
-                .edit().putStringSet(FAVORITES_KEY, valid).apply()
+            val mediaLibraryPaths = linkedSetOf<String>()
+            favorites.optJSONArray("mediaLibraryDirectories")?.let { libraryDirectories ->
+                for (index in 0 until libraryDirectories.length()) {
+                    val path = libraryDirectories.optString(index).trim()
+                    if (path.isNotEmpty()) mediaLibraryPaths += File(path).absolutePath
+                }
+            }
+            FavoriteDirectoryStore(context).replace(valid, mediaLibraryPaths)
         }
         return RestoreResult(skippedPaths, skippedFavorites)
     }

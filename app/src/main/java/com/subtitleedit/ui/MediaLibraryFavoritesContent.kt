@@ -113,7 +113,6 @@ internal fun FavoritesTabContent(
                 onShowInfo = { onShowSelectionInfo(selectedTracks) },
                 onCancel = { selectedPaths = emptySet() },
                 onSelectAll = { select(MediaLibrarySelectionAction.SELECT_ALL) },
-                onDeselectAll = { select(MediaLibrarySelectionAction.DESELECT_ALL) },
                 onSelectRange = { select(MediaLibrarySelectionAction.SELECT_RANGE) },
                 onInvertSelection = { select(MediaLibrarySelectionAction.INVERT) },
                 modifier = Modifier.align(Alignment.BottomCenter).heightIn(max = maxHeight * 0.7f)

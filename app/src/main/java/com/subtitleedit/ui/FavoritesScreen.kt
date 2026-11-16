@@ -1,18 +1,24 @@
 package com.subtitleedit.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -25,6 +31,7 @@ import com.subtitleedit.feature.ui.BrowserFileRefreshKey
 import com.subtitleedit.feature.ui.browserFileContentPadding
 import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.ui.components.AppAlertDialog
+import com.subtitleedit.ui.components.SectionHeader
 import com.subtitleedit.ui.settings.settingsPageBackground
 import java.io.File
 
@@ -38,8 +45,16 @@ fun FavoritesScreen(
     onConfirmRemoval: () -> Unit,
     onDismissRemoval: () -> Unit,
     viewMode: FileBrowserViewMode = FileBrowserViewMode.DETAILED,
-    metadataRefreshKey: Any? = null
+    metadataRefreshKey: Any? = null,
+    mediaLibraryDirectoryPaths: Set<String> = emptySet()
 ) {
+    val sections = remember(directories, mediaLibraryDirectoryPaths) {
+        val (library, common) = directories.partition { it.absolutePath in mediaLibraryDirectoryPaths }
+        buildList {
+            if (common.isNotEmpty()) add(FavoriteDirectorySection(R.string.nav_favorites, common))
+            if (library.isNotEmpty()) add(FavoriteDirectorySection(R.string.nav_library, library))
+        }
+    }
     Box(Modifier.fillMaxSize().background(settingsPageBackground())) {
         if (directories.isEmpty()) {
             Box(
@@ -53,16 +68,22 @@ fun FavoritesScreen(
                 )
             }
         } else {
-            BrowserFileLayout(
-                items = directories,
-                key = { it.absolutePath },
-                viewMode = viewMode,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = browserFileContentPadding(viewMode, bottom = 96.dp),
-                adaptiveGrid = true
-            ) { directory ->
+            val directoryContent: @Composable (File) -> Unit = { directory ->
                 FavoriteDirectoryItem(directory, viewMode, onOpenDirectory, onRequestRemoval,
                     metadataRefreshKey ?: BrowserFileRefreshKey(directories))
+            }
+            if (sections.lastOrNull()?.titleRes != R.string.nav_library) {
+                BrowserFileLayout(
+                    items = directories,
+                    key = { it.absolutePath },
+                    viewMode = viewMode,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = browserFileContentPadding(viewMode, bottom = 96.dp),
+                    adaptiveGrid = true,
+                    itemContent = directoryContent
+                )
+            } else {
+                FavoriteDirectorySections(sections, viewMode, directoryContent)
             }
         }
         FloatingActionButton(
@@ -89,6 +110,49 @@ fun FavoritesScreen(
             onDismiss = onDismissRemoval
         )
     }
+}
+
+private data class FavoriteDirectorySection(val titleRes: Int, val directories: List<File>)
+
+@Composable
+private fun FavoriteDirectorySections(
+    sections: List<FavoriteDirectorySection>,
+    viewMode: FileBrowserViewMode,
+    directoryContent: @Composable (File) -> Unit
+) {
+    val padding = browserFileContentPadding(viewMode, bottom = 96.dp)
+    if (viewMode == FileBrowserViewMode.GRID) {
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(112.dp),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = padding,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            sections.forEach { section ->
+                item(key = section.titleRes, span = { GridItemSpan(maxLineSpan) }) {
+                    FavoriteDirectorySectionHeader(section.titleRes, viewMode)
+                }
+                items(section.directories, key = { it.absolutePath }) { directoryContent(it) }
+            }
+        }
+    } else {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
+            sections.forEach { section ->
+                item(key = section.titleRes) { FavoriteDirectorySectionHeader(section.titleRes, viewMode) }
+                items(section.directories, key = { it.absolutePath }) { directoryContent(it) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FavoriteDirectorySectionHeader(titleRes: Int, viewMode: FileBrowserViewMode) {
+    SectionHeader(
+        stringResource(titleRes),
+        Modifier.fillMaxWidth().padding(start = if (viewMode == FileBrowserViewMode.GRID) 4.dp else 12.dp,
+            top = 12.dp)
+    )
 }
 
 @Composable

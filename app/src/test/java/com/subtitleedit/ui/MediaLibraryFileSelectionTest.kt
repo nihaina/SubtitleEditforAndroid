@@ -16,16 +16,6 @@ class MediaLibraryFileSelectionTest {
         assertEquals(files.toSet() + "outside.mp3", result)
     }
 
-    @Test fun deselectAllOnlyClearsFilesInThisList() {
-        val result = updateMediaLibrarySelection(
-            files,
-            setOf("outside.mp3", "b.mp4", "d.wav"),
-            MediaLibrarySelectionAction.DESELECT_ALL
-        )
-
-        assertEquals(setOf("outside.mp3"), result)
-    }
-
     @Test fun rangeUsesDisplayedOrderRatherThanSelectionOrder() {
         val result = updateMediaLibrarySelection(
             files,

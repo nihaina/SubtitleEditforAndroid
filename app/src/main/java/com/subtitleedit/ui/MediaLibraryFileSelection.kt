@@ -2,7 +2,6 @@ package com.subtitleedit.ui
 
 internal enum class MediaLibrarySelectionAction {
     SELECT_ALL,
-    DESELECT_ALL,
     SELECT_RANGE,
     INVERT
 }
@@ -16,7 +15,6 @@ internal fun updateMediaLibrarySelection(
     val visible = visiblePaths.distinct()
     return when (action) {
         MediaLibrarySelectionAction.SELECT_ALL -> selectedPaths + visible
-        MediaLibrarySelectionAction.DESELECT_ALL -> selectedPaths - visible.toSet()
         MediaLibrarySelectionAction.INVERT -> {
             val visibleSet = visible.toSet()
             (selectedPaths - visibleSet) + visible.filterNot { it in selectedPaths }

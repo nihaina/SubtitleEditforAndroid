@@ -239,7 +239,8 @@ internal fun MediaLibraryScreen(
     }
 
     val libraryTitle = stringResource(R.string.nav_library)
-    LaunchedEffect(isActive, openedPlaylist, browsePath, libraryTitle) {
+    // Selecting the current top-level tab resets its toolbar while retaining this page.
+    LaunchedEffect(isActive, selectionVersion, openedPlaylist, browsePath, libraryTitle) {
         if (isActive) {
             when {
                 openedPlaylist != null -> toolbarCallback(openedPlaylist.name, true) { openedPlaylistId = null }
@@ -1020,7 +1021,6 @@ internal fun FilesTabContent(
                 onShowInfo = onShowInfo,
                 onCancel = onClearSelection,
                 onSelectAll = { onAdvancedSelection(MediaLibrarySelectionAction.SELECT_ALL) },
-                onDeselectAll = { onAdvancedSelection(MediaLibrarySelectionAction.DESELECT_ALL) },
                 onSelectRange = { onAdvancedSelection(MediaLibrarySelectionAction.SELECT_RANGE) },
                 onInvertSelection = { onAdvancedSelection(MediaLibrarySelectionAction.INVERT) },
                 modifier = Modifier.align(Alignment.BottomCenter)

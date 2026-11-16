@@ -60,7 +60,6 @@ internal fun MediaLibrarySelectionPanel(
     onShowInfo: () -> Unit,
     onCancel: () -> Unit,
     onSelectAll: () -> Unit,
-    onDeselectAll: () -> Unit,
     onSelectRange: () -> Unit,
     onInvertSelection: () -> Unit,
     modifier: Modifier = Modifier,
@@ -199,10 +198,6 @@ internal fun MediaLibrarySelectionPanel(
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.media_lib_selection_all)) },
                             onClick = { advancedExpanded = false; onSelectAll() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.media_lib_selection_none)) },
-                            onClick = { advancedExpanded = false; onDeselectAll() }
                         )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.media_lib_selection_range)) },

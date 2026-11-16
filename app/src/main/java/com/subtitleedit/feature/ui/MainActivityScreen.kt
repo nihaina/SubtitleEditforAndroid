@@ -445,24 +445,6 @@ internal fun MainActivityScreen(
                                                         onOpenFileManagementSettings()
                                                     }
                                                 )
-                                                if (state.playerModeEnabled) {
-                                                    DropdownMenuItem(
-                                                        text = { Text(stringResource(R.string.nav_favorites)) },
-                                                        leadingIcon = { Icon(painterResource(R.drawable.ic_favorite), contentDescription = null) },
-                                                        onClick = {
-                                                            directoryMenuExpanded = false
-                                                            onTopLevelPageSelected(R.id.nav_favorites)
-                                                        }
-                                                    )
-                                                    DropdownMenuItem(
-                                                        text = { Text(stringResource(R.string.drafts)) },
-                                                        leadingIcon = { Icon(painterResource(R.drawable.ic_nav_draft), contentDescription = null) },
-                                                        onClick = {
-                                                            directoryMenuExpanded = false
-                                                            onTopLevelPageSelected(R.id.nav_drafts)
-                                                        }
-                                                    )
-                                                }
                                             }
                                         }
                                     }
