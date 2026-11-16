@@ -1190,7 +1190,8 @@ class MainActivity : AppComposeActivity() {
 
     private fun enterSelectionMode(file: File) {
         if (directoryNavigationPending) return
-        if (com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled) {
+        if (com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled &&
+            stateModel.mediaSelection.active) {
             if (isAudioOrVideoFile(file)) stateModel.mediaSelection.select(file.absolutePath)
             return
         }
@@ -1210,7 +1211,8 @@ class MainActivity : AppComposeActivity() {
     }
 
     private fun selectAllVisibleFiles() {
-        if (com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled) {
+        if (com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled &&
+            stateModel.mediaSelection.active) {
             stateModel.mediaSelection.updateVisiblePaths(visibleFiles.filter(::isAudioOrVideoFile).map { it.absolutePath })
             stateModel.mediaSelection.selectVisible(com.subtitleedit.ui.MediaLibrarySelectionAction.SELECT_ALL)
             return
@@ -1224,7 +1226,8 @@ class MainActivity : AppComposeActivity() {
     }
 
     private fun selectRangeBetweenSelectedFiles() {
-        if (com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled) {
+        if (com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled &&
+            stateModel.mediaSelection.active) {
             stateModel.mediaSelection.selectVisible(com.subtitleedit.ui.MediaLibrarySelectionAction.SELECT_RANGE)
             return
         }

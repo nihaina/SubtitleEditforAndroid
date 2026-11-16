@@ -60,7 +60,8 @@ internal fun DirectoryBrowserContent(
     gridState: LazyGridState = rememberDirectoryGridState(state),
     isActive: Boolean = true
 ) {
-    val mediaSelection = com.subtitleedit.ui.LocalMediaSelection.current
+    // Directory long-press keeps file operations; only an already active media selection takes over.
+    val mediaSelection = com.subtitleedit.ui.LocalMediaSelection.current?.takeIf { it.active }
     LaunchedEffect(mediaSelection, isActive, state.files, state.fileMetadata) {
         if (isActive) mediaSelection?.refreshVisiblePaths(
             state.files.map { it.absolutePath }, state.fileMetadata

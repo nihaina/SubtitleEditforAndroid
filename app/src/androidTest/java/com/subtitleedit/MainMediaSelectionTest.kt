@@ -10,6 +10,7 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
@@ -22,6 +23,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.subtitleedit.feature.ui.MainActivityScreenState
 import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.util.DirectoryWatcher
+import com.subtitleedit.util.FavoriteDirectoryStore
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
@@ -94,19 +96,16 @@ class MainMediaSelectionTest {
         }
     }
 
-    @Test fun directorySelectionSurvivesLibraryAndCategoryNavigationAndUsesTheSharedOptions() {
+    @Test fun audioModeDirectoryKeepsOriginalFileSelectionAndCanCopyToAnotherFolder() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("player_settings", Context.MODE_PRIVATE)
         val previousMode = preferences.all["player_mode_enabled"] as? Boolean
         assertTrue(preferences.edit().putBoolean("player_mode_enabled", true).commit())
-        val root = File(context.cacheDir, "main-media-selection-${System.nanoTime()}").apply { check(mkdirs()) }
-        val audio = File(root, "selected-audio.m4a").apply {
-            instrumentation.context.assets.open("media-tags/preservation.m4a")
-                .use { input -> outputStream().use { input.copyTo(it) } }
-        }
-        val video = File(root, "selected-video.mp4").apply { writeBytes(byteArrayOf(0)) }
-        val subtitle = File(root, "excluded.srt").apply { writeText("subtitle") }
-        val folder = File(root, "excluded-folder.mp3").apply { check(mkdir()) }
+        val root = File(context.cacheDir, "directory-copy-selection-${System.nanoTime()}").apply { check(mkdirs()) }
+        val audio = File(root, "a-audio.wav").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val image = File(root, "b-cover.jpg").apply { writeBytes(byteArrayOf(4, 5, 6)) }
+        val subtitle = File(root, "c-subtitle.srt").apply { writeText("Original subtitle") }
+        val destination = File(root, "Destination").apply { check(mkdir()) }
         var scenario: ActivityScenario<MainActivity>? = null
         try {
             scenario = ActivityScenario.launch(MainActivity::class.java)
@@ -124,14 +123,96 @@ class MainMediaSelectionTest {
             compose.waitUntil(5_000L) {
                 onMain { screen(activity).currentDirectory == root && !screen(activity).isDirectoryLoading }
             }
-            compose.onNodeWithText(subtitle.name).performTouchInput { longClick() }
-            compose.onNodeWithText(folder.name).performTouchInput { longClick() }
-            onMain { assertFalse(model.mediaSelection.active) }
-
             compose.onNodeWithText(audio.name).performTouchInput { longClick() }
+            compose.onNodeWithText("复制").assertIsDisplayed()
+            compose.onNodeWithText("移动").assertIsDisplayed()
+            compose.onNodeWithTag("library-selection-panel").assertDoesNotExist()
+            compose.onNodeWithText(subtitle.name).performClick()
+            compose.onNodeWithContentDescription(context.getString(R.string.directory_select_range)).performClick()
+            onMain {
+                assertFalse(model.mediaSelection.active)
+                assertTrue(setOf(audio.path, image.path, subtitle.path).all { it in model.selectedPaths })
+            }
+            compose.onNodeWithContentDescription(context.getString(R.string.source_selection_select_all)).performClick()
+            onMain { assertEquals(screen(activity).files.filter { it.name != ".." }.map { it.path }.toSet(), model.selectedPaths.toSet()) }
+            compose.onNodeWithContentDescription(context.getString(R.string.source_selection_select_all)).performClick()
+            onMain { assertTrue(model.selectedPaths.isEmpty()); assertFalse(model.mediaSelection.active) }
+
+            // Folders and nonmedia still start the original selection too.
+            listOf(destination, subtitle, image).forEach { file ->
+                compose.onNodeWithText(file.name).performTouchInput { longClick() }
+                onMain { assertEquals(setOf(file.path), model.selectedPaths.toSet()); assertFalse(model.mediaSelection.active) }
+                compose.onNodeWithText("复制").assertIsDisplayed()
+                pressBack()
+            }
+            compose.onNodeWithText(audio.name).performTouchInput { longClick() }
+            compose.onNodeWithText(image.name).performClick()
+            compose.onNodeWithText("复制").performClick()
+            onMain { assertEquals(FileOperation.COPY, model.pendingFileOperation) }
+            compose.onNodeWithText(destination.name).performClick()
+            compose.waitUntil(5_000L) {
+                onMain { screen(activity).currentDirectory == destination && !screen(activity).isDirectoryLoading }
+            }
+            compose.onNodeWithText("复制到此处").performClick()
+            compose.waitUntil(5_000L) {
+                File(destination, audio.name).isFile && File(destination, image.name).isFile &&
+                    onMain { model.pendingFileOperation == null && model.selectedPaths.isEmpty() }
+            }
+            assertTrue(audio.readBytes().contentEquals(File(destination, audio.name).readBytes()))
+            assertTrue(image.readBytes().contentEquals(File(destination, image.name).readBytes()))
+            onMain { assertFalse(model.mediaSelection.active); assertTrue(screen(activity).playerModeEnabled) }
+        } finally {
+            scenario?.close()
+            val restore = preferences.edit()
+            if (previousMode == null) restore.remove("player_mode_enabled")
+            else restore.putBoolean("player_mode_enabled", previousMode)
+            assertTrue(restore.commit())
+            root.deleteRecursively()
+        }
+    }
+
+    @Test fun selectionStartedInLibraryIsSharedWithDirectoryUntilItIsCancelled() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("player_settings", Context.MODE_PRIVATE)
+        val previousMode = preferences.all["player_mode_enabled"] as? Boolean
+        assertTrue(preferences.edit().putBoolean("player_mode_enabled", true).commit())
+        val root = File(context.cacheDir, "main-media-selection-${System.nanoTime()}").apply { check(mkdirs()) }
+        val audio = File(root, "selected-audio.m4a").apply {
+            instrumentation.context.assets.open("media-tags/preservation.m4a")
+                .use { input -> outputStream().use { input.copyTo(it) } }
+        }
+        val video = File(root, "selected-video.mp4").apply { writeBytes(byteArrayOf(0)) }
+        val subtitle = File(root, "excluded.srt").apply { writeText("subtitle") }
+        val folder = File(root, "excluded-folder.mp3").apply { check(mkdir()) }
+        val directoryStore = FavoriteDirectoryStore(context)
+        val previousDirectories = directoryStore.load()
+        directoryStore.replace(setOf(root.path), setOf(root.path))
+        var scenario: ActivityScenario<MainActivity>? = null
+        try {
+            scenario = ActivityScenario.launch(MainActivity::class.java)
+            lateinit var activity: MainActivity
+            lateinit var model: MainViewModel
+            scenario.onActivity {
+                activity = it
+                model = ViewModelProvider(it)[MainViewModel::class.java]
+                model.documentState.viewMode = FileBrowserViewMode.DETAILED
+                field<DirectoryWatcher>(it, "directoryWatcher").setEnabled(false)
+                invoke(it, "showTopLevelPage", arrayOf(Int::class.javaPrimitiveType!!), R.id.nav_directory)
+                assertTrue(invoke(it, "loadDirectory",
+                    arrayOf(File::class.java, Boolean::class.javaPrimitiveType!!), root, true) as Boolean)
+            }
+            compose.waitUntil(5_000L) {
+                onMain { screen(activity).currentDirectory == root && !screen(activity).isDirectoryLoading }
+            }
+            compose.onNode(hasText(context.getString(R.string.nav_library)) and hasClickAction()).performClick()
+            compose.onNodeWithText(root.name).performClick()
+            compose.onNodeWithTag("library-file:${audio.path}").performTouchInput { longClick() }
             compose.onNodeWithTag("library-selection-panel").assertIsDisplayed()
+            compose.onNode(hasText(context.getString(R.string.nav_directory)) and hasClickAction()).performClick()
+            compose.onNodeWithText("复制").assertDoesNotExist()
             compose.onNodeWithText(video.name).performClick()
             compose.onNodeWithText(subtitle.name).performClick()
+            compose.onNodeWithText(folder.name).performTouchInput { longClick() }
             onMain {
                 assertEquals(setOf(audio.path, video.path), model.mediaSelection.selectedPaths.toSet())
                 assertTrue("Media selection must leave legacy editor selection untouched", model.selectedPaths.isEmpty())
@@ -161,8 +242,17 @@ class MainMediaSelectionTest {
             compose.onNodeWithTag("media-selection-options-dialog").assertDoesNotExist()
             compose.onNodeWithTag("library-selection-panel").assertIsDisplayed()
             onMain { assertEquals(setOf(audio.path, video.path), model.mediaSelection.selectedPaths.toSet()) }
+            compose.onNodeWithTag("library-selection-cancel").performClick()
+            compose.onNodeWithTag("library-selection-panel").assertDoesNotExist()
+            compose.onNodeWithText(audio.name).performTouchInput { longClick() }
+            compose.onNodeWithText("复制").assertIsDisplayed()
+            onMain {
+                assertFalse(model.mediaSelection.active)
+                assertEquals(setOf(audio.path), model.selectedPaths.toSet())
+            }
         } finally {
             scenario?.close()
+            directoryStore.replace(previousDirectories.paths, previousDirectories.mediaLibraryPaths)
             val restore = preferences.edit()
             if (previousMode == null) restore.remove("player_mode_enabled")
             else restore.putBoolean("player_mode_enabled", previousMode)
