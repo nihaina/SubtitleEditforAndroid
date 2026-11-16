@@ -3,7 +3,6 @@ package com.subtitleedit.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -13,8 +12,6 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
@@ -68,8 +65,8 @@ internal fun MediaAlbumDetailContent(
         }
     }
     val selectedGroups = remember(groups, chosenGroups) {
-        chosenGroups?.filterTo(linkedSetOf()) { it in groups }?.takeIf { it.isNotEmpty() }
-            ?: groups.keys.take(1).toSet()
+        chosenGroups?.filterTo(linkedSetOf()) { it in groups }
+            ?: groups.keys.toSet()
     }
     LaunchedEffect(revealRequest?.token, groups, groupTracks, isActive) {
         val path = revealRequest?.takeIf { isActive }?.trackPath ?: return@LaunchedEffect
@@ -137,20 +134,29 @@ internal fun MediaAlbumDetailContent(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(groups.keys.toList(), key = { it }) { group ->
+                    item(key = "select-all") {
+                        MediaDetailGroupCard(
+                            selected = selectedGroups.size == groups.size,
+                            onClick = { chosenGroups = if (selectedGroups.size == groups.size) emptyList() else null },
+                            modifier = Modifier.width(112.dp).heightIn(min = 56.dp).testTag("album-group-all")
+                        ) {
+                            Box(Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                                .padding(horizontal = 10.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
+                                Text(stringResource(R.string.media_lib_selection_all), style = MaterialTheme.typography.titleSmall)
+                            }
+                        }
+                    }
+                    items(groups.keys.toList(), key = { "group:$it" }) { group ->
                         val selected = group in selectedGroups
-                        OutlinedCard(
+                        MediaDetailGroupCard(
+                            selected = selected,
                             onClick = {
                                 val changed = if (selected) selectedGroups - group else selectedGroups + group
-                                if (changed.isNotEmpty()) chosenGroups = changed.toList()
+                                chosenGroups = changed.toList().takeUnless { changed.size == groups.size }
                             },
+                            onLongClick = { chosenGroups = listOf(group) },
                             modifier = Modifier.width(112.dp).heightIn(min = 56.dp)
-                                .testTag("album-group:$group").semantics { this.selected = selected },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.outlinedCardColors(
-                                containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer
-                                else MaterialTheme.colorScheme.surface
-                            )
+                                .testTag("album-group:$group")
                         ) {
                             Box(Modifier.fillMaxWidth().heightIn(min = 56.dp)
                                 .padding(horizontal = 10.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {

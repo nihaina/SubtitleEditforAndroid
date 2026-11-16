@@ -7,6 +7,8 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasTestTag
@@ -124,22 +126,47 @@ class MediaSingerPageTest {
     @Test fun albumFiltersAndUngroupedModeFeedTheSameVisiblePlaybackQueue() {
         val harness = showPage()
         openSinger()
-        compose.onNodeWithTag("singer-album:alpha").assertIsSelected()
+        albumFilter("all").assertIsSelected()
+        albumFilter("alpha").assertIsSelected()
+        albumFilter("beta").assertIsSelected()
+        albumFilter("all").performClick().assertIsNotSelected()
+        albumFilter("alpha").assertIsNotSelected()
+        albumFilter("beta").assertIsNotSelected()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_album_detail_song_count, 0)).assertIsDisplayed()
+        compose.onNodeWithTag("singer-play-all").assertIsNotEnabled()
+        compose.onNodeWithTag("singer-tracks-shuffle").assertIsNotEnabled()
+        harness.singerPaths.forEach { compose.onNodeWithTag("singer-track:$it").assertDoesNotExist() }
+        albumFilter("all").performClick().assertIsSelected()
         compose.onNodeWithTag("singer-play-all").performClick()
-        compose.runOnIdle { assertEquals(harness.singerPaths.take(2) to null, harness.played.last()) }
+        compose.runOnIdle { assertEquals(harness.singerPaths to null, harness.played.last()) }
 
-        compose.onNodeWithTag("singer-albums").performScrollToNode(hasTestTag("singer-album:beta"))
-        compose.onNodeWithTag("singer-album:beta").performClick()
-        compose.onNodeWithTag("singer-albums").performScrollToNode(hasTestTag("singer-album:alpha"))
-        compose.onNodeWithTag("singer-album:alpha").performClick()
-        compose.onNodeWithTag("singer-albums").performScrollToNode(hasTestTag("singer-album:beta"))
-        compose.onNodeWithTag("singer-album:beta").assertIsSelected().performClick()
-        compose.onNodeWithTag("singer-album:beta").assertIsSelected()
+        albumFilter("beta").performTouchInput { longClick() }
+        albumFilter("alpha").assertIsNotSelected()
+        albumFilter("all").assertIsNotSelected()
+        albumFilter("beta").assertIsSelected().performClick().assertIsNotSelected()
+        compose.onNodeWithTag("singer-play-all").assertIsNotEnabled()
+        compose.onNodeWithTag("singer-tracks-shuffle").assertIsNotEnabled()
+        albumFilter("beta").performTouchInput { longClick() }
+        albumFilter("beta").assertIsSelected()
         compose.onNodeWithTag("singer-tracks-shuffle").performClick()
         val beta = harness.singerPaths.last()
         compose.runOnIdle { assertEquals(listOf(beta), harness.shuffled.last()) }
         track(beta).performClick()
         compose.runOnIdle { assertEquals(listOf(beta) to beta, harness.played.last()) }
+
+        // A long press must also replace the selection when its target was not selected.
+        albumFilter("alpha").performTouchInput { longClick() }
+        albumFilter("beta").assertIsNotSelected()
+        compose.onNodeWithTag("singer-play-all").performClick()
+        compose.runOnIdle { assertEquals(harness.singerPaths.take(2) to null, harness.played.last()) }
+        albumFilter("all").performClick().assertIsSelected()
+        compose.onNodeWithTag("singer-tracks-shuffle").performClick()
+        compose.runOnIdle { assertEquals(harness.singerPaths, harness.shuffled.last()) }
+        // Ordinary taps still add/remove individual filters.
+        albumFilter("alpha").performClick().assertIsNotSelected()
+        albumFilter("all").assertIsNotSelected()
+        albumFilter("alpha").performClick().assertIsSelected()
+        albumFilter("all").assertIsSelected()
 
         compose.onNodeWithTag("singer-detail-back").performClick()
         compose.onNodeWithTag("singer-settings").performClick()
@@ -179,7 +206,7 @@ class MediaSingerPageTest {
         compose.onNodeWithTag("singer-list").assertIsDisplayed()
     }
 
-    @Test fun confirmedAlbumAndTrackSortControlFirstGroupAndVisibleQueue() {
+    @Test fun confirmedAlbumAndTrackSortControlTheFiltersAndVisibleQueue() {
         val harness = showPage()
         selectCategory(MediaCategory.SINGERS)
         compose.onNodeWithTag("singer-settings").performClick()
@@ -189,12 +216,12 @@ class MediaSingerPageTest {
         compose.onNodeWithTag("album-sort-confirm").performClick()
         compose.onNodeWithTag("singer-settings-back").performClick()
         compose.onNodeWithTag("singer-item:singer a").performClick()
-        compose.onNodeWithTag("singer-album:beta").assertIsSelected()
+        albumFilter("all").assertIsSelected()
+        albumFilter("beta").assertIsSelected().performTouchInput { longClick() }
         compose.onNodeWithTag("singer-tracks-shuffle").performClick()
         compose.runOnIdle { assertEquals(listOf(harness.singerPaths.last()), harness.shuffled.last()) }
 
-        compose.onNodeWithTag("singer-albums").performScrollToNode(hasTestTag("singer-album:alpha"))
-        compose.onNodeWithTag("singer-album:alpha").performClick()
+        albumFilter("all").performClick()
         compose.onNodeWithTag("singer-tracks-sort").performClick()
         compose.onNodeWithTag("album-track-sort-list").performScrollToNode(hasTestTag("album-track-sort:DURATION"))
         compose.onNodeWithTag("album-track-sort:DURATION").performClick()
@@ -225,6 +252,13 @@ class MediaSingerPageTest {
 
     private fun track(path: String) = compose.onNodeWithTag("singer-tracks")
         .performScrollToNode(hasTestTag("singer-track:$path")).let { compose.onNodeWithTag("singer-track:$path") }
+
+    private fun albumFilter(key: String): androidx.compose.ui.test.SemanticsNodeInteraction {
+        val tag = if (key == "all") "singer-album-all" else "singer-album:$key"
+        compose.onNodeWithTag("singer-tracks").performScrollToNode(hasTestTag("singer-albums"))
+        compose.onNodeWithTag("singer-albums").performScrollToNode(hasTestTag(tag))
+        return compose.onNodeWithTag(tag)
+    }
 
     private fun selectionAction(label: Int) {
         compose.onNodeWithTag("library-selection-options").performClick()

@@ -7,6 +7,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasTestTag
@@ -144,10 +146,25 @@ class MediaGenrePageTest {
         val harness = showPage()
         selectCategory(MediaCategory.GENRES)
         compose.onNodeWithTag("genre-item:asmr").performClick()
-        compose.onNodeWithTag("genre-album:alpha").assertIsSelected()
+        albumFilter("all").assertIsSelected()
+        albumFilter("alpha").assertIsSelected()
+        albumFilter("beta").assertIsSelected()
+        albumFilter("all").performClick().assertIsNotSelected()
+        albumFilter("alpha").assertIsNotSelected()
+        albumFilter("beta").assertIsNotSelected()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_album_detail_song_count, 0)).assertIsDisplayed()
+        compose.onNodeWithTag("genre-play-all").assertIsNotEnabled()
+        compose.onNodeWithTag("genre-tracks-shuffle").assertIsNotEnabled()
+        harness.paths(1, 3, 4).forEach { compose.onNodeWithTag("genre-track:$it").assertDoesNotExist() }
+        albumFilter("all").performClick().assertIsSelected()
+        compose.onNodeWithTag("genre-tracks-shuffle").performClick()
+        compose.runOnIdle { assertEquals(harness.paths(1, 3, 4), harness.shuffled.single()) }
+        albumFilter("alpha").performTouchInput { longClick() }
+        albumFilter("all").assertIsNotSelected()
+        albumFilter("beta").assertIsNotSelected()
         val alpha = harness.paths(1, 4)
         compose.onNodeWithTag("genre-tracks-shuffle").performClick()
-        compose.runOnIdle { assertEquals(alpha, harness.shuffled.single()) }
+        compose.runOnIdle { assertEquals(alpha, harness.shuffled.last()) }
         captureIfRequested("genre-detail.png")
         track(harness.path(4)).performClick()
         compose.runOnIdle { assertEquals(alpha to harness.path(4), harness.played.single()) }
@@ -164,8 +181,7 @@ class MediaGenrePageTest {
         pressBack()
         compose.onNodeWithTag("genre-detail").assertIsDisplayed()
 
-        compose.onNodeWithTag("genre-albums").performScrollToNode(hasTestTag("genre-album:beta"))
-        compose.onNodeWithTag("genre-album:beta").performClick()
+        albumFilter("all").performClick().assertIsSelected()
         compose.onNodeWithTag("genre-tracks-sort").performClick()
         compose.onNodeWithTag("album-track-sort-list").performScrollToNode(hasTestTag("album-track-sort:DURATION"))
         compose.onNodeWithTag("album-track-sort:DURATION").performClick()
@@ -208,6 +224,13 @@ class MediaGenrePageTest {
 
     private fun track(path: String) = compose.onNodeWithTag("genre-tracks")
         .performScrollToNode(hasTestTag("genre-track:$path")).let { compose.onNodeWithTag("genre-track:$path") }
+
+    private fun albumFilter(key: String): androidx.compose.ui.test.SemanticsNodeInteraction {
+        val tag = if (key == "all") "genre-album-all" else "genre-album:$key"
+        compose.onNodeWithTag("genre-tracks").performScrollToNode(hasTestTag("genre-albums"))
+        compose.onNodeWithTag("genre-albums").performScrollToNode(hasTestTag(tag))
+        return compose.onNodeWithTag(tag)
+    }
 
     private fun selectionAction(label: Int) {
         compose.onNodeWithTag("library-selection-options").performClick()

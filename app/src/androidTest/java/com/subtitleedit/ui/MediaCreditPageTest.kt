@@ -7,6 +7,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasTestTag
@@ -219,13 +221,14 @@ class MediaCreditPageTest {
         val harness = showPage()
         selectCategory(MediaCategory.COMPOSERS)
         compose.onNodeWithTag("composer-item:composer a").performClick()
-        compose.onNodeWithTag("composer-album:alpha").assertIsSelected()
+        albumFilter("composer", "all").assertIsSelected()
+        albumFilter("composer", "alpha").assertIsSelected()
+        albumFilter("composer", "beta").assertIsSelected()
         compose.onNodeWithTag("composer-play-all").performClick()
-        compose.runOnIdle { assertEquals(harness.paths(listOf(4)) to null, harness.played.single()) }
-        compose.onNodeWithTag("composer-albums").performScrollToNode(hasTestTag("composer-album:beta"))
-        compose.onNodeWithTag("composer-album:beta").performClick()
-        compose.onNodeWithTag("composer-albums").performScrollToNode(hasTestTag("composer-album:alpha"))
-        compose.onNodeWithTag("composer-album:alpha").performClick()
+        compose.runOnIdle { assertEquals(harness.paths(listOf(2, 3, 4)) to null, harness.played.single()) }
+        albumFilter("composer", "beta").performTouchInput { longClick() }
+        albumFilter("composer", "all").assertIsNotSelected()
+        albumFilter("composer", "alpha").assertIsNotSelected()
         compose.onNodeWithTag("composer-tracks-shuffle").performClick()
         compose.runOnIdle { assertEquals(harness.paths(listOf(2, 3)), harness.shuffled.last()) }
 
@@ -239,6 +242,45 @@ class MediaCreditPageTest {
         compose.runOnIdle { assertEquals(harness.paths(listOf(3, 2)), harness.shuffled.last()) }
         track("composer", harness.path(3)).performClick()
         compose.runOnIdle { assertEquals(harness.paths(listOf(3, 2)) to harness.path(3), harness.played.last()) }
+
+        albumFilter("composer", "all").performClick().assertIsSelected()
+        compose.onNodeWithTag("composer-tracks-shuffle").performClick()
+        compose.runOnIdle { assertEquals(harness.paths(listOf(4, 3, 2)), harness.shuffled.last()) }
+        albumFilter("composer", "all").performClick().assertIsNotSelected()
+        albumFilter("composer", "alpha").assertIsNotSelected()
+        albumFilter("composer", "beta").assertIsNotSelected()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_album_detail_song_count, 0)).assertIsDisplayed()
+        compose.onNodeWithTag("composer-play-all").assertIsNotEnabled()
+        compose.onNodeWithTag("composer-tracks-shuffle").assertIsNotEnabled()
+        harness.paths(listOf(2, 3, 4)).forEach { compose.onNodeWithTag("composer-track:$it").assertDoesNotExist() }
+        albumFilter("composer", "all").performClick().assertIsSelected()
+        compose.onNodeWithTag("composer-tracks-shuffle").performClick()
+        compose.runOnIdle { assertEquals(harness.paths(listOf(4, 3, 2)), harness.shuffled.last()) }
+    }
+
+    @Test fun artistAlbumFiltersDefaultToAllAndLongPressExcludesEveryOtherAlbum() {
+        val harness = showPage()
+        selectCategory(MediaCategory.ARTISTS)
+        compose.onNodeWithTag("artist-item:artist a").performClick()
+        albumFilter("artist", "all").assertIsSelected()
+        albumFilter("artist", "alpha").assertIsSelected()
+        albumFilter("artist", "beta").assertIsSelected()
+        compose.onNodeWithTag("artist-tracks-shuffle").performClick()
+        compose.runOnIdle { assertEquals(harness.paths(listOf(1, 3, 4)), harness.shuffled.single()) }
+        albumFilter("artist", "all").performClick().assertIsNotSelected()
+        albumFilter("artist", "alpha").assertIsNotSelected()
+        albumFilter("artist", "beta").assertIsNotSelected()
+        compose.onNodeWithTag("artist-play-all").assertIsNotEnabled()
+        compose.onNodeWithTag("artist-tracks-shuffle").assertIsNotEnabled()
+        // A long press can select a single album directly from the empty state.
+        albumFilter("artist", "alpha").performTouchInput { longClick() }
+        albumFilter("artist", "beta").assertIsNotSelected()
+        albumFilter("artist", "all").assertIsNotSelected()
+        compose.onNodeWithTag("artist-play-all").performClick()
+        compose.runOnIdle { assertEquals(harness.paths(listOf(1, 4)) to null, harness.played.last()) }
+        albumFilter("artist", "all").performClick().assertIsSelected()
+        compose.onNodeWithTag("artist-tracks-shuffle").performClick()
+        compose.runOnIdle { assertEquals(harness.paths(listOf(1, 3, 4)), harness.shuffled.last()) }
     }
 
     private fun selectCategory(category: MediaCategory) {
@@ -254,6 +296,13 @@ class MediaCreditPageTest {
     private fun track(prefix: String, path: String) = compose.onNodeWithTag("$prefix-tracks")
         .performScrollToNode(hasTestTag("$prefix-track:$path"))
         .let { compose.onNodeWithTag("$prefix-track:$path") }
+
+    private fun albumFilter(prefix: String, key: String): androidx.compose.ui.test.SemanticsNodeInteraction {
+        val tag = if (key == "all") "$prefix-album-all" else "$prefix-album:$key"
+        compose.onNodeWithTag("$prefix-tracks").performScrollToNode(hasTestTag("$prefix-albums"))
+        compose.onNodeWithTag("$prefix-albums").performScrollToNode(hasTestTag(tag))
+        return compose.onNodeWithTag(tag)
+    }
 
     private fun selectionAction(label: Int) {
         compose.onNodeWithTag("library-selection-options").performClick()

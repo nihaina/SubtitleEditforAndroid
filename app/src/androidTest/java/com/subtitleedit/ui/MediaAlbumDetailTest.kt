@@ -9,6 +9,10 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
@@ -54,13 +58,91 @@ class MediaAlbumDetailTest {
         assertTrue(selector.left < shuffle.left)
         assertTrue(shuffle.left < sort.left)
         row(harness.tracks.first()).assertIsDisplayed()
-        row(harness.tracks.last()).assertDoesNotExist()
+        val all = compose.onNodeWithTag("album-group-all").assertIsDisplayed().assertIsSelected()
+        val firstGroup = compose.onNodeWithTag("album-group:Singer A").assertIsSelected()
+        assertTrue("Select all is the leftmost group card",
+            all.fetchSemanticsNode().boundsInRoot.right <= firstGroup.fetchSemanticsNode().boundsInRoot.left)
+        compose.onNodeWithTag("album-tracks-shuffle").performClick()
+        compose.runOnIdle { assertEquals(harness.paths, harness.shuffled.single()) }
+        firstGroup.performTouchInput { longClick() }
+        all.assertIsNotSelected()
 
         compose.onNodeWithTag("album-group-selector").performClick()
         compose.onNodeWithTag("album-grouping:COMPOSERS").performClick()
+        all.assertIsSelected()
         compose.onNodeWithTag("album-group:Composer").assertIsDisplayed()
         compose.onNodeWithTag("album-tracks-shuffle").performClick()
-        compose.runOnIdle { assertEquals(harness.paths, harness.shuffled.single()) }
+        compose.runOnIdle { assertEquals(listOf(harness.paths, harness.paths), harness.shuffled) }
+    }
+
+    @Test fun longPressingAGroupExclusivelySelectsItAndSelectAllRestoresTheFullQueue() {
+        val harness = showDetail(4, separateSingers = true)
+        val groups = compose.onNodeWithTag("album-groups")
+        val all = compose.onNodeWithTag("album-group-all")
+        val singerA = compose.onNodeWithTag("album-group:Singer A")
+        val singerB = compose.onNodeWithTag("album-group:Singer B")
+        val firstSingerPaths = harness.tracks.filter { it.track.artist == "Singer A" }.map { it.track.path }
+        val secondSingerPaths = harness.tracks.filter { it.track.artist == "Singer B" }.map { it.track.path }
+
+        // A is already selected by default. Long press must isolate it without also toggling it off.
+        singerA.assertIsSelected().performTouchInput { longClick() }
+        singerA.assertIsSelected()
+        all.assertIsNotSelected()
+        groups.performScrollToNode(hasTestTag("album-group:Singer B"))
+        singerB.assertIsNotSelected()
+        compose.onNodeWithTag("album-tracks-shuffle").performClick()
+        compose.runOnIdle { assertEquals(firstSingerPaths, harness.shuffled.last()) }
+
+        // Long press also works on an unselected group and excludes the prior selection.
+        singerB.performTouchInput { longClick() }
+        singerB.assertIsSelected()
+        groups.performScrollToNode(hasTestTag("album-group:Singer A"))
+        singerA.assertIsNotSelected()
+        row(harness.tracks.first()).assertDoesNotExist()
+        compose.onNodeWithTag("album-tracks-shuffle").performClick()
+        compose.runOnIdle { assertEquals(secondSingerPaths, harness.shuffled.last()) }
+
+        groups.performScrollToNode(hasTestTag("album-group-all"))
+        all.performClick().assertIsSelected()
+        singerA.assertIsSelected()
+        groups.performScrollToNode(hasTestTag("album-group:Singer B"))
+        singerB.assertIsSelected()
+        compose.onNodeWithTag("album-tracks-shuffle").performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(firstSingerPaths, secondSingerPaths, harness.paths), harness.shuffled)
+            assertTrue("Filtering groups must not start playback", harness.played.isEmpty())
+        }
+    }
+
+    @Test fun selectAllTogglesBetweenEveryGroupAndNoGroupsAndLongPressCanRestartSelection() {
+        val harness = showDetail(4, separateSingers = true)
+        val groups = compose.onNodeWithTag("album-groups")
+        val all = compose.onNodeWithTag("album-group-all")
+        val singerA = compose.onNodeWithTag("album-group:Singer A")
+        val singerB = compose.onNodeWithTag("album-group:Singer B")
+        all.assertIsSelected().performClick().assertIsNotSelected()
+        singerA.assertIsNotSelected()
+        groups.performScrollToNode(hasTestTag("album-group:Singer B"))
+        singerB.assertIsNotSelected()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_album_detail_song_count, 0)).assertIsDisplayed()
+        compose.onNodeWithTag("album-play-all").assertIsNotEnabled()
+        compose.onNodeWithTag("album-tracks-shuffle").assertIsNotEnabled()
+        row(harness.tracks.first()).assertDoesNotExist()
+
+        groups.performScrollToNode(hasTestTag("album-group-all"))
+        all.performClick().assertIsSelected()
+        compose.onNodeWithTag("album-play-all").assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(harness.paths to null, harness.played.single()) }
+        all.performClick().assertIsNotSelected()
+        groups.performScrollToNode(hasTestTag("album-group:Singer B"))
+        singerB.performTouchInput { longClick() }
+        singerB.assertIsSelected()
+        groups.performScrollToNode(hasTestTag("album-group:Singer A"))
+        singerA.assertIsNotSelected()
+        compose.onNodeWithTag("album-tracks-shuffle").assertIsEnabled().performClick()
+        compose.runOnIdle {
+            assertEquals(harness.tracks.filter { it.track.artist == "Singer B" }.map { it.track.path }, harness.shuffled.single())
+        }
     }
 
     @Test fun longPressAdvancedSelectionAndActionsUseSelectedFilesWithoutPlaying() {

@@ -3,7 +3,6 @@ package com.subtitleedit.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -12,8 +11,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
@@ -46,8 +43,8 @@ internal fun MediaSingerDetailContent(
     var chosenAlbums by rememberSaveable(role, singer.key) { mutableStateOf<List<String>?>(null) }
     val selectedAlbums = remember(albums, chosenAlbums) {
         val keys = albums.mapTo(hashSetOf()) { it.key }
-        chosenAlbums?.filterTo(linkedSetOf()) { it in keys }?.takeIf { it.isNotEmpty() }
-            ?: albums.take(1).mapTo(linkedSetOf()) { it.key }
+        chosenAlbums?.filterTo(linkedSetOf()) { it in keys }
+            ?: albums.mapTo(linkedSetOf()) { it.key }
     }
     LaunchedEffect(revealRequest?.token, albums, options.groupTracks, isActive) {
         val path = revealRequest?.takeIf { isActive }?.trackPath ?: return@LaunchedEffect
@@ -96,20 +93,29 @@ internal fun MediaSingerDetailContent(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(albums, key = { it.key }) { album ->
+                    item(key = "select-all") {
+                        MediaDetailGroupCard(
+                            selected = selectedAlbums.size == albums.size,
+                            onClick = { chosenAlbums = if (selectedAlbums.size == albums.size) emptyList() else null },
+                            modifier = Modifier.width(112.dp).heightIn(min = 64.dp).testTag("$tagPrefix-album-all")
+                        ) {
+                            Box(Modifier.fillMaxWidth().heightIn(min = 64.dp)
+                                .padding(horizontal = 10.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
+                                Text(stringResource(R.string.media_lib_selection_all), style = MaterialTheme.typography.titleSmall)
+                            }
+                        }
+                    }
+                    items(albums, key = { "album:${it.key}" }) { album ->
                         val selected = album.key in selectedAlbums
-                        OutlinedCard(
+                        MediaDetailGroupCard(
+                            selected = selected,
                             onClick = {
                                 val changed = if (selected) selectedAlbums - album.key else selectedAlbums + album.key
-                                if (changed.isNotEmpty()) chosenAlbums = changed.toList()
+                                chosenAlbums = changed.toList().takeUnless { changed.size == albums.size }
                             },
+                            onLongClick = { chosenAlbums = listOf(album.key) },
                             modifier = Modifier.width(168.dp).heightIn(min = 64.dp)
-                                .testTag("$tagPrefix-album:${album.key}").semantics { this.selected = selected },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.outlinedCardColors(
-                                containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer
-                                    else MaterialTheme.colorScheme.surface
-                            )
+                                .testTag("$tagPrefix-album:${album.key}")
                         ) {
                             Row(
                                 Modifier.fillMaxWidth().padding(8.dp),
