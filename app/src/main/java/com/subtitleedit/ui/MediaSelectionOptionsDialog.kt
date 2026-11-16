@@ -43,6 +43,7 @@ import com.subtitleedit.ui.components.AppLazyListScrollbar
 internal enum class MediaSelectionAction(val labelRes: Int, val iconRes: Int, val singleFileOnly: Boolean = false) {
     PLAY_NEXT(R.string.media_selection_play_next, R.drawable.ic_skip_next),
     ADD_TO_QUEUE(R.string.media_selection_add_to_queue, R.drawable.ic_queue_play),
+    REMOVE_FROM_QUEUE(R.string.media_selection_remove_from_queue, R.drawable.ic_playlist_remove),
     ADD_TO_PLAYLIST(R.string.player_action_add_to_playlist, R.drawable.ic_playlist_add),
     ADD_TO_FAVORITES(R.string.media_selection_add_to_favorites, R.drawable.ic_favorite),
     REMOVE_FROM_FAVORITES(R.string.media_selection_remove_from_favorites, R.drawable.ic_favorite_border),

@@ -66,6 +66,7 @@ class MediaSelectionOptionsTest {
         action(MediaSelectionAction.LOCATE_DIRECTORY).assertIsNotEnabled()
         action(MediaSelectionAction.EDIT_TAGS).assertIsEnabled()
         action(MediaSelectionAction.PLAY_NEXT).assertIsEnabled()
+        action(MediaSelectionAction.REMOVE_FROM_QUEUE).assertIsEnabled()
         action(MediaSelectionAction.SHARE).assertIsEnabled()
         action(MediaSelectionAction.CLEAR_HISTORY).assertIsEnabled()
         action(MediaSelectionAction.DELETE_FILES).assertIsEnabled()
@@ -98,7 +99,7 @@ class MediaSelectionOptionsTest {
         var received = emptyList<String>()
         compose.setContent {
             SubtitleEditComposeTheme {
-                MediaSelectionActionHost(f.selection, onAddToQueue = {}, onPlayNext = { received = it },
+                MediaSelectionActionHost(f.selection, onAddToQueue = {}, onRemoveFromQueue = {}, onPlayNext = { received = it },
                     onEditTags = {}, onLocate = {}, onDeleteFiles = { _, _ -> }, repository = f.repository)
             }
         }
@@ -133,6 +134,34 @@ class MediaSelectionOptionsTest {
         compose.waitUntil(5_000L) { barrier { f.repository.getPlaybackHistory().map { it.path } == listOf(f.files[2].path) } }
         compose.runOnIdle { assertEquals(f.files.take(2).map { it.path }, f.selection.selectedPaths) }
         assertTrue(f.files.all { it.isFile })
+    }
+
+    @Test fun removeFromQueueUsesTheWholeSelectionAndHonorsTheCloseSelectionCheckbox() {
+        val f = Fixture().also { fixture = it }
+        f.files.take(2).forEach { f.selection.select(it.path) }
+        f.selection.optionsOpen = true
+        val removed = mutableListOf<List<String>>()
+        compose.setContent {
+            SubtitleEditComposeTheme {
+                MediaSelectionActionHost(f.selection, onAddToQueue = {}, onRemoveFromQueue = { removed += it },
+                    onPlayNext = {}, onEditTags = {}, onLocate = {}, onDeleteFiles = { _, _ -> }, repository = f.repository)
+            }
+        }
+        compose.onNodeWithTag("media-selection-close-after-action").performClick().assertIsOff()
+        action(MediaSelectionAction.REMOVE_FROM_QUEUE).performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(f.files.take(2).map { it.path }), removed)
+            assertTrue(f.selection.active)
+            assertEquals(f.files.take(2).map { it.path }, f.selection.selectedPaths)
+            f.selection.optionsOpen = true
+        }
+        compose.onNodeWithTag("media-selection-close-after-action").performClick().assertIsOn()
+        action(MediaSelectionAction.REMOVE_FROM_QUEUE).performClick()
+        compose.runOnIdle {
+            assertEquals(2, removed.size)
+            assertFalse(f.selection.active)
+            assertTrue(f.files.all { it.isFile })
+        }
     }
 
     @Test fun portraitKeepsTheTitleAndCloseSelectionCheckboxOutsideTheScrollingActions() =
@@ -196,7 +225,7 @@ class MediaSelectionOptionsTest {
         compose.setContent {
             SubtitleEditComposeTheme {
                 Surface(Modifier.fillMaxSize()) {
-                    MediaSelectionActionHost(f.selection, onAddToQueue = {}, onPlayNext = {}, onEditTags = {}, onLocate = {},
+                    MediaSelectionActionHost(f.selection, onAddToQueue = {}, onRemoveFromQueue = {}, onPlayNext = {}, onEditTags = {}, onLocate = {},
                         onDeleteFiles = { _, success -> success() }, repository = f.repository)
                 }
             }

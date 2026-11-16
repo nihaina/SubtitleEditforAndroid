@@ -136,6 +136,7 @@ internal fun StandaloneMediaSelectionHost(
                 PlayerTrack(path, file.name, FileTypePolicy.isVideo(file))
             })
         },
+        onRemoveFromQueue = { paths -> player.removeFromCurrentQueue(paths.toSet()) },
         onPlayNext = { paths ->
             player.enqueueNextTracks(paths.map { path ->
                 val file = File(path)

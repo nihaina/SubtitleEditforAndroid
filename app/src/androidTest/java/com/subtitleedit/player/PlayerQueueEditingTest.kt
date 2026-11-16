@@ -34,6 +34,49 @@ class PlayerQueueEditingTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val app get() = ApplicationProvider.getApplicationContext<Application>()
 
+    @Test fun removingFromDormantSavedQueueKeepsRepeatedSurvivorsAndCurrentIndexWithoutStartingPlayback() = Fixture().use { f ->
+        f.repository.saveCurrentQueue(listOf(f.tracks[0].path, f.tracks[1].path, f.tracks[0].path,
+            f.tracks[2].path, f.tracks[3].path), 4, allowDuplicates = true)
+        onMain { f.model.removeFromCurrentQueue(setOf(f.tracks[1].path, f.tracks[2].path)) }
+        await("selected saved songs are removed") {
+            barrier()
+            val queue = f.repository.getCurrentQueue()
+            queue.first.map { it.path } == listOf(f.tracks[0].path, f.tracks[0].path, f.tracks[3].path) && queue.second == 2
+        }
+        assertEquals(0L, state(f.model).queueVersion)
+        assertTrue(state(f.model).playlist.isEmpty())
+        assertFalse(state(f.model).playing)
+        assertFalse(mainValue { f.model.expanded.value })
+        onMain { f.model.removeFromCurrentQueue(setOf(f.tracks[3].path)) }
+        await("removing the saved current song selects its previous survivor") {
+            barrier()
+            val queue = f.repository.getCurrentQueue()
+            queue.first.map { it.path } == listOf(f.tracks[0].path, f.tracks[0].path) && queue.second == 1
+        }
+        onMain { f.model.removeFromCurrentQueue(setOf(f.tracks[0].path)) }
+        await("all repeated copies of the selected file are removed") {
+            barrier()
+            f.repository.getCurrentQueue().first.isEmpty()
+        }
+        assertSourcesUnchanged(f)
+    }
+
+    @Test fun removingFromCurrentQueueRemovesAllSelectedOccurrencesAndKeepsItsLiveCurrentSong() = Fixture().use { f ->
+        onMain {
+            f.model.configure(listOf(f.tracks[0], f.tracks[1], f.tracks[0], f.tracks[2]),
+                1, queueSource = f.source, allowDuplicates = true)
+        }
+        val before = state(f.model)
+        onMain { f.model.removeFromCurrentQueue(setOf(f.tracks[0].path)) }
+        val after = state(f.model)
+        assertEquals(listOf(f.tracks[1].path, f.tracks[2].path), after.playlist.map { it.path })
+        assertEquals(before.currentTrack, after.currentTrack)
+        assertEquals(0, after.currentIndex)
+        assertEquals(before.queueVersion, after.queueVersion)
+        assertQueue(f, after)
+        assertSourcesUnchanged(f)
+    }
+
     @Test fun playNextInsertsRepeatedFilesAfterThePlayingOccurrenceWithoutChangingNativePlayback() = Fixture().use { f ->
         onMain { f.model.configure(f.tracks, 1, PlayerPlayMode.SHUFFLE, f.source) }
         f.openNative().use {

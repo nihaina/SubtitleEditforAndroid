@@ -140,7 +140,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
     private var trackEnded = false
     private var configured = false
     private var queueVersionCounter = 0L
-    private var appendGeneration = 0L
+    @Volatile private var appendGeneration = 0L
     private var hintToken = 0L
     private var externalSubtitles: List<PlayerSubtitleOption> = emptyList()
     private val pickedSubtitles = mutableMapOf<String, List<PlayerSubtitleOption>>()
@@ -563,6 +563,43 @@ internal class PlayerViewModel @JvmOverloads constructor(
         _state.value = current.copy(playlist = edit.playlist, currentIndex = edit.currentIndex,
             shuffleOrder = edit.shuffleOrder)
         persistEditedQueue(edit)
+    }
+
+    /** Removes queue entries only; files, favorites and source playlists remain untouched. */
+    fun removeFromCurrentQueue(paths: Set<String>) {
+        if (paths.isEmpty()) return
+        val selected = paths.toSet()
+        if (_state.value.queueVersion > 0L) {
+            removeQueueTracks(selected)
+            return
+        }
+        val generation = appendGeneration
+        viewModelScope.launch {
+            try {
+                // A dormant queue is edited in storage without mounting a player or choosing
+                // a new playback session. Keep this read/write together in the ordered writer.
+                val handledInStorage = PlayerLibraryWriter.execute {
+                    when {
+                        generation != appendGeneration -> true
+                        _state.value.queueVersion > 0L -> false
+                        else -> {
+                            val saved = libraryRepository.getCurrentQueue()
+                            val tracks = saved.first.map { PlayerTrack(it.path, it.displayTitle, it.isVideo) }
+                            PlayerQueueEdits.remove(tracks, saved.second, tracks.indices.toList(), selected)?.let { edit ->
+                                libraryRepository.saveCurrentQueue(edit.playlist.map { it.path }, edit.currentIndex,
+                                    allowDuplicates = true)
+                            }
+                            true
+                        }
+                    }
+                }
+                if (!handledInStorage && generation == appendGeneration) removeQueueTracks(selected)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                hint(R.string.error)
+            }
+        }
     }
 
     /** Removes queue entries only; files, favorites and source playlists remain untouched. */

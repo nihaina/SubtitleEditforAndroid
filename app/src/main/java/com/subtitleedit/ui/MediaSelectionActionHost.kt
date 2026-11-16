@@ -25,6 +25,7 @@ import kotlinx.coroutines.launch
 internal fun MediaSelectionActionHost(
     controller: MediaSelectionController,
     onAddToQueue: (List<String>) -> Unit,
+    onRemoveFromQueue: (List<String>) -> Unit,
     onPlayNext: (List<String>) -> Unit,
     onEditTags: (List<String>) -> Unit,
     onLocate: (String) -> Unit,
@@ -73,6 +74,10 @@ internal fun MediaSelectionActionHost(
                         }
                         MediaSelectionAction.ADD_TO_QUEUE -> {
                             onAddToQueue(snapshot)
+                            controller.finishAction(snapshot)
+                        }
+                        MediaSelectionAction.REMOVE_FROM_QUEUE -> {
+                            onRemoveFromQueue(snapshot)
                             controller.finishAction(snapshot)
                         }
                         MediaSelectionAction.ADD_TO_PLAYLIST -> assigningPaths = snapshot

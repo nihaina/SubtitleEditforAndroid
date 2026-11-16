@@ -361,6 +361,7 @@ class MainActivity : AppComposeActivity() {
                         val file = File(path)
                         PlayerTrack(path, file.name, FileTypePolicy.isVideo(file))
                     }) },
+                    onRemoveFromQueue = { paths -> playerModel.removeFromCurrentQueue(paths.toSet()) },
                     onPlayNext = { paths -> playerModel.enqueueNextTracks(paths.map { path ->
                         val file = File(path)
                         PlayerTrack(path, file.name, FileTypePolicy.isVideo(file))
