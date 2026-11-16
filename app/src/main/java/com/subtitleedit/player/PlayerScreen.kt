@@ -88,6 +88,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.subtitleedit.R
+import com.subtitleedit.ui.MediaCategoryRevealRequest
 import kotlin.math.abs
 
 @Composable
@@ -97,7 +98,8 @@ internal fun PlayerScreen(
     onPickSubtitle: () -> Unit = {},
     embedded: Boolean = false,
     interactionsEnabled: Boolean = true,
-    onCollapse: (() -> Unit)? = null
+    onCollapse: (() -> Unit)? = null,
+    onNavigateToCategory: ((MediaCategoryRevealRequest) -> Unit)? = null
 ) {
     val state by viewModel.state.collectAsState()
     val pageGradient = PlayerColors.pageGradient
@@ -414,7 +416,8 @@ internal fun PlayerScreen(
                 PlayerTrackInfoDialog(
                     state = state,
                     onDismiss = viewModel::closeTrackInfoDialog,
-                    onEditTags = onEditTags
+                    onEditTags = onEditTags,
+                    onNavigateToCategory = onNavigateToCategory
                 )
 
                 PlayerPlaylistPickerDialog(

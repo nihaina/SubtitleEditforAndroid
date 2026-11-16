@@ -27,6 +27,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.subtitleedit.ui.MediaCategoryRevealRequest
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -38,6 +39,7 @@ internal fun MainPlayerHost(
     onPickSubtitle: () -> Unit,
     onImmersiveChanged: (Boolean, Boolean) -> Unit,
     enabled: Boolean = true,
+    onNavigateToCategory: ((MediaCategoryRevealRequest) -> Unit)? = null,
     content: @Composable (@Composable () -> Unit) -> Unit
 ) {
     val state by viewModel.state.collectAsState()
@@ -193,7 +195,7 @@ internal fun MainPlayerHost(
                 }) {
                     PlayerScreen(viewModel, onEditTags = onEditTags, onPickSubtitle = onPickSubtitle,
                         embedded = true, interactionsEnabled = expanded && !dragging && progress >= 0.999f,
-                        onCollapse = viewModel::collapse)
+                        onCollapse = viewModel::collapse, onNavigateToCategory = onNavigateToCategory)
                 }
                 if (progress < 0.34f) PlayerMiniBar(state, viewModel::expand, viewModel::togglePlay,
                     viewModel::previous, viewModel::next,

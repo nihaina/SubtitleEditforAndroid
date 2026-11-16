@@ -73,6 +73,7 @@ import com.subtitleedit.FileOperation
 import com.subtitleedit.DirectoryScrollPosition
 import com.subtitleedit.MainTopLevelPages
 import com.subtitleedit.MainTopLevelPagesState
+import com.subtitleedit.ui.MediaCategoryRevealRequest
 import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.util.BatchRename
@@ -203,11 +204,15 @@ internal fun MainActivityScreen(
     onCacheItemSelected: (com.subtitleedit.ui.settings.SettingsCacheItem) -> Unit,
     onCacheClearConfirm: (com.subtitleedit.ui.settings.SettingsCacheItem) -> Unit,
     onProcessMediaSelection: () -> Unit = {},
-    miniPlayerSlot: @Composable () -> Unit = {}
+    miniPlayerSlot: @Composable () -> Unit = {},
+    categoryRevealRequest: MediaCategoryRevealRequest? = null
 ) {
     val directoryListState = rememberLazyListState()
     val directoryGridState = rememberLazyGridState()
     val topLevelPagesState = remember { MainTopLevelPagesState() }
+    LaunchedEffect(categoryRevealRequest?.token) {
+        categoryRevealRequest?.let { topLevelPagesState.mediaAlbumPage.revealRequest = it }
+    }
     val topLevelOrder = bottomNavigationItems(state.playerModeEnabled).map { it.first }
     var createMenuExpanded by remember { mutableStateOf(false) }
     var directoryMenuExpanded by remember { mutableStateOf(false) }

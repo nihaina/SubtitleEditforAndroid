@@ -44,7 +44,9 @@ internal fun MediaAlbumDetailContent(
     onFavoriteSelection: (List<MediaLibraryTrack>, () -> Unit) -> Unit,
     onAddSelectionToPlaylist: (List<MediaLibraryTrack>, () -> Unit) -> Unit,
     onShowInfo: (String) -> Unit,
-    metadataRefreshKey: Any? = null
+    metadataRefreshKey: Any? = null,
+    revealRequest: MediaCategoryRevealRequest? = null,
+    onRevealFinished: (Long) -> Unit = {}
 ) {
     var grouping by rememberSaveable(album.key) { mutableStateOf(MediaCategory.SINGERS) }
     var groupMenuOpen by remember { mutableStateOf(false) }
@@ -69,6 +71,13 @@ internal fun MediaAlbumDetailContent(
         chosenGroups?.filterTo(linkedSetOf()) { it in groups }?.takeIf { it.isNotEmpty() }
             ?: groups.keys.take(1).toSet()
     }
+    LaunchedEffect(revealRequest?.token, groups, groupTracks, isActive) {
+        val path = revealRequest?.takeIf { isActive }?.trackPath ?: return@LaunchedEffect
+        if (groupTracks) {
+            groups.entries.firstOrNull { (_, members) -> members.any { it.track.path == path } }
+                ?.key?.let { chosenGroups = listOf(it) }
+        }
+    }
     val visibleTracks = remember(album, groupTracks, groups, selectedGroups, trackSort) {
         val members = if (groupTracks) selectedGroups.flatMap { groups[it].orEmpty() } else album.tracks
         sortMediaAlbumTracks(members, trackSort)
@@ -91,7 +100,9 @@ internal fun MediaAlbumDetailContent(
         onFavoriteSelection = onFavoriteSelection,
         onAddSelectionToPlaylist = onAddSelectionToPlaylist,
         onShowInfo = onShowInfo,
-        tagPrefix = "album"
+        tagPrefix = "album",
+        revealRequest = revealRequest,
+        onRevealFinished = onRevealFinished
     ) {
         if (groupTracks) {
             item(key = "grouping") {

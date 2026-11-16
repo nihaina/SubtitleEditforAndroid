@@ -97,6 +97,7 @@ import com.subtitleedit.util.MediaCacheCleaner
 import com.subtitleedit.util.SubtitleFormatConverter
 import com.subtitleedit.util.UpdateChecker
 import com.subtitleedit.ui.settings.SettingsCacheItem
+import com.subtitleedit.ui.MediaCategoryRevealRequest
 import java.io.File
 import java.lang.ref.WeakReference
 import kotlinx.coroutines.CancellationException
@@ -142,6 +143,7 @@ class MainActivity : AppComposeActivity() {
     private lateinit var playerController: MainPlayerController
     private var playerImmersive = false
     private var playerKeepScreenOn = false
+    private var categoryRevealRequest by mutableStateOf<MediaCategoryRevealRequest?>(null)
     private var mainVolumeControlStream: Int? = null
     private var mainCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
 
@@ -348,6 +350,7 @@ class MainActivity : AppComposeActivity() {
             SubtitleEditComposeTheme {
                 MainPlayerHost(playerModel, playerController::openTagEditor, playerController::openSubtitlePicker,
                     onImmersiveChanged = ::updatePlayerWindow,
+                    onNavigateToCategory = ::revealPlayerTrackInCategory,
                     enabled = screenState.playerModeEnabled) { miniPlayerSlot ->
                 CompositionLocalProvider(LocalPlayerLauncher provides
                     if (screenState.playerModeEnabled) ::openPlayerQueue else null) {
@@ -411,7 +414,8 @@ class MainActivity : AppComposeActivity() {
                         onDeleteConfirm = ::deleteConfirmedSelection,
                         onCacheItemSelected = ::confirmSelectedMediaCacheClear,
                         onCacheClearConfirm = ::clearSelectedMediaCache,
-                        miniPlayerSlot = miniPlayerSlot
+                        miniPlayerSlot = miniPlayerSlot,
+                        categoryRevealRequest = categoryRevealRequest
                 )
                 mediaProcessingSelection?.let { selection ->
                     MediaProcessingChooserDialog(
@@ -540,6 +544,13 @@ class MainActivity : AppComposeActivity() {
         super.onDestroy()
     }
     
+    private fun revealPlayerTrackInCategory(request: MediaCategoryRevealRequest) {
+        if (!com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled) return
+        categoryRevealRequest = request
+        playerModel.collapse()
+        showTopLevelPage(R.id.nav_tools)
+    }
+
     private fun showTopLevelPage(itemId: Int) {
         // The legacy BottomNavigationView replaced the selected fragment even
         // when the user tapped the already-selected item. Keep a generation

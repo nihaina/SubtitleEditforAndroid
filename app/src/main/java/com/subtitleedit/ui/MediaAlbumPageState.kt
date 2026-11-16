@@ -38,6 +38,10 @@ internal class MediaAlbumPageState {
     var catalog by mutableStateOf<MediaAlbumCatalogSnapshot?>(null)
     var library by mutableStateOf<MediaAlbumLibrarySnapshot?>(null)
     var prepared by mutableStateOf<MediaAlbumPreparedSnapshot?>(null)
+    var revealRequest by mutableStateOf<MediaCategoryRevealRequest?>(null)
+    // A directly opened song may sit outside the user's scanned favorite directories.
+    var revealTrack by mutableStateOf<MediaAlbumTrack?>(null)
+    var resolvedRevealToken by mutableStateOf<Long?>(null)
 }
 
 internal typealias MediaAlbumCatalogLoader = suspend (directories: List<String>) -> List<MediaAlbumTrack>

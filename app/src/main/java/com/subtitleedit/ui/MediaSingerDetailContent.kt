@@ -34,7 +34,9 @@ internal fun MediaSingerDetailContent(
     onAddSelectionToPlaylist: (List<MediaLibraryTrack>, () -> Unit) -> Unit,
     onShowInfo: (String) -> Unit,
     role: MediaCreditRole = MediaCreditRole.SINGER,
-    metadataRefreshKey: Any? = null
+    metadataRefreshKey: Any? = null,
+    revealRequest: MediaCategoryRevealRequest? = null,
+    onRevealFinished: (Long) -> Unit = {}
 ) {
     val name = singer.name.ifBlank { stringResource(role.unknownRes) }
     val tagPrefix = role.tagPrefix
@@ -46,6 +48,13 @@ internal fun MediaSingerDetailContent(
         val keys = albums.mapTo(hashSetOf()) { it.key }
         chosenAlbums?.filterTo(linkedSetOf()) { it in keys }?.takeIf { it.isNotEmpty() }
             ?: albums.take(1).mapTo(linkedSetOf()) { it.key }
+    }
+    LaunchedEffect(revealRequest?.token, albums, options.groupTracks, isActive) {
+        val path = revealRequest?.takeIf { isActive }?.trackPath ?: return@LaunchedEffect
+        if (options.groupTracks) {
+            albums.firstOrNull { album -> album.tracks.any { it.track.path == path } }
+                ?.key?.let { chosenAlbums = listOf(it) }
+        }
     }
     val visibleTracks = remember(singer, albums, selectedAlbums, options.groupTracks, options.trackSort) {
         val members = if (options.groupTracks) albums.filter { it.key in selectedAlbums }.flatMap { it.tracks }
@@ -68,7 +77,9 @@ internal fun MediaSingerDetailContent(
         onFavoriteSelection = onFavoriteSelection,
         onAddSelectionToPlaylist = onAddSelectionToPlaylist,
         onShowInfo = onShowInfo,
-        tagPrefix = tagPrefix
+        tagPrefix = tagPrefix,
+        revealRequest = revealRequest,
+        onRevealFinished = onRevealFinished
     ) {
         if (options.groupTracks) {
             item(key = "grouping") {

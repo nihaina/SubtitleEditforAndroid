@@ -53,6 +53,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -60,6 +62,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import com.subtitleedit.R
 import com.subtitleedit.library.PlayerTrackDetails
+import com.subtitleedit.ui.MediaCategory
+import com.subtitleedit.ui.MediaCategoryRevealRequest
 import com.subtitleedit.ui.components.AppDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,7 +71,8 @@ import com.subtitleedit.ui.components.AppDialog
 internal fun PlayerTrackInfoDialog(
     state: PlayerUiState,
     onDismiss: () -> Unit,
-    onEditTags: () -> Unit
+    onEditTags: () -> Unit,
+    onNavigateToCategory: ((MediaCategoryRevealRequest) -> Unit)? = null
 ) {
     if (!state.showTrackInfoDialog) return
     val context = LocalContext.current
@@ -84,7 +89,7 @@ internal fun PlayerTrackInfoDialog(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
                 .widthIn(max = 460.dp)
-                .testTag("player-track-info-dialog"),
+                .testTag("player-track-info-dialog").semantics { testTagsAsResourceId = true },
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 6.dp
@@ -117,7 +122,7 @@ internal fun PlayerTrackInfoDialog(
                 Column(
                     modifier = Modifier
                         .weight(1f, fill = false)
-                        .verticalScroll(rememberScrollState()),
+                        .verticalScroll(rememberScrollState()).testTag("player-track-info-fields"),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Row(
@@ -207,7 +212,10 @@ internal fun PlayerTrackInfoDialog(
                             label = stringResource(R.string.player_info_genre),
                             value = details.genre.ifBlank { unknownText },
                             showActionIcon = true,
-                            onActionClick = onEditTags.takeIf { details.canEditTags }
+                            actionTag = "player-info-open:GENRES",
+                            onActionClick = onNavigateToCategory?.let { navigate ->
+                                { navigate(MediaCategoryRevealRequest(MediaCategory.GENRES, details.filePath)) }
+                            }
                         )
                         TrackInfoField(
                             label = stringResource(R.string.player_info_track_title),
@@ -217,13 +225,19 @@ internal fun PlayerTrackInfoDialog(
                             label = stringResource(R.string.player_info_artist),
                             value = details.artist.ifBlank { unknownText },
                             showActionIcon = true,
-                            onActionClick = onEditTags.takeIf { details.canEditTags }
+                            actionTag = "player-info-open:SINGERS",
+                            onActionClick = onNavigateToCategory?.let { navigate ->
+                                { navigate(MediaCategoryRevealRequest(MediaCategory.SINGERS, details.filePath)) }
+                            }
                         )
                         TrackInfoField(
                             label = stringResource(R.string.player_info_album),
                             value = details.album.ifBlank { unknownText },
                             showActionIcon = true,
-                            onActionClick = onEditTags.takeIf { details.canEditTags }
+                            actionTag = "player-info-open:ALBUMS",
+                            onActionClick = onNavigateToCategory?.let { navigate ->
+                                { navigate(MediaCategoryRevealRequest(MediaCategory.ALBUMS, details.filePath)) }
+                            }
                         )
                         TrackInfoField(
                             label = stringResource(R.string.player_info_year),
@@ -233,13 +247,19 @@ internal fun PlayerTrackInfoDialog(
                             label = stringResource(R.string.player_info_album_artist),
                             value = details.albumArtist.ifBlank { unknownText },
                             showActionIcon = true,
-                            onActionClick = onEditTags.takeIf { details.canEditTags }
+                            actionTag = "player-info-open:ARTISTS",
+                            onActionClick = onNavigateToCategory?.let { navigate ->
+                                { navigate(MediaCategoryRevealRequest(MediaCategory.ARTISTS, details.filePath)) }
+                            }
                         )
                         TrackInfoField(
                             label = stringResource(R.string.player_info_composer),
                             value = details.composer.ifBlank { unknownText },
                             showActionIcon = true,
-                            onActionClick = onEditTags.takeIf { details.canEditTags }
+                            actionTag = "player-info-open:COMPOSERS",
+                            onActionClick = onNavigateToCategory?.let { navigate ->
+                                { navigate(MediaCategoryRevealRequest(MediaCategory.COMPOSERS, details.filePath)) }
+                            }
                         )
                         TrackInfoField(
                             label = stringResource(R.string.player_info_track_number),
@@ -341,7 +361,8 @@ private fun TrackInfoField(
     label: String,
     value: String,
     showActionIcon: Boolean = false,
-    onActionClick: (() -> Unit)? = null
+    onActionClick: (() -> Unit)? = null,
+    actionTag: String? = null
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -356,9 +377,10 @@ private fun TrackInfoField(
             if (showActionIcon && onActionClick != null) {
                 Icon(
                     painter = painterResource(R.drawable.ic_open_in_new),
-                    contentDescription = null,
+                    contentDescription = stringResource(R.string.player_info_open_category, label),
                     modifier = Modifier
                         .size(16.dp)
+                        .then(if (actionTag != null) Modifier.testTag(actionTag) else Modifier)
                         .clip(CircleShape)
                         .clickable(onClick = onActionClick),
                     tint = MaterialTheme.colorScheme.primary

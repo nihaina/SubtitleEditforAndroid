@@ -73,7 +73,10 @@ internal fun MediaAlbumScreen(
     val catalog = pageState.catalog
     val history = pageState.library?.history.orEmpty()
     val prepared = pageState.prepared?.takeIf { it.catalog.key.directories == roots }
-    val albums = prepared?.albums.orEmpty()
+    val revealRequest = pageState.revealRequest
+    val albums = remember(prepared?.albums, pageState.revealTrack) {
+        mediaAlbumsWithRevealTrack(prepared?.albums.orEmpty(), pageState.revealTrack)
+    }
     var refreshing by remember { mutableStateOf(prepared == null) }
     val loading = prepared == null && (refreshing || catalog?.key?.directories == roots)
     val scope = rememberCoroutineScope()
@@ -81,6 +84,33 @@ internal fun MediaAlbumScreen(
     val playlists = pageState.library?.playlists.orEmpty()
     var playlistRequest by remember { mutableStateOf<AlbumPlaylistRequest?>(null) }
     var infoPath by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(revealRequest?.token) {
+        val request = revealRequest ?: return@LaunchedEffect
+        try {
+            val target = withContext(Dispatchers.IO) {
+                val file = File(request.trackPath)
+                if (!file.isFile || !file.canRead()) null else loadMediaCategoryRevealTrack(request.trackPath)
+            }
+            if (pageState.revealRequest?.token != request.token) return@LaunchedEffect
+            if (target == null) {
+                withContext(Dispatchers.Main.immediate) {
+                    Toast.makeText(context, R.string.media_lib_file_missing, Toast.LENGTH_SHORT).show()
+                }
+                pageState.revealRequest = null
+            } else {
+                pageState.revealTrack = target
+                pageState.resolvedRevealToken = request.token
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            if (pageState.revealRequest?.token == request.token) {
+                pageState.revealRequest = null
+                withContext(Dispatchers.Main.immediate) { showLibraryError(context, error) }
+            }
+        }
+    }
 
     fun updateCreditOptions(role: MediaCreditRole, next: MediaSingerViewOptions) {
         creditOptions = creditOptions + (role to next)
@@ -201,6 +231,10 @@ internal fun MediaAlbumScreen(
         options = options,
         loading = loading,
         isActive = isActive,
+        revealRequest = revealRequest?.takeIf { pageState.resolvedRevealToken == it.token },
+        onRevealFinished = { token ->
+            if (pageState.revealRequest?.token == token) pageState.revealRequest = null
+        },
         onOptionsChanged = { options = it; preferences.save(it) },
         singerOptions = creditOptions.getValue(MediaCreditRole.SINGER),
         onSingerOptionsChanged = { updateCreditOptions(MediaCreditRole.SINGER, it) },
@@ -287,7 +321,9 @@ internal fun MediaAlbumPageContent(
     onGenreOptionsChanged: (MediaSingerViewOptions) -> Unit = {},
     metadataRefreshKey: Any? = null,
     onPlayFromSource: ((MediaAlbum, String?, PlayerQueueSource) -> Unit)? = null,
-    onShuffleFromSource: ((MediaAlbum, PlayerQueueSource) -> Unit)? = null
+    onShuffleFromSource: ((MediaAlbum, PlayerQueueSource) -> Unit)? = null,
+    revealRequest: MediaCategoryRevealRequest? = null,
+    onRevealFinished: (Long) -> Unit = {}
 ) {
     var category by rememberSaveable { mutableStateOf(MediaCategory.ALBUMS) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -299,6 +335,43 @@ internal fun MediaAlbumPageContent(
     var openedCreditKey by rememberSaveable { mutableStateOf<String?>(null) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var sortOpen by remember { mutableStateOf(false) }
+    var handledRevealToken by rememberSaveable { mutableStateOf<Long?>(null) }
+
+    fun cancelReveal() {
+        revealRequest?.let {
+            handledRevealToken = it.token
+            onRevealFinished(it.token)
+        }
+    }
+
+    LaunchedEffect(revealRequest?.token, albums, isActive) {
+        val request = revealRequest ?: return@LaunchedEffect
+        if (!isActive || handledRevealToken == request.token) return@LaunchedEffect
+        category = request.category
+        settingsOpen = false
+        sortOpen = false
+        when (request.category) {
+            MediaCategory.ALBUMS -> query = ""
+            MediaCategory.SINGERS -> singerQuery = ""
+            MediaCategory.ARTISTS -> artistQuery = ""
+            MediaCategory.COMPOSERS -> composerQuery = ""
+            MediaCategory.GENRES -> genreQuery = ""
+        }
+        val album = albums.firstOrNull { item -> item.tracks.any { it.track.path == request.trackPath } }
+            ?: return@LaunchedEffect
+        val role = request.category.creditRole
+        if (role == null) {
+            openedAlbumKey = album.key
+            openedCreditKey = null
+        } else {
+            val credit = buildMediaCredits(albums.flatMap { it.tracks }, role)
+                .firstOrNull { item -> item.tracks.any { it.track.path == request.trackPath } }
+                ?: return@LaunchedEffect
+            openedAlbumKey = null
+            openedCreditKey = credit.key
+        }
+        handledRevealToken = request.token
+    }
     val openedAlbum = albums.firstOrNull { it.key == openedAlbumKey }
     val creditRole = category.creditRole
     val activeCreditOptions = when (creditRole) {
@@ -331,10 +404,11 @@ internal fun MediaAlbumPageContent(
         filterAndSortMediaAlbums(albums, if (options.quickSearch) query else "", options.sortField, options.ascending)
     }
     LaunchedEffect(credits, openedCreditKey, loading) {
-        if (!loading && openedCreditKey != null && openedCredit == null) openedCreditKey = null
+        if (!loading && revealRequest == null && openedCreditKey != null && openedCredit == null) openedCreditKey = null
     }
 
     BackHandler(isActive && (settingsOpen || openedAlbumKey != null || openedCreditKey != null)) {
+        cancelReveal()
         when {
             settingsOpen -> settingsOpen = false
             openedCreditKey != null -> openedCreditKey = null
@@ -360,7 +434,9 @@ internal fun MediaAlbumPageContent(
                 options = activeCreditOptions,
                 onOptionsChanged = changeCreditOptions,
                 isActive = isActive,
-                onBack = { openedCreditKey = null },
+                onBack = { cancelReveal(); openedCreditKey = null },
+                revealRequest = revealRequest?.takeIf { handledRevealToken == it.token && category == it.category },
+                onRevealFinished = onRevealFinished,
                 onPlay = { displayed, path ->
                     val album = MediaAlbum(openedCredit.name, displayed)
                     val source = PlayerQueueSource(creditRole.queueSourceKind, openedCredit.key)
@@ -385,7 +461,9 @@ internal fun MediaAlbumPageContent(
                 trackSort = options.trackSort,
                 onTrackSortChanged = { onOptionsChanged(options.copy(trackSort = it)) },
                 isActive = isActive,
-                onBack = { openedAlbumKey = null },
+                onBack = { cancelReveal(); openedAlbumKey = null },
+                revealRequest = revealRequest?.takeIf { handledRevealToken == it.token && category == it.category },
+                onRevealFinished = onRevealFinished,
                 onPlay = { displayed, path ->
                     val album = openedAlbum.copy(tracks = displayed)
                     val source = PlayerQueueSource(PlayerQueueSourceKind.ALBUM, openedAlbum.key)
@@ -410,6 +488,7 @@ internal fun MediaAlbumPageContent(
                         FilterChip(
                             selected = category == item,
                             onClick = {
+                                cancelReveal()
                                 openedCreditKey = null
                                 category = item
                             },
@@ -434,7 +513,7 @@ internal fun MediaAlbumPageContent(
                             onQueryChanged = { query = it },
                             onSort = { sortOpen = true },
                             onSettings = { settingsOpen = true },
-                            onOpenAlbum = { openedAlbumKey = it.key },
+                            onOpenAlbum = { cancelReveal(); openedAlbumKey = it.key },
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -458,7 +537,7 @@ internal fun MediaAlbumPageContent(
                             },
                             onSort = { sortOpen = true },
                             onSettings = { settingsOpen = true },
-                            onOpenSinger = { openedCreditKey = it.key },
+                            onOpenSinger = { cancelReveal(); openedCreditKey = it.key },
                             modifier = Modifier.weight(1f),
                             role = creditRole
                         )

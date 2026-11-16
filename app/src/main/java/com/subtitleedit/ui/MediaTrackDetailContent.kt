@@ -3,6 +3,7 @@ package com.subtitleedit.ui
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
@@ -17,6 +18,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
@@ -47,6 +49,8 @@ internal fun MediaTrackDetailContent(
     onAddSelectionToPlaylist: (List<MediaLibraryTrack>, () -> Unit) -> Unit,
     onShowInfo: (String) -> Unit,
     tagPrefix: String,
+    revealRequest: MediaCategoryRevealRequest? = null,
+    onRevealFinished: (Long) -> Unit = {},
     header: LazyListScope.() -> Unit
 ) {
     val context = LocalContext.current
@@ -60,6 +64,12 @@ internal fun MediaTrackDetailContent(
         visibleTracks.filter { it.track.path in selectedPaths }
     }
     val selectionMode = selectedPaths.isNotEmpty()
+    val (revealOpacity, revealPulse) = rememberMediaTrackRevealHighlight(collectionKey, revealRequest,
+        visiblePaths, isActive, listState, onRevealFinished)
+    val revealColor = MaterialTheme.colorScheme.primaryContainer
+    LaunchedEffect(revealRequest?.token) {
+        if (revealRequest != null) selectedPaths = emptySet()
+    }
     LaunchedEffect(collectionKey, selectionResetKey) { selectedPaths = emptySet() }
     LaunchedEffect(visiblePaths) { selectedPaths = selectedPaths.intersect(visiblePaths.toSet()) }
     BackHandler(enabled = isActive && selectionMode) { selectedPaths = emptySet() }
@@ -113,7 +123,14 @@ internal fun MediaTrackDetailContent(
                 }
                 items(visibleTracks, key = { it.track.path }) { item ->
                     BrowserFileRow(
-                        modifier = Modifier.testTag("$tagPrefix-track:${item.track.path}"),
+                        modifier = Modifier.testTag("$tagPrefix-track:${item.track.path}").then(
+                            if (isActive && item.track.path == revealRequest?.trackPath) Modifier
+                                .background(revealColor.copy(alpha = revealOpacity))
+                                .semantics {
+                                    mediaTrackRevealPulse = revealPulse
+                                    mediaTrackRevealOpacity = revealOpacity
+                                }
+                            else Modifier),
                         file = item.track.file,
                         metadataRefreshKey = metadataRefreshKey ?: item,
                         relativePathRoot = null,
