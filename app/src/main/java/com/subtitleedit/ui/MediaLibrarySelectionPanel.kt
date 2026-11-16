@@ -63,7 +63,8 @@ internal fun MediaLibrarySelectionPanel(
     onDeselectAll: () -> Unit,
     onSelectRange: () -> Unit,
     onInvertSelection: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    favoriteActionLabelRes: Int = R.string.player_action_favorite
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     var optionsExpanded by remember { mutableStateOf(false) }
@@ -171,7 +172,7 @@ internal fun MediaLibrarySelectionPanel(
                         onDismissRequest = { optionsExpanded = false }
                     ) {
                         DropdownMenuItem(
-                            text = { Text(stringResource(R.string.player_action_favorite)) },
+                            text = { Text(stringResource(favoriteActionLabelRes)) },
                             onClick = { optionsExpanded = false; onFavorite() }
                         )
                         DropdownMenuItem(

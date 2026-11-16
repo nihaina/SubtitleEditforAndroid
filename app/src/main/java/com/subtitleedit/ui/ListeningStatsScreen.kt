@@ -84,6 +84,7 @@ import com.subtitleedit.library.MediaLibraryTrack
 import com.subtitleedit.library.PlaybackHistoryEntry
 import com.subtitleedit.library.TopListeningItem
 import com.subtitleedit.player.PlayerActivity
+import com.subtitleedit.player.LocalPlayerLauncher
 import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.ui.theme.cardContainer
 import kotlinx.coroutines.CancellationException
@@ -105,6 +106,7 @@ internal fun ListeningStatsScreen(
     contentLoader: ListeningStatsLoader? = null
 ) {
     val context = LocalContext.current
+    val playerLauncher = LocalPlayerLauncher.current
     val repository = remember(context) { MediaLibraryRepository.getInstance(context) }
     val revision by repository.revision.collectAsState()
 
@@ -183,6 +185,8 @@ internal fun ListeningStatsScreen(
                 val exists = withContext(Dispatchers.IO) { File(path).isFile }
                 if (!exists) {
                     Toast.makeText(context, context.getString(R.string.media_lib_file_missing), Toast.LENGTH_SHORT).show()
+                } else if (playerLauncher != null) {
+                    playerLauncher(listOf(path), 0, null)
                 } else {
                     context.startActivity(Intent(context, PlayerActivity::class.java).apply {
                         putStringArrayListExtra(PlayerActivity.EXTRA_PLAYLIST, arrayListOf(path))

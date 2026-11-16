@@ -3,6 +3,7 @@ package com.subtitleedit
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -18,6 +19,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import android.view.WindowManager
+import com.subtitleedit.player.MainPlayerController
+import com.subtitleedit.player.MainPlayerHost
+import com.subtitleedit.player.LocalPlayerLauncher
+import com.subtitleedit.player.PlayerPlayMode
+import com.subtitleedit.player.PlayerTrack
+import com.subtitleedit.player.PlayerViewModel
+import com.subtitleedit.player.hidePlayerSystemBars
+import com.subtitleedit.player.updatePlayerCutoutMode
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewModelScope
 import com.subtitleedit.editor.EditorMediaType
@@ -121,6 +134,12 @@ class MainActivity : AppComposeActivity() {
     private lateinit var archiveTestRunner: ArchiveTestRunner
     private lateinit var archiveActionDialogController: ArchiveActionDialogController
     private val stateModel: MainViewModel by viewModels()
+    private val playerModel: PlayerViewModel by viewModels()
+    private lateinit var playerController: MainPlayerController
+    private var playerImmersive = false
+    private var playerKeepScreenOn = false
+    private var mainVolumeControlStream: Int? = null
+    private var mainCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
 
     private val visibleFiles = mutableListOf<File>()
     private var directorySnapshot: BrowserDirectorySnapshot? = null
@@ -197,6 +216,15 @@ class MainActivity : AppComposeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val settingsManager = com.subtitleedit.util.SettingsManager.getInstance(this)
         super.onCreate(savedInstanceState)
+        mainVolumeControlStream = volumeControlStream
+        if (com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled) {
+            volumeControlStream = AudioManager.STREAM_MUSIC
+        }
+        if (Build.VERSION.SDK_INT >= 28) mainCutoutMode = window.attributes.layoutInDisplayCutoutMode
+        playerController = MainPlayerController(this, playerModel).also {
+            it.restoreState(savedInstanceState)
+            lifecycle.addObserver(it)
+        }
         activeInstance = WeakReference(this)
         directorySnapshotLoader = DirectorySnapshotLoader(
             lifecycleScope, stateModel.directoryCache, ::applyDirectorySnapshot
@@ -313,6 +341,11 @@ class MainActivity : AppComposeActivity() {
         )
         setContent {
             SubtitleEditComposeTheme {
+                MainPlayerHost(playerModel, playerController::openTagEditor, playerController::openSubtitlePicker,
+                    onImmersiveChanged = ::updatePlayerWindow,
+                    enabled = screenState.playerModeEnabled) { miniPlayerSlot ->
+                CompositionLocalProvider(LocalPlayerLauncher provides
+                    if (screenState.playerModeEnabled) ::openPlayerQueue else null) {
                 MainActivityScreen(
                         state = screenState,
                         topLevelPageRefreshVersion = topLevelPageRefreshVersion,
@@ -372,7 +405,8 @@ class MainActivity : AppComposeActivity() {
                         onDeleteBatchRenameHistory = ::deleteBatchRenameHistory,
                         onDeleteConfirm = ::deleteConfirmedSelection,
                         onCacheItemSelected = ::confirmSelectedMediaCacheClear,
-                        onCacheClearConfirm = ::clearSelectedMediaCache
+                        onCacheClearConfirm = ::clearSelectedMediaCache,
+                        miniPlayerSlot = miniPlayerSlot
                 )
                 mediaProcessingSelection?.let { selection ->
                     MediaProcessingChooserDialog(
@@ -381,6 +415,8 @@ class MainActivity : AppComposeActivity() {
                         onDismiss = { mediaProcessingSelection = null },
                         onSelect = ::openSelectedMediaProcessingPage
                     )
+                }
+                }
                 }
             }
         }
@@ -422,6 +458,7 @@ class MainActivity : AppComposeActivity() {
 
     override fun onResume() {
         super.onResume()
+        applyPlayerWindow()
         lifecycleCoordinator.onResume()
         refreshPlayerModeNavigation()
         topLevelPageRefreshVersion++
@@ -430,6 +467,49 @@ class MainActivity : AppComposeActivity() {
     override fun onPause() {
         lifecycleCoordinator.onPause()
         super.onPause()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        playerController.saveState(outState)
+        super.onSaveInstanceState(outState)
+    }
+
+    @Deprecated("Deprecated in Android")
+    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+        val target = intent.component?.className
+        val ownsMpv = target == EditorActivity::class.java.name || target == com.subtitleedit.player.PlayerActivity::class.java.name
+        if (ownsMpv) playerModel.suspendOutput()
+        try {
+            super.startActivityForResult(intent, requestCode, options)
+        } catch (error: RuntimeException) {
+            if (ownsMpv) playerController.cancelPlaybackActivityLaunch()
+            throw error
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applyPlayerWindow()
+    }
+
+    private fun updatePlayerWindow(immersive: Boolean, keepScreenOn: Boolean) {
+        if (playerImmersive == immersive && playerKeepScreenOn == keepScreenOn) return
+        playerImmersive = immersive
+        playerKeepScreenOn = keepScreenOn
+        applyPlayerWindow()
+    }
+
+    private fun applyPlayerWindow() {
+        if (playerImmersive) {
+            window.updatePlayerCutoutMode(resources.configuration.orientation ==
+                android.content.res.Configuration.ORIENTATION_LANDSCAPE, mainCutoutMode)
+            window.hidePlayerSystemBars()
+        } else {
+            window.updatePlayerCutoutMode(false, mainCutoutMode)
+            WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
+        }
+        if (playerKeepScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     private fun showPendingUpdate(update: UpdateChecker.UpdateInfo) {
@@ -1990,9 +2070,12 @@ class MainActivity : AppComposeActivity() {
     }
 
     private fun refreshPlayerModeNavigation() {
+        val enabled = com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled
+        volumeControlStream = if (enabled) AudioManager.STREAM_MUSIC else mainVolumeControlStream ?: volumeControlStream
+        if (!enabled && playerModel.state.value.currentTrack != null) playerModel.closeSession()
         val current = stateModel.documentState.selectedTopLevelItem
         val target = MainNavigationPolicy.pageForMode(
-            current, com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled
+            current, enabled
         )
         if (target != current) showTopLevelPage(target) else publishScreenState()
     }
@@ -2006,13 +2089,23 @@ class MainActivity : AppComposeActivity() {
         val queue = screenState.files.filter(::isAudioOrVideoFile)
         if (queue.isEmpty()) return
         val startIndex = queue.indexOfFirst { it.absolutePath == file.absolutePath }.coerceAtLeast(0)
-        startActivity(Intent(this, com.subtitleedit.player.PlayerActivity::class.java).apply {
-            putStringArrayListExtra(
-                com.subtitleedit.player.PlayerActivity.EXTRA_PLAYLIST,
-                ArrayList(queue.map { it.absolutePath })
-            )
-            putExtra(com.subtitleedit.player.PlayerActivity.EXTRA_START_INDEX, startIndex)
-        })
+        openPlayerQueue(queue.map { it.absolutePath }, startIndex, null)
+    }
+
+    private fun openPlayerQueue(paths: List<String>, startIndex: Int, mode: PlayerPlayMode?) {
+        if (!com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled) {
+            startActivity(Intent(this, com.subtitleedit.player.PlayerActivity::class.java).apply {
+                putStringArrayListExtra(com.subtitleedit.player.PlayerActivity.EXTRA_PLAYLIST, ArrayList(paths))
+                putExtra(com.subtitleedit.player.PlayerActivity.EXTRA_START_INDEX, startIndex)
+                mode?.let { putExtra(com.subtitleedit.player.PlayerActivity.EXTRA_PLAY_MODE, it.name) }
+            })
+            return
+        }
+        val tracks = paths.map { path ->
+            val file = File(path)
+            PlayerTrack(path, file.name, FileTypePolicy.isVideo(file))
+        }
+        playerModel.openQueue(tracks, startIndex, mode)
     }
 
     private fun openMediaFileForEdit(

@@ -103,6 +103,12 @@ internal class PlayerViewModel @JvmOverloads constructor(
     val state: StateFlow<PlayerUiState> = _state.asStateFlow()
     private val _finishRequests = MutableStateFlow(0L)
     val finishRequests: StateFlow<Long> = _finishRequests.asStateFlow()
+    private val _expanded = MutableStateFlow(false)
+    val expanded: StateFlow<Boolean> = _expanded.asStateFlow()
+    private val _outputSuspended = MutableStateFlow(false)
+    val outputSuspended: StateFlow<Boolean> = _outputSuspended.asStateFlow()
+    private val _outputGeneration = MutableStateFlow(0L)
+    val outputGeneration: StateFlow<Long> = _outputGeneration.asStateFlow()
 
     private var engine: PlayerEngine? = null
     private var host: PlayerMpvView? = null
@@ -146,6 +152,95 @@ internal class PlayerViewModel @JvmOverloads constructor(
     fun configure(playlist: List<PlayerTrack>, startIndex: Int, initialMode: PlayerPlayMode? = null) {
         if (configured) return
         configured = true
+        configureQueue(playlist, startIndex, initialMode)
+    }
+
+    fun restoreSession(playlist: List<PlayerTrack>, startIndex: Int, mode: PlayerPlayMode?,
+        positionMs: Long, playing: Boolean, expanded: Boolean) {
+        if (configured) return
+        configure(playlist, startIndex, mode)
+        detachedPosition = positionMs.coerceAtLeast(0L)
+        playOnAttach = playing
+        _expanded.value = expanded
+    }
+
+    /** A new library selection replaces the queue without replacing the output view. */
+    fun openQueue(playlist: List<PlayerTrack>, startIndex: Int, initialMode: PlayerPlayMode? = null) {
+        if (playlist.none { it.file.isFile }) {
+            hint(R.string.player_playlist_empty)
+            return
+        }
+        val selected = playlist.getOrNull(startIndex)?.path
+        if (selected == _state.value.currentTrack?.path &&
+            playlist.map { it.path } == _state.value.playlist.map { it.path } && initialMode == null) {
+            expand()
+            return
+        }
+        rememberPosition()
+        stopListening()
+        cancelScheduledStart()
+        tagEditResume = null
+        detachedPosition = null
+        detachedSubtitle = null
+        playOnAttach = true
+        configured = true
+        configureQueue(playlist, startIndex, initialMode ?: preferences.defaultPlayMode)
+        _state.value = _state.value.copy(positionMs = 0L, durationMs = 0L, ready = false,
+            playing = false, seekPreviewMs = null, panel = PlayerPanel.NONE,
+            controlsLocked = false, controlsVisible = true, lyricsVisible = false,
+            showTrackInfoDialog = false, showPlaylistPickerDialog = false)
+        loadCurrent(resume = _state.value.resumePlayback, autoplay = true)
+        expand()
+    }
+
+    fun expand() {
+        _expanded.value = true
+        setControlsVisible(true)
+    }
+
+    fun collapse() {
+        endVolumeGesture()
+        clearSeekPreview()
+        closePanel()
+        closeTrackInfoDialog()
+        closePlaylistPickerDialog()
+        _expanded.value = false
+        saveProgress()
+    }
+
+    /** Leaving audio mode must not leave an invisible player or its timers running. */
+    fun closeSession() {
+        collapse()
+        cancelScheduledStart()
+        clearSleepTimer()
+        host?.let(::detach)
+        subtitleImportVersion++
+        subtitleImportJob?.cancel()
+        lyricLoadJob?.cancel()
+        tagEditResume = null
+        detachedPosition = null
+        detachedSubtitle = null
+        loadedTrackPath = null
+        configured = false
+        _state.value = _state.value.copy(playlist = emptyList(), currentIndex = -1,
+            ready = false, playing = false, positionMs = 0L, durationMs = 0L, error = null,
+            controlsLocked = false, lyricsVisible = false, lyricLines = emptyList(),
+            subtitleOptions = emptyList(), subtitleText = "", gestureHint = null)
+    }
+
+    /** Release the global mpv context before an editor Activity claims it. */
+    fun suspendOutput() {
+        _outputSuspended.value = true
+        host?.let(::detach)
+    }
+
+    fun resumeOutput() {
+        if (!_outputSuspended.value) return
+        _outputGeneration.value++
+        _outputSuspended.value = false
+    }
+
+    private fun configureQueue(playlist: List<PlayerTrack>, startIndex: Int, initialMode: PlayerPlayMode?) {
         val selectedPath = playlist.getOrNull(startIndex)?.path
         val tracks = playlist.filter { it.file.isFile }.distinctBy { it.path }
         val index = if (tracks.isEmpty()) -1 else tracks.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
@@ -442,7 +537,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         PlayerLibraryWriter.submit {
             libraryRepository.recordPlaybackProgress(track.path, progress.playbackId,
                 progress.durationMs, progress.positionMs, playedAt)
-            if (newPlayback) libraryRepository.indexTrack(track.path, progress.durationMs)
+            if (newPlayback) libraryRepository.indexTrack(track.path, progress.durationMs, forceFileRevision = false)
         }
     }
 

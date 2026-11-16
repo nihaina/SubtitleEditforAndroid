@@ -66,6 +66,8 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.systemBarsIgnoringVisibility
+import androidx.compose.foundation.layout.union
 import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.FileOperation
 import com.subtitleedit.DirectoryScrollPosition
@@ -141,7 +143,7 @@ internal enum class MainCreateItemKind { FOLDER, FILE }
 internal enum class MainCreateItemField { NAME, EXTENSION }
 internal data class MainCreateItemError(val field: MainCreateItemField, val message: String)
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 internal fun MainActivityScreen(
     state: MainActivityScreenState,
@@ -200,7 +202,8 @@ internal fun MainActivityScreen(
     onDeleteConfirm: () -> Unit,
     onCacheItemSelected: (com.subtitleedit.ui.settings.SettingsCacheItem) -> Unit,
     onCacheClearConfirm: (com.subtitleedit.ui.settings.SettingsCacheItem) -> Unit,
-    onProcessMediaSelection: () -> Unit = {}
+    onProcessMediaSelection: () -> Unit = {},
+    miniPlayerSlot: @Composable () -> Unit = {}
 ) {
     val directoryListState = rememberLazyListState()
     val directoryGridState = rememberLazyGridState()
@@ -250,7 +253,7 @@ internal fun MainActivityScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.systemBarsIgnoringVisibility))
             .background(MaterialTheme.colorScheme.background)
     ) {
         MainTopLevelPageTransition(
@@ -498,6 +501,7 @@ internal fun MainActivityScreen(
             }
         }
 
+        miniPlayerSlot()
         val showBottomNavigation = state.selectedPaths.isEmpty() && state.pendingOperation == null
         androidx.compose.animation.AnimatedContent(
             targetState = showBottomNavigation,

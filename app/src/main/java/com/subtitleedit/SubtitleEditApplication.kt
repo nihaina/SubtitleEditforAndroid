@@ -12,6 +12,7 @@ class SubtitleEditApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.subtitleedit.player.PlayerOutputHandoff.install(this)
         AppThemeMode.apply(this, SettingsManager.getInstance(this).getThemeMode())
         RuntimeLogManager.install(this)
     }

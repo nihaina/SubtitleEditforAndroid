@@ -55,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.zIndex
@@ -63,6 +64,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -77,6 +79,7 @@ import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.res.painterResource
@@ -93,7 +96,10 @@ import kotlin.math.roundToInt
 internal fun PlayerScreen(
     viewModel: PlayerViewModel,
     onEditTags: () -> Unit = {},
-    onPickSubtitle: () -> Unit = {}
+    onPickSubtitle: () -> Unit = {},
+    embedded: Boolean = false,
+    interactionsEnabled: Boolean = true,
+    onCollapse: (() -> Unit)? = null
 ) {
     val state by viewModel.state.collectAsState()
     val pageGradient = PlayerColors.pageGradient
@@ -116,6 +122,7 @@ internal fun PlayerScreen(
     val currentTopOverlay by rememberUpdatedState(topOverlayBounds)
     val currentBottomOverlay by rememberUpdatedState(bottomOverlayBounds)
     val currentGestureOrigin by rememberUpdatedState(gestureOrigin)
+    val collapseGestureHeightPx = with(density) { if (embedded) 112.dp.toPx() else 0f }
     var videoLockActivity by remember(state.currentTrack?.path) { mutableStateOf(0L) }
     var audioRestoreActivity by remember(state.currentTrack?.path) { mutableStateOf(0L) }
     LaunchedEffect(state.controlsVisible) {
@@ -129,11 +136,15 @@ internal fun PlayerScreen(
     } ?: if (landscape) 132.dp else 204.dp
     val audioContentTopPadding = if (state.controlsVisible) audioButtonTopPadding else 0.dp
     val audioContentBottomPadding = if (state.controlsVisible) audioButtonBottomPadding else 0.dp
-    BackHandler(enabled = state.lyricsVisible && !state.isVideo && state.panel == PlayerPanel.NONE &&
+    BackHandler(enabled = embedded && interactionsEnabled && onCollapse != null && !state.controlsLocked &&
+        state.panel == PlayerPanel.NONE && !state.showTrackInfoDialog && !state.showPlaylistPickerDialog) {
+        onCollapse?.invoke()
+    }
+    BackHandler(enabled = !embedded && interactionsEnabled && state.lyricsVisible && !state.isVideo && state.panel == PlayerPanel.NONE &&
         !state.showTrackInfoDialog && !state.showPlaylistPickerDialog) {
         viewModel.setLyricsVisible(false)
     }
-    BackHandler(enabled = state.isVideo && state.controlsLocked) {
+    BackHandler(enabled = interactionsEnabled && state.isVideo && state.controlsLocked) {
         viewModel.setVideoControlsLocked(false)
     }
     MaterialTheme {
@@ -143,8 +154,19 @@ internal fun PlayerScreen(
                 .testTag("player-screen")
                 .semantics { testTagsAsResourceId = true }
                 .onGloballyPositioned { gestureOrigin = it.positionInRoot(); playerHeightPx = it.size.height }
-                .background(pageGradient)
-                .pointerInput(state.currentTrack?.path, state.isVideo, state.durationMs, state.controlsLocked) {
+                .then(if (embedded) Modifier else Modifier.background(pageGradient))
+                .then(if (interactionsEnabled) Modifier else Modifier
+                    .clearAndSetSemantics {}
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                            }
+                        }
+                    })
+                .pointerInput(state.currentTrack?.path, state.isVideo, state.durationMs, state.controlsLocked,
+                    interactionsEnabled, collapseGestureHeightPx) {
+                    if (!interactionsEnabled) return@pointerInput
                     var axis: Int? = null
                     var dragVolume = 0f
                     var appliedVolume = 0
@@ -167,10 +189,11 @@ internal fun PlayerScreen(
                                 lastVolumeHapticAt = 0L
                                 // Only the initial press is excluded by the controls; an accepted
                                 // video drag keeps ownership as it crosses into either overlay.
-                                canSeek = current.isVideo && !current.controlsLocked && current.ready && current.panel == PlayerPanel.NONE &&
+                                val outsideCollapseHandle = down.position.y >= collapseGestureHeightPx
+                                canSeek = outsideCollapseHandle && current.isVideo && !current.controlsLocked && current.ready && current.panel == PlayerPanel.NONE &&
                                     outsideOverlays(down.position)
                                 // Vertical swipes in the audio lyric list belong to the list.
-                                canAdjustVolume = !current.controlsLocked && current.panel == PlayerPanel.NONE &&
+                                canAdjustVolume = outsideCollapseHandle && !current.controlsLocked && current.panel == PlayerPanel.NONE &&
                                     (current.isVideo || !current.lyricsVisible)
                             },
                             onDragEnd = {
@@ -225,7 +248,8 @@ internal fun PlayerScreen(
                         viewModel.endVolumeGesture()
                     }
                 }
-                .pointerInput(state.currentTrack?.path) {
+                .pointerInput(state.currentTrack?.path, interactionsEnabled) {
+                    if (!interactionsEnabled) return@pointerInput
                     detectTapGestures(
                         onTap = {
                             val current = viewModel.state.value
@@ -243,13 +267,17 @@ internal fun PlayerScreen(
                     )
                 }
         ) {
-            AndroidView(
-                factory = { context -> PlayerMpvView(context).also { viewModel.attach(it) } },
-                modifier = Modifier.fillMaxSize(),
-                onRelease = { viewModel.detach(it) }
-            )
+            if (!embedded) {
+                AndroidView(
+                    factory = { context -> PlayerMpvView(context).also { viewModel.attach(it) } },
+                    modifier = Modifier.fillMaxSize(),
+                    onRelease = { viewModel.detach(it) }
+                )
+            }
             if (!state.isVideo) {
-                Box(Modifier.fillMaxSize().background(pageGradient), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize().then(
+                    if (!embedded || state.lyricsVisible) Modifier.background(pageGradient) else Modifier
+                ), contentAlignment = Alignment.Center) {
                     key(state.currentTrack?.path) {
                         if (state.lyricsVisible) {
                             key(state.selectedSubtitleId) {
@@ -272,10 +300,21 @@ internal fun PlayerScreen(
                                 )
                             }
                         } else {
-                            PlayerAudioVisual(state.playing, state.loudness, state.loudnessSampleId, state.showLoudnessWaveform,
-                                Modifier.padding(bottom = if (landscape) 24.dp else 120.dp),
-                                trackPath = state.currentTrack?.path,
-                                onArtworkClick = viewModel::toggleLyrics)
+                            if (embedded) {
+                                val artworkHitSize = if (landscape)
+                                    (configuration.screenHeightDp.dp * 0.42f).coerceIn(96.dp, 180.dp) else 300.dp
+                                Box(Modifier.padding(bottom = if (landscape) 24.dp else 120.dp)) {
+                                    Box(Modifier.size(artworkHitSize)
+                                        .clickable(enabled = interactionsEnabled,
+                                            onClickLabel = stringResource(R.string.player_lyrics_show),
+                                            role = Role.Button, onClick = viewModel::toggleLyrics))
+                                }
+                            } else {
+                                PlayerAudioVisual(state.playing, state.loudness, state.loudnessSampleId, state.showLoudnessWaveform,
+                                    Modifier.padding(bottom = if (landscape) 24.dp else 120.dp),
+                                    trackPath = state.currentTrack?.path,
+                                    onArtworkClick = viewModel::toggleLyrics)
+                            }
                         }
                     }
                 }
@@ -340,7 +379,7 @@ internal fun PlayerScreen(
                     topOverlayBounds = it
                     if (it != null && !state.isVideo) expandedAudioTopInset = it.bottom - gestureOrigin.y
                 }) {
-                    PlayerTopBar(state, viewModel, landscape)
+                    PlayerTopBar(state, viewModel, landscape, onCollapse)
                 }
             }
 
@@ -358,20 +397,22 @@ internal fun PlayerScreen(
                 }
             }
 
-            PlayerPanelSheet(state, viewModel, onPickSubtitle = onPickSubtitle)
+            if (interactionsEnabled) {
+                PlayerPanelSheet(state, viewModel, onPickSubtitle = onPickSubtitle)
 
-            PlayerTrackInfoDialog(
-                state = state,
-                onDismiss = viewModel::closeTrackInfoDialog,
-                onEditTags = onEditTags
-            )
+                PlayerTrackInfoDialog(
+                    state = state,
+                    onDismiss = viewModel::closeTrackInfoDialog,
+                    onEditTags = onEditTags
+                )
 
-            PlayerPlaylistPickerDialog(
-                state = state,
-                onDismiss = viewModel::closePlaylistPickerDialog,
-                onCreatePlaylist = viewModel::createUserPlaylist,
-                onConfirmAdd = viewModel::addCurrentTrackToPlaylists
-            )
+                PlayerPlaylistPickerDialog(
+                    state = state,
+                    onDismiss = viewModel::closePlaylistPickerDialog,
+                    onCreatePlaylist = viewModel::createUserPlaylist,
+                    onConfirmAdd = viewModel::addCurrentTrackToPlaylists
+                )
+            }
 
             if (state.isVideo && state.controlsLocked) {
                 // Shield exiting controls too; only the edge unlock button remains interactive.
@@ -461,7 +502,12 @@ private const val AXIS_SEEK = 0
 private const val AXIS_VOLUME = 1
 
 @Composable
-private fun PlayerTopBar(state: PlayerUiState, viewModel: PlayerViewModel, landscape: Boolean) {
+private fun PlayerTopBar(
+    state: PlayerUiState,
+    viewModel: PlayerViewModel,
+    landscape: Boolean,
+    onCollapse: (() -> Unit)? = null
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -471,10 +517,12 @@ private fun PlayerTopBar(state: PlayerUiState, viewModel: PlayerViewModel, lands
             .padding(horizontal = 8.dp, vertical = if (landscape) 2.dp else 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(onClick = { viewModel.requestFinish() }, modifier = Modifier.size(if (landscape) 42.dp else 48.dp).testTag("player-back")) {
+        IconButton(onClick = onCollapse ?: viewModel::requestFinish,
+            modifier = Modifier.size(if (landscape) 42.dp else 48.dp).testTag("player-back")) {
             Icon(
-                painterResource(R.drawable.ic_back),
-                contentDescription = stringResource(R.string.tools_navigate_back),
+                painterResource(if (onCollapse == null) R.drawable.ic_back else R.drawable.ic_arrow_right),
+                contentDescription = stringResource(if (onCollapse == null) R.string.tools_navigate_back else R.string.player_collapse),
+                modifier = if (onCollapse == null) Modifier else Modifier.rotate(90f),
                 tint = PlayerControlColors.Foreground
             )
         }

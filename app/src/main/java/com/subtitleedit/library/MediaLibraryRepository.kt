@@ -608,8 +608,8 @@ private constructor(
         }
     }
 
-    fun indexTrack(path: String, durationMs: Long = 0L) {
-        val file = SharedFileCache.attributes.refresh(File(path), forceRevision = true) ?: return
+    fun indexTrack(path: String, durationMs: Long = 0L, forceFileRevision: Boolean = true) {
+        val file = SharedFileCache.attributes.refresh(File(path), forceRevision = forceFileRevision) ?: return
         if (!isMediaFile(file)) return
         val indexed = indexedTrack(file, durationMs)
         write {

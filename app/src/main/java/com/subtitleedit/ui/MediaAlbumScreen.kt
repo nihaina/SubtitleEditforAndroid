@@ -20,6 +20,7 @@ import com.subtitleedit.R
 import com.subtitleedit.library.*
 import com.subtitleedit.player.PlayerActivity
 import com.subtitleedit.player.PlayerPlayMode
+import com.subtitleedit.player.LocalPlayerLauncher
 import com.subtitleedit.ui.settings.settingsPageBackground
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +51,7 @@ internal fun MediaAlbumScreen(
     catalogLoader: MediaAlbumCatalogLoader? = null
 ) {
     val context = LocalContext.current
+    val playerLauncher = LocalPlayerLauncher.current
     val repository = remember(context) { MediaLibraryRepository.getInstance(context) }
     val revision by repository.revision.collectAsState()
     val catalogRevision by repository.catalogRevision.collectAsState()
@@ -167,12 +169,17 @@ internal fun MediaAlbumScreen(
                 if (selection == null) {
                     Toast.makeText(context, R.string.media_lib_file_missing, Toast.LENGTH_SHORT).show()
                 } else {
-                    context.startActivity(Intent(context, PlayerActivity::class.java).apply {
-                        putStringArrayListExtra(PlayerActivity.EXTRA_PLAYLIST, ArrayList(selection.paths))
-                        putExtra(PlayerActivity.EXTRA_START_INDEX,
-                            if (shuffle) selection.paths.indices.random() else selection.startIndex)
-                        if (shuffle) putExtra(PlayerActivity.EXTRA_PLAY_MODE, PlayerPlayMode.SHUFFLE.name)
-                    })
+                    val startIndex = if (shuffle) selection.paths.indices.random() else selection.startIndex
+                    val initialMode = if (shuffle) PlayerPlayMode.SHUFFLE else null
+                    if (playerLauncher != null) {
+                        playerLauncher(selection.paths, startIndex, initialMode)
+                    } else {
+                        context.startActivity(Intent(context, PlayerActivity::class.java).apply {
+                            putStringArrayListExtra(PlayerActivity.EXTRA_PLAYLIST, ArrayList(selection.paths))
+                            putExtra(PlayerActivity.EXTRA_START_INDEX, startIndex)
+                            initialMode?.let { putExtra(PlayerActivity.EXTRA_PLAY_MODE, it.name) }
+                        })
+                    }
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled

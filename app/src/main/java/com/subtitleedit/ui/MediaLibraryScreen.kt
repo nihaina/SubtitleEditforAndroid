@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -71,6 +72,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -89,6 +92,7 @@ import com.subtitleedit.library.PlayerTrackDetails
 import com.subtitleedit.library.PlayerTrackMetadataReader
 import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.player.PlayerActivity
+import com.subtitleedit.player.LocalPlayerLauncher
 import com.subtitleedit.player.formatPlaybackTime
 import com.subtitleedit.ui.components.AppAlertDialog
 import com.subtitleedit.ui.components.AppDialog
@@ -142,6 +146,7 @@ internal fun MediaLibraryScreen(
     scanPickerPending: Boolean = false
 ) {
     val context = LocalContext.current
+    val playerLauncher = LocalPlayerLauncher.current
     val repository = remember(context) { MediaLibraryRepository.getInstance(context) }
     val revision by repository.revision.collectAsState()
     val scope = rememberCoroutineScope()
@@ -293,6 +298,8 @@ internal fun MediaLibraryScreen(
                 }
                 if (selection == null) {
                     Toast.makeText(context, context.getString(R.string.media_lib_file_missing), Toast.LENGTH_SHORT).show()
+                } else if (playerLauncher != null) {
+                    playerLauncher(selection.paths, selection.startIndex, null)
                 } else {
                     context.startActivity(Intent(context, PlayerActivity::class.java).apply {
                         putStringArrayListExtra(PlayerActivity.EXTRA_PLAYLIST, ArrayList(selection.paths))
@@ -319,7 +326,20 @@ internal fun MediaLibraryScreen(
                     onPlay = { idx -> playTracks(favorites, idx) },
                     onPlayAll = { playTracks(favorites, 0, playAll = true) },
                     onToggleFavorite = { track -> mutate({ repository.removeFavorite(track.path) }) },
-                    onAddToPlaylist = { pickingPlaylistForTracks = listOf(it) }
+                    onAddToPlaylist = { pickingPlaylistForTracks = listOf(it) },
+                    onRemoveFavorites = { tracks ->
+                        mutate({ tracks.forEach { repository.removeFavorite(it.path) } })
+                    },
+                    onAddSelectionToPlaylist = { pickingPlaylistForTracks = it },
+                    onShowSelectionInfo = { tracks ->
+                        val track = tracks.singleOrNull()
+                        if (track == null) {
+                            Toast.makeText(context, context.getString(R.string.media_lib_files_info_single), Toast.LENGTH_SHORT).show()
+                        } else {
+                            infoFilePath = track.path
+                        }
+                    },
+                    isActive = isActive
                 )
             } else {
                 PlaylistDetailContent(
@@ -386,7 +406,7 @@ internal fun MediaLibraryScreen(
 
                     MediaLibraryTab.FILES -> FilesTabContent(
                         roots = favoriteDirectories,
-                        metadataRefreshKey = refreshVersion to revision,
+                        metadataRefreshKey = refreshVersion,
                         rootPath = browseRootPath,
                         currentPath = browsePath,
                         entries = folderEntries,
@@ -396,7 +416,9 @@ internal fun MediaLibraryScreen(
                         onOpenRoot = ::openRootFolder,
                         onOpenFolder = ::openChildFolder,
                         onPlayFile = { entry ->
-                            playTracks(listOf(MediaLibraryTrack(entry.path, entry.name)), 0)
+                            val queue = mediaFolderPlaybackQueue(folderEntries)
+                            val index = queue.indexOfFirst { it.path == entry.path }
+                            if (index >= 0) playTracks(queue, index)
                         },
                         onLongPressFolder = { pendingFolderRemoval = it },
                         onLongPressFile = { selectedFilePaths = selectedFilePaths + it },
@@ -644,58 +666,6 @@ internal fun MediaLibraryScreen(
 
     infoFilePath?.let { path ->
         MediaFileInfoDialog(path = path, onDismiss = { infoFilePath = null })
-    }
-}
-
-@Composable
-private fun FavoritesTabContent(
-    tracks: List<MediaLibraryTrack>,
-    onPlay: (Int) -> Unit,
-    onPlayAll: () -> Unit,
-    onToggleFavorite: (MediaLibraryTrack) -> Unit,
-    onAddToPlaylist: (MediaLibraryTrack) -> Unit
-) {
-    if (tracks.isEmpty()) {
-        LibraryEmptyState(
-            iconRes = R.drawable.ic_favorite_border,
-            title = stringResource(R.string.media_lib_empty_favorites),
-            subtitle = stringResource(R.string.media_lib_empty_favorites_hint)
-        )
-        return
-    }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        item {
-            PlayAllHeaderRow(count = tracks.size, onPlayAll = onPlayAll)
-        }
-        itemsIndexed(tracks, key = { _, item -> item.path }) { index, track ->
-            MediaTrackCard(
-                track = track,
-                subtitle = track.artist.ifBlank { track.album.ifBlank { track.file.parentFile?.name.orEmpty() } },
-                onClick = { onPlay(index) },
-                trailingContent = {
-                    IconButton(onClick = { onAddToPlaylist(track) }, modifier = Modifier.size(36.dp)) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_playlist_add),
-                            contentDescription = stringResource(R.string.player_action_add_to_playlist),
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(onClick = { onToggleFavorite(track) }, modifier = Modifier.size(36.dp)) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_favorite),
-                            contentDescription = stringResource(R.string.player_action_unfavorite),
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-            )
-        }
     }
 }
 
@@ -1259,7 +1229,7 @@ private fun FileInfoField(label: String, value: String) {
 }
 
 @Composable
-private fun PlayAllHeaderRow(count: Int, onPlayAll: () -> Unit) {
+internal fun PlayAllHeaderRow(count: Int, onPlayAll: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1378,24 +1348,31 @@ private fun PlaylistCardRow(
 }
 
 @Composable
-private fun MediaTrackCard(
+internal fun MediaTrackCard(
     track: MediaLibraryTrack,
     subtitle: String,
     highlighted: Boolean = false,
     onClick: () -> Unit,
-    trailingContent: @Composable () -> Unit = {}
+    trailingContent: @Composable () -> Unit = {},
+    onLongClick: (() -> Unit)? = null,
+    isSelected: Boolean = false,
+    isSelectionMode: Boolean = false,
+    modifier: Modifier = Modifier
 ) {
     val cover by produceState<Bitmap?>(initialValue = null, key1 = track.path) {
         value = withContext(Dispatchers.IO) { SharedFileCache.attributes.get(File(track.path))?.let { metadata -> SharedMediaCache.artwork(metadata, 128) } }
     }
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick),
+            .then(if (onLongClick == null) Modifier.clickable(onClick = onClick)
+                else Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick))
+            .semantics { if (isSelectionMode) selected = isSelected },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (highlighted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+            containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer
+            else if (highlighted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
             else MaterialTheme.colorScheme.cardContainer
         )
     ) {
@@ -1460,6 +1437,7 @@ private fun MediaTrackCard(
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (isSelectionMode) Checkbox(checked = isSelected, onCheckedChange = null)
                 trailingContent()
             }
         }
@@ -1467,7 +1445,7 @@ private fun MediaTrackCard(
 }
 
 @Composable
-private fun LibraryEmptyState(
+internal fun LibraryEmptyState(
     iconRes: Int,
     title: String,
     subtitle: String,

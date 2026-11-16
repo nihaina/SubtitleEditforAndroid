@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_expand">展开播放器</string>
+    <string name="player_collapse">收起播放器</string>
+</resources>
