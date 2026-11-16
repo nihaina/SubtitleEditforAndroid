@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.viewinterop.AndroidView
 
 /**
@@ -20,7 +21,8 @@ internal fun PlayerMediaStage(
     viewModel: PlayerViewModel,
     modifier: Modifier = Modifier,
     videoModifier: Modifier = Modifier,
-    audioArtworkModifier: Modifier = Modifier
+    audioArtworkModifier: Modifier = Modifier,
+    onArtworkBoundsChanged: ((Rect?) -> Unit)? = null
 ) {
     val state by viewModel.state.collectAsState()
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -38,7 +40,8 @@ internal fun PlayerMediaStage(
                     loudnessSampleId = state.loudnessSampleId,
                     showLoudnessWaveform = state.showLoudnessWaveform,
                     modifier = audioArtworkModifier,
-                    trackPath = state.currentTrack?.path
+                    trackPath = state.currentTrack?.path,
+                    onArtworkBoundsChanged = onArtworkBoundsChanged
                 )
             }
         }

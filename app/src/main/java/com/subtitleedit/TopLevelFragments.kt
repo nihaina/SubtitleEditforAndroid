@@ -49,11 +49,16 @@ import com.subtitleedit.util.SettingsBackupManager
 import com.subtitleedit.util.ModelDirectoryManager
 import com.subtitleedit.util.ModelDirectoryMigration
 import com.subtitleedit.util.SubtitleFontManager
+import com.subtitleedit.util.SettingsCacheSizes
+import com.subtitleedit.util.readSettingsCacheSizes
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** State retained by the main Compose navigation while a top-level page is hidden. */
 internal class MainTopLevelPagesState {
@@ -65,6 +70,7 @@ internal class MainTopLevelPagesState {
     var draftDialog by mutableStateOf<DraftsDialogState?>(null)
     var draftToExport by mutableStateOf<DraftsActivity.DraftItem?>(null)
     var settingsPage by mutableStateOf(SettingsPageState())
+    var settingsCacheRefreshVersion by mutableIntStateOf(0)
     val listeningStatsPage = ListeningStatsPageState()
     val mediaAlbumPage = MediaAlbumPageState()
     val mediaLibraryPage = MediaLibraryPageState()
@@ -99,6 +105,18 @@ internal fun MainTopLevelPages(
         ?: candidateStateHolder.also { state.retainedSaveableStateHolder = it }
 
     fun loadFavoriteDirectories() = refreshFavoriteDirectoryState(directoryStore, state)
+
+    fun refreshSettingsPage() {
+        state.settingsPage = loadSettingsPage(context, settings, state.settingsPage.cacheItems)
+    }
+
+    fun clearCache(item: SettingsCacheItem) {
+        settingsScope.launch {
+            val message = withContext(Dispatchers.IO) { clearSettingsCache(context, item, false) }
+            showTopLevelToast(context, message)
+            state.settingsCacheRefreshVersion++
+        }
+    }
 
     fun removeFavoriteDirectory(directory: File) {
         directoryStore.remove(directory)
@@ -137,7 +155,8 @@ internal fun MainTopLevelPages(
                     Toast.LENGTH_LONG
                 ).show()
             }
-            state.settingsPage = loadSettingsPage(context, settings)
+            refreshSettingsPage()
+            state.settingsCacheRefreshVersion++
         }
     }
 
@@ -212,7 +231,8 @@ internal fun MainTopLevelPages(
                 } ?: error("无法读取备份文件")
                 SettingsBackupManager.restore(context, json)
             }.onSuccess { result ->
-                state.settingsPage = loadSettingsPage(context, settings)
+                refreshSettingsPage()
+                state.settingsCacheRefreshVersion++
                 loadFavoriteDirectories()
                 AppThemeMode.apply(context, settings.getThemeMode())
                 showTopLevelToast(
@@ -291,7 +311,7 @@ internal fun MainTopLevelPages(
             }
             R.id.nav_settings -> {
                 val pending = state.settingsPage
-                val loaded = loadSettingsPage(context, settings)
+                val loaded = loadSettingsPage(context, settings, pending.cacheItems)
                 // MainActivity refreshes top-level pages when the folder picker
                 // returns. Keep a directory choice that is waiting for the
                 // migration confirmation across that reload.
@@ -304,6 +324,20 @@ internal fun MainTopLevelPages(
                 )
             }
         }
+    }
+
+    LaunchedEffect(selectedPage, activePage, refreshVersion, resources, state.settingsCacheRefreshVersion) {
+        if (!isActive || selectedPage != R.id.nav_settings) return@LaunchedEffect
+        val cacheItems = withContext(Dispatchers.IO) {
+            val job = currentCoroutineContext()
+            settingsCacheItems(context, readSettingsCacheSizes(context.cacheDir) { job.ensureActive() })
+        }
+        // Only cache fields come from the worker; settings changed during the scan stay current.
+        state.settingsPage = state.settingsPage.copy(
+            cacheItems = cacheItems,
+            cacheSize = cacheItems.sumOf(SettingsCacheItem::sizeBytes).takeIf { it > 0L }
+                ?.let(::formatTopLevelSize).orEmpty()
+        )
     }
 
     BackHandler(
@@ -444,12 +478,12 @@ internal fun MainTopLevelPages(
             onEncodingSelected = { encoding ->
                 if (encoding.isAuto) settings.setDefaultEncodingAutomatic()
                 else settings.setDefaultEncoding(encoding.charset)
-                state.settingsPage = loadSettingsPage(context, settings)
+                refreshSettingsPage()
             },
             onThemeSelected = { mode ->
                 settings.setThemeMode(mode)
                 AppThemeMode.apply(context, mode)
-                state.settingsPage = loadSettingsPage(context, settings)
+                refreshSettingsPage()
             },
             onCheckUpdatesChanged = { enabled ->
                 state.settingsPage = state.settingsPage.copy(checkUpdatesOnStartup = enabled)
@@ -492,8 +526,8 @@ internal fun MainTopLevelPages(
             },
             // SettingsFragment's legacy cache dialog deleted the selected group
             // immediately and always used the generic result message.
-            onCacheClear = { item -> clearSettingsCache(context, settings, state, item, false) },
-            onEmptyCacheClear = { item -> clearSettingsCache(context, settings, state, item, false) },
+            onCacheClear = ::clearCache,
+            onEmptyCacheClear = ::clearCache,
             onBackup = { backupExporter.launch(context.getString(R.string.app_name) + ".json") },
             onRestore = { backupImporter.launch(arrayOf("application/json", "text/plain", "*/*")) }
         )
@@ -576,7 +610,11 @@ private fun Context.openActivity(activity: Class<*>) {
     startActivity(intent)
 }
 
-private fun loadSettingsPage(context: Context, settings: SettingsManager): SettingsPageState {
+private fun loadSettingsPage(
+    context: Context,
+    settings: SettingsManager,
+    cacheItems: List<SettingsCacheItem>
+): SettingsPageState {
     val encodings = FileUtils.SUPPORTED_ENCODINGS
     val encoding = if (settings.isDefaultEncodingAutomatic()) {
         SettingsManager.AUTO_ENCODING
@@ -586,7 +624,6 @@ private fun loadSettingsPage(context: Context, settings: SettingsManager): Setti
             ?.id ?: currentEncoding.name()
     }
     val themeMode = settings.getThemeMode()
-    val cacheItems = settingsCacheItems(context)
     val cacheSize = cacheItems.sumOf(SettingsCacheItem::sizeBytes)
     return SettingsPageState(
         encoding = encoding,
@@ -606,43 +643,36 @@ private fun loadSettingsPage(context: Context, settings: SettingsManager): Setti
     )
 }
 
-private fun settingsCacheItems(context: Context): List<SettingsCacheItem> {
-    val waveform = cacheFilesInWaveformDirectory(context) { it.extension == "wave" }
-    val spectrogram = cacheFilesInWaveformDirectory(context) {
-        it.extension == "png" && it.name.contains(".spec_")
-    }
-    val audio = context.cacheDir.walkTopDown().filter {
-        it.isFile && it.name.startsWith("quick_transcribe_") && it.name.endsWith("_16k.wav")
-    }.toList()
+private fun settingsCacheItems(context: Context, sizes: SettingsCacheSizes): List<SettingsCacheItem> {
     return listOf(
         SettingsCacheItem(
             "waveform",
             context.getString(R.string.settings_cache_waveform_label),
-            waveform.sumOf(File::length),
+            sizes.waveform,
             context.getString(R.string.settings_cache_waveform_empty),
             context.getString(
                 R.string.settings_cache_waveform_confirm,
-                formatTopLevelSize(waveform.sumOf(File::length))
+                formatTopLevelSize(sizes.waveform)
             )
         ),
         SettingsCacheItem(
             "spectrogram",
             context.getString(R.string.settings_cache_spectrogram_label),
-            spectrogram.sumOf(File::length),
+            sizes.spectrogram,
             context.getString(R.string.settings_cache_spectrogram_empty),
             context.getString(
                 R.string.settings_cache_spectrogram_confirm,
-                formatTopLevelSize(spectrogram.sumOf(File::length))
+                formatTopLevelSize(sizes.spectrogram)
             )
         ),
         SettingsCacheItem(
             "quick_transcribe",
             context.getString(R.string.settings_cache_quick_transcribe_label),
-            audio.sumOf(File::length),
+            sizes.quickTranscribe,
             context.getString(R.string.settings_cache_quick_transcribe_empty),
             context.getString(
                 R.string.settings_cache_quick_transcribe_confirm,
-                formatTopLevelSize(audio.sumOf(File::length))
+                formatTopLevelSize(sizes.quickTranscribe)
             )
         )
     )
@@ -650,18 +680,16 @@ private fun settingsCacheItems(context: Context): List<SettingsCacheItem> {
 
 private fun clearSettingsCache(
     context: Context,
-    settings: SettingsManager,
-    state: MainTopLevelPagesState,
     item: SettingsCacheItem,
     includeCacheLabel: Boolean = true
-) {
+): String {
     val matches: (File) -> Boolean = when (item.key) {
         "waveform" -> { file -> file.extension == "wave" }
         "spectrogram" -> { file -> file.extension == "png" && file.name.contains(".spec_") }
         "quick_transcribe" -> { file ->
             file.name.startsWith("quick_transcribe_") && file.name.endsWith("_16k.wav")
         }
-        else -> return
+        else -> return ""
     }
     val files = if (item.key == "quick_transcribe") {
         context.cacheDir.walkTopDown().filter { it.isFile && matches(it) }.toList()
@@ -669,14 +697,12 @@ private fun clearSettingsCache(
         cacheFilesInWaveformDirectory(context, matches)
     }
     val count = files.count(File::delete)
-    val message = if (includeCacheLabel) {
+    return if (includeCacheLabel) {
         val label = item.label.removeSuffix("缓存")
         context.getString(R.string.settings_cache_cleared, count, label)
     } else {
         context.getString(R.string.settings_cache_cleared_generic, count)
     }
-    showTopLevelToast(context, message)
-    state.settingsPage = loadSettingsPage(context, settings)
 }
 
 private fun cacheFilesInWaveformDirectory(context: Context, matches: (File) -> Boolean): List<File> {

@@ -1,5 +1,14 @@
 package com.subtitleedit.ui
 
+import com.subtitleedit.model.BrowserFileMetadata
+import java.io.File
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -20,6 +29,50 @@ class MediaSelectionControllerTest {
         selection.updateVisiblePaths(listOf(audio, video, subtitle, folder).map { it.path })
         selection.selectVisible(MediaLibrarySelectionAction.SELECT_ALL)
         assertEquals(listOf(audio.path, video.path), selection.selectedPaths)
+    }
+
+    @Test fun directoryScopeUsesThePublishedMetadataInsteadOfCheckingFilesAgain() = runBlocking {
+        val audio = File(temporary.root, "snapshot.wav")
+        val folder = File(temporary.root, "folder.mp3")
+        val subtitle = File(temporary.root, "subtitle.srt")
+        val fallback = temporary.newFile("fallback.mp4")
+        val metadata = listOf(
+            BrowserFileMetadata(audio, isDirectory = false, size = 0L, modifiedTimeMillis = 0L),
+            BrowserFileMetadata(folder, isDirectory = true, size = 0L, modifiedTimeMillis = 0L),
+            BrowserFileMetadata(subtitle, isDirectory = false, size = 0L, modifiedTimeMillis = 0L)
+        ).associateBy { it.path }
+        val selection = MediaSelectionController()
+
+        selection.refreshVisiblePaths(listOf(audio, folder, subtitle, fallback, audio).map { it.path }, metadata)
+        selection.selectVisible(MediaLibrarySelectionAction.SELECT_ALL)
+
+        assertFalse(audio.exists())
+        assertEquals(listOf(audio.path, fallback.path), selection.selectedPaths)
+    }
+
+    @Test fun aPendingPageScopeCannotSelectThePreviousPagesFilesOrOverwriteANewerScope() = runBlocking {
+        val previous = temporary.newFile("previous.wav").path
+        val pending = temporary.newFile("pending.wav").path
+        val latest = temporary.newFile("latest.wav").path
+        val executor = Executors.newSingleThreadExecutor()
+        executor.asCoroutineDispatcher().use { worker ->
+            val blocked = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            executor.submit { blocked.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+            assertTrue(blocked.await(5, TimeUnit.SECONDS))
+            val selection = MediaSelectionController(worker)
+            selection.updateVisiblePaths(listOf(previous))
+            selection.select(previous)
+            val refresh = launch(start = CoroutineStart.UNDISPATCHED) { selection.refreshVisiblePaths(listOf(pending)) }
+            try {
+                selection.selectVisible(MediaLibrarySelectionAction.INVERT)
+                assertEquals("The previous page is no longer a visible selection scope", listOf(previous), selection.selectedPaths)
+                selection.updateVisiblePaths(listOf(latest))
+            } finally { release.countDown() }
+            refresh.join()
+            selection.selectVisible(MediaLibrarySelectionAction.SELECT_ALL)
+            assertEquals(listOf(previous, latest), selection.selectedPaths)
+        }
     }
 
     @Test fun changingPagesAndInvertingVisibleFilesRetainsSelectionsElsewhere() {

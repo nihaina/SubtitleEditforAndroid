@@ -107,6 +107,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -132,6 +134,21 @@ internal data class MediaLibraryContent(
 /** Keeps the last prepared library snapshot while its top-level page is off screen. */
 internal class MediaLibraryPageState {
     var content by mutableStateOf(MediaLibraryContent())
+    internal var loadedQuery: MediaLibraryQueryKey? = null
+    internal var browseIndex by mutableStateOf<PreparedMediaLibraryIndex?>(null)
+    internal var folderSnapshot by mutableStateOf<PreparedMediaLibraryFolder?>(null)
+}
+
+internal data class MediaLibraryQueryKey(
+    val repository: MediaLibraryRepository,
+    val revision: Long,
+    val refreshVersion: Int,
+    val playlistId: Long?
+)
+
+private class MediaLibraryTracksKey(private val tracks: List<MediaLibraryTrack>) {
+    override fun equals(other: Any?): Boolean = other is MediaLibraryTracksKey && tracks === other.tracks
+    override fun hashCode(): Int = System.identityHashCode(tracks)
 }
 
 internal data class MediaFolderEntry(
@@ -230,15 +247,39 @@ internal fun MediaLibraryScreen(
         selectedFilePaths = emptySet()
     }
 
-    val browseDirectory = browsePath?.let(::File)
-    val folderEntries = remember(content.allTracks, browsePath) {
-        browseDirectory?.let { buildMediaFolderEntries(it, content.allTracks) }.orEmpty()
+    val rootPaths = remember(favoriteDirectories) { favoriteDirectories.map { it.absolutePath } }
+    val tracksKey = MediaLibraryTracksKey(content.allTracks)
+    val browseIndex = pageState.browseIndex?.takeIf {
+        it.tracks === content.allTracks && it.rootPaths == rootPaths
     }
-    val rootMediaCounts = remember(content.allTracks, favoriteDirectories) {
-        favoriteDirectories.associate { it.absolutePath to countMediaUnder(it, content.allTracks) }
+    val folderEntries = pageState.folderSnapshot?.takeIf {
+        it.tracks === content.allTracks && it.directoryPath == browsePath
+    }?.entries.orEmpty()
+    val rootMediaCounts = browseIndex?.rootMediaCounts.orEmpty()
+    val selectedDurationMs = remember(selectedFilePaths, browseIndex) {
+        selectedFilePaths.sumOf { browseIndex?.durationByPath?.get(it) ?: 0L }
     }
-    val selectedDurationMs = remember(selectedFilePaths, content.allTracks) {
-        content.allTracks.filter { it.path in selectedFilePaths }.sumOf { it.durationMs }
+
+    LaunchedEffect(isActive, tracksKey, rootPaths) {
+        if (!isActive || browseIndex != null) return@LaunchedEffect
+        val tracks = content.allTracks
+        val index = withContext(Dispatchers.Default) {
+            val job = currentCoroutineContext()
+            prepareMediaLibraryIndex(tracks, rootPaths) { job.ensureActive() }
+        }
+        pageState.browseIndex = index
+    }
+    LaunchedEffect(isActive, tracksKey, browsePath) {
+        val directory = browsePath ?: return@LaunchedEffect
+        if (!isActive || pageState.folderSnapshot?.let {
+                it.tracks === content.allTracks && it.directoryPath == directory
+            } == true) return@LaunchedEffect
+        val tracks = content.allTracks
+        val prepared = withContext(Dispatchers.Default) {
+            val job = currentCoroutineContext()
+            prepareMediaLibraryFolder(tracks, directory) { job.ensureActive() }
+        }
+        pageState.folderSnapshot = prepared
     }
 
     val openedPlaylist = remember(playlists, openedPlaylistId) {
@@ -275,8 +316,12 @@ internal fun MediaLibraryScreen(
         if (selectedFilePaths.isNotEmpty()) selectedFilePaths = emptySet() else leaveFolder()
     }
 
-    LaunchedEffect(revision, refreshVersion, openedPlaylistId) {
+    LaunchedEffect(repository, isActive, revision, refreshVersion, openedPlaylistId) {
+        if (!isActive) return@LaunchedEffect
         val playlistId = openedPlaylistId
+        val query = MediaLibraryQueryKey(repository, revision, refreshVersion, playlistId)
+        if (pageState.loadedQuery == query) return@LaunchedEffect
+        val previousTracks = pageState.content.allTracks
         try {
             val loaded = withContext(Dispatchers.IO) {
                 MediaLibraryContent(
@@ -284,12 +329,17 @@ internal fun MediaLibraryScreen(
                     currentQueue = com.subtitleedit.player.PlayerLibraryWriter.execute { repository.getCurrentQueue() },
                     playlists = repository.getPlaylists(),
                     history = repository.getPlaybackHistory(),
-                    allTracks = repository.searchLibrary(""),
+                    // Queue/history changes also bump the repository revision. Keep the
+                    // unchanged track source so its prepared folder/index remains usable.
+                    allTracks = repository.searchLibrary("").let { tracks ->
+                        if (tracks == previousTracks) previousTracks else tracks
+                    },
                     playlistId = playlistId,
                     playlistTracks = playlistId?.let(repository::getPlaylistTracks).orEmpty()
                 )
             }
             pageState.content = loaded
+            pageState.loadedQuery = query
             if (playlistId != null && loaded.playlists.none { it.id == playlistId }) openedPlaylistId = null
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -728,7 +778,7 @@ private fun PlaylistDetailContent(
     val globalSelection = LocalMediaSelection.current
     val selectionMode = globalSelection?.active == true
     LaunchedEffect(tracks, isActive, globalSelection) {
-        if (isActive) globalSelection?.updateVisiblePaths(tracks.map { it.path })
+        if (isActive) globalSelection?.refreshVisiblePaths(tracks.map { it.path })
     }
     if (tracks.isEmpty()) {
         LibraryEmptyState(
@@ -780,7 +830,7 @@ private fun HistoryTabContent(
     val globalSelection = LocalMediaSelection.current
     val selectionMode = globalSelection?.active == true
     LaunchedEffect(entries, isActive, globalSelection) {
-        if (isActive) globalSelection?.updateVisiblePaths(entries.map { it.path })
+        if (isActive) globalSelection?.refreshVisiblePaths(entries.map { it.path })
     }
     if (entries.isEmpty()) {
         LibraryEmptyState(
@@ -851,51 +901,6 @@ private fun HistoryTabContent(
     }
 }
 
-private fun buildMediaFolderEntries(
-    directory: File,
-    tracks: List<MediaLibraryTrack>
-): List<MediaFolderEntry> {
-    val base = directory.absolutePath.trimEnd(File.separatorChar)
-    val directories = LinkedHashMap<String, MediaFolderEntry>()
-    val files = ArrayList<MediaFolderEntry>()
-    tracks.forEach { track ->
-        val path = track.path
-        val relative = when {
-            path == base -> ""
-            path.startsWith("$base/") -> path.substring(base.length + 1)
-            else -> return@forEach
-        }
-        if (relative.isEmpty()) return@forEach
-        val segments = relative.split('/')
-        if (segments.size == 1) {
-            files += MediaFolderEntry(
-                path = path,
-                name = segments.first(),
-                isDirectory = false,
-                mediaCount = 1,
-                totalDurationMs = track.durationMs
-            )
-        } else {
-            val childPath = "$base/${segments.first()}"
-            val existing = directories[childPath]
-            directories[childPath] = MediaFolderEntry(
-                path = childPath,
-                name = segments.first(),
-                isDirectory = true,
-                mediaCount = (existing?.mediaCount ?: 0) + 1,
-                totalDurationMs = (existing?.totalDurationMs ?: 0L) + track.durationMs
-            )
-        }
-    }
-    return directories.values.sortedBy { it.name.lowercase(Locale.ROOT) } +
-        files.sortedBy { it.name.lowercase(Locale.ROOT) }
-}
-
-private fun countMediaUnder(directory: File, tracks: List<MediaLibraryTrack>): Int {
-    val base = directory.absolutePath.trimEnd(File.separatorChar)
-    return tracks.count { it.path.startsWith("$base/") }
-}
-
 @Composable
 internal fun FilesTabContent(
     roots: List<File>,
@@ -924,7 +929,7 @@ internal fun FilesTabContent(
     val localSelectionMode = globalSelection == null && selectionMode
     val visiblePaths = remember(entries) { entries.filterNot { it.isDirectory }.map { it.path } }
     LaunchedEffect(visiblePaths, isActive, globalSelection) {
-        if (isActive) globalSelection?.updateVisiblePaths(visiblePaths)
+        if (isActive) globalSelection?.refreshVisiblePaths(visiblePaths)
     }
     val density = LocalDensity.current
     var selectionPanelHeight by remember(currentPath) { mutableStateOf(112.dp) }

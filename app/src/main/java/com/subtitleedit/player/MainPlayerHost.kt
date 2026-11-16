@@ -10,10 +10,8 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -55,6 +53,7 @@ internal fun MainPlayerHost(
     var settleVelocity by remember { mutableFloatStateOf(0f) }
     var settleRevision by remember { mutableIntStateOf(0) }
     var miniBounds by remember { mutableStateOf<Rect?>(null) }
+    var audioArtworkBounds by remember { mutableStateOf<Rect?>(null) }
     val hasTrack = enabled && state.currentTrack != null
     BackHandler(enabled = hasTrack && (expanded || dragging || animation.value > 0f)) {
         viewModel.collapse()
@@ -169,9 +168,8 @@ internal fun MainPlayerHost(
                 val artScale = thumbnail.height / discPx + (1f - thumbnail.height / discPx) * progress
                 if (!outputSuspended) key(outputGeneration) { PlayerMediaStage(
                     viewModel = viewModel,
-                    modifier = Modifier.drawWithContent {
-                        clipRect(media.left, media.top, media.right, media.bottom) { this@drawWithContent.drawContent() }
-                    },
+                    modifier = Modifier.playerMediaViewport(media),
+                    onArtworkBoundsChanged = { audioArtworkBounds = it },
                     videoModifier = Modifier.graphicsLayer {
                         alpha = if (state.isVideo) 1f else 0f
                         transformOrigin = TransformOrigin(0f, 0f)
@@ -195,6 +193,7 @@ internal fun MainPlayerHost(
                 }) {
                     PlayerScreen(viewModel, onEditTags = onEditTags, onPickSubtitle = onPickSubtitle,
                         embedded = true, interactionsEnabled = expanded && !dragging && progress >= 0.999f,
+                        embeddedArtworkBounds = audioArtworkBounds,
                         onCollapse = viewModel::collapse, onNavigateToCategory = onNavigateToCategory)
                 }
                 if (progress < 0.34f) PlayerMiniBar(state, viewModel::expand, viewModel::togglePlay,

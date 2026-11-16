@@ -1,6 +1,7 @@
 package com.subtitleedit.ui
 
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -14,8 +15,22 @@ internal class ListeningStatsPageState(currentDate: String = ListeningDay.curren
     var selectedDate by mutableStateOf(currentDate)
     var previousCurrentDate by mutableStateOf(currentDate)
     var content by mutableStateOf<ListeningStatsContent?>(null)
+    internal var loadedQuery: ListeningStatsQuery? = null
+    private val heatmapScrollStates = mutableMapOf<Int, ScrollState>()
     val listState = LazyListState()
+
+    fun heatmapScrollState(year: Int): ScrollState =
+        heatmapScrollStates.getOrPut(year) { ScrollState(Int.MAX_VALUE) }
 }
+
+internal data class ListeningStatsQuery(
+    val revision: Long,
+    val refreshVersion: Int,
+    val currentDate: String,
+    val selectedYear: Int,
+    val granularity: StatsGranularity,
+    val selectedDate: String
+)
 
 internal typealias ListeningStatsLoader = suspend (
     currentDate: String,

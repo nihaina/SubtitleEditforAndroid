@@ -99,7 +99,8 @@ internal fun PlayerScreen(
     embedded: Boolean = false,
     interactionsEnabled: Boolean = true,
     onCollapse: (() -> Unit)? = null,
-    onNavigateToCategory: ((MediaCategoryRevealRequest) -> Unit)? = null
+    onNavigateToCategory: ((MediaCategoryRevealRequest) -> Unit)? = null,
+    embeddedArtworkBounds: Rect? = null
 ) {
     val state by viewModel.state.collectAsState()
     val pageGradient = PlayerColors.pageGradient
@@ -305,14 +306,9 @@ internal fun PlayerScreen(
                             }
                         } else {
                             if (embedded) {
-                                val artworkHitSize = if (landscape)
-                                    (configuration.screenHeightDp.dp * 0.42f).coerceIn(96.dp, 180.dp) else 300.dp
-                                Box(Modifier.padding(bottom = if (landscape) 24.dp else 120.dp)) {
-                                    Box(Modifier.size(artworkHitSize)
-                                        .clickable(enabled = interactionsEnabled,
-                                            onClickLabel = stringResource(R.string.player_lyrics_show),
-                                            role = Role.Button, onClick = viewModel::toggleLyrics))
-                                }
+                                PlayerAudioArtworkHitTarget(embeddedArtworkBounds, gestureOrigin,
+                                    interactionsEnabled, viewModel::toggleLyrics,
+                                    Modifier.align(Alignment.TopStart))
                             } else {
                                 PlayerAudioVisual(state.playing, state.loudness, state.loudnessSampleId, state.showLoudnessWaveform,
                                     Modifier.padding(bottom = if (landscape) 24.dp else 120.dp),

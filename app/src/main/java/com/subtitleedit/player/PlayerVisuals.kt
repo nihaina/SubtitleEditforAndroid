@@ -31,19 +31,25 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -78,7 +84,8 @@ internal fun PlayerAudioVisual(
     showLoudnessWaveform: Boolean,
     modifier: Modifier = Modifier,
     trackPath: String? = null,
-    onArtworkClick: (() -> Unit)? = null
+    onArtworkClick: (() -> Unit)? = null,
+    onArtworkBoundsChanged: ((Rect?) -> Unit)? = null
 ) {
     val configuration = LocalConfiguration.current
     val landscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -97,6 +104,14 @@ internal fun PlayerAudioVisual(
         onDispose { owner?.lifecycle?.removeObserver(observer) }
     }
     var artwork by remember(trackPath, targetSizePx) { mutableStateOf<Bitmap?>(null) }
+    val boundsCallback by rememberUpdatedState(onArtworkBoundsChanged)
+    var artworkCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    // Layer transforms can change without remeasuring the artwork. Read after those changes
+    // are applied too, so the embedded hit target follows the final docking transform.
+    SideEffect {
+        boundsCallback?.invoke(artworkCoordinates?.takeIf { it.isAttached }?.boundsInRoot())
+    }
+    DisposableEffect(Unit) { onDispose { boundsCallback?.invoke(null) } }
     LaunchedEffect(trackPath, targetSizePx, artworkRevision) {
         artwork = if (trackPath == null) null else withContext(Dispatchers.IO) {
             try {
@@ -120,16 +135,20 @@ internal fun PlayerAudioVisual(
             onClickLabel = stringResource(R.string.player_lyrics_show), role = Role.Button,
             onClick = onArtworkClick
         ) else Modifier
+        val artworkBounds = if (onArtworkBoundsChanged == null) Modifier else Modifier.onGloballyPositioned {
+            artworkCoordinates = it
+            boundsCallback?.invoke(it.boundsInRoot())
+        }
         if (cover != null) {
             Image(
                 bitmap = cover.asImageBitmap(),
                 contentDescription = null,
                 modifier = Modifier.size(coverSize).clip(RoundedCornerShape(20.dp))
-                    .testTag("player-audio-cover").then(artworkClick),
+                    .testTag("player-audio-cover").then(artworkBounds).then(artworkClick),
                 contentScale = ContentScale.Crop
             )
         } else {
-            Box(Modifier.testTag("player-audio-vinyl").then(artworkClick)) {
+            Box(Modifier.testTag("player-audio-vinyl").then(artworkBounds).then(artworkClick)) {
                 if (playing) AnimatedVinyl(discSize) else StaticVinyl(discSize)
             }
         }

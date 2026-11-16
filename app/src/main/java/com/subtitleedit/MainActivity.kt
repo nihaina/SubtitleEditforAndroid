@@ -74,7 +74,6 @@ import com.subtitleedit.util.FileDeletionManager
 import com.subtitleedit.util.FileBrowserNavigation
 import com.subtitleedit.util.ArchiveNamePolicy
 import com.subtitleedit.util.ArchiveErrorPolicy
-import com.subtitleedit.util.FileBrowserPolicy
 import com.subtitleedit.util.AndroidDirectoryPolicy
 import com.subtitleedit.util.FilePathPolicy
 import com.subtitleedit.util.SelectionRangePolicy
@@ -91,6 +90,9 @@ import com.subtitleedit.util.DirectoryWatcher
 import com.subtitleedit.util.DirectoryChanges
 import com.subtitleedit.util.BrowserDirectorySnapshot
 import com.subtitleedit.util.DirectorySnapshotLoader
+import com.subtitleedit.util.DirectoryDisplayOptions
+import com.subtitleedit.util.DirectoryDisplayPreparer
+import com.subtitleedit.util.PreparedDirectoryDisplay
 import com.subtitleedit.util.SharedFileCache
 import com.subtitleedit.util.DirectorySearchController
 import com.subtitleedit.util.SettingsManager
@@ -148,8 +150,9 @@ class MainActivity : AppComposeActivity() {
     private var mainVolumeControlStream: Int? = null
     private var mainCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
 
-    private val visibleFiles = mutableListOf<File>()
+    private var visibleFiles = emptyList<File>()
     private var directorySnapshot: BrowserDirectorySnapshot? = null
+    private var pendingDirectorySnapshot: BrowserDirectorySnapshot? = null
     private var displayedMetadata: Map<String, BrowserFileMetadata> = emptyMap()
     private var displayedFiles = emptyList<File>()
     private var directoryEmptyStateVisible = false
@@ -192,6 +195,7 @@ class MainActivity : AppComposeActivity() {
         }
     )
     private lateinit var directorySnapshotLoader: DirectorySnapshotLoader
+    private lateinit var directoryDisplayPreparer: DirectoryDisplayPreparer
     private lateinit var directorySearchController: DirectorySearchController
     private lateinit var backNavigationCallback: OnBackPressedCallback
     private var lastBackExitPromptAt = 0L
@@ -241,6 +245,7 @@ class MainActivity : AppComposeActivity() {
         directorySnapshotLoader = DirectorySnapshotLoader(
             lifecycleScope, stateModel.directoryCache, ::applyDirectorySnapshot
         )
+        directoryDisplayPreparer = DirectoryDisplayPreparer(lifecycleScope, ::applyDirectoryDisplay)
         screenState = MainActivityScreenState(
             selectedTopLevelItem = MainNavigationPolicy.pageForMode(
                 stateModel.documentState.selectedTopLevelItem,
@@ -317,7 +322,10 @@ class MainActivity : AppComposeActivity() {
             state = stateModel.documentState,
             saveDirectoryScroll = ::saveCurrentDirectoryScrollPosition,
             loadDirectory = { directory, restore -> loadDirectory(directory, restore) },
-            cancelDirectorySearch = { directorySearchController.cancel() },
+            cancelDirectorySearch = {
+                directorySearchController.cancel()
+                directoryDisplayPreparer.cancel()
+            },
             stopDirectoryWatcher = { directoryWatcher.stop() },
             clearDirectorySelection = {
                 stateModel.documentState.directoryHistory.clear()
@@ -851,6 +859,8 @@ class MainActivity : AppComposeActivity() {
         }
         
         stateModel.documentState.currentDirectory = directory
+        directoryDisplayPreparer.cancel()
+        pendingDirectorySnapshot = null
         directorySearchController.cancel()
         searchInProgress = false
         directoryLoading = true
@@ -862,17 +872,15 @@ class MainActivity : AppComposeActivity() {
 
     private fun applyDirectorySnapshot(snapshot: BrowserDirectorySnapshot, restoreScrollPosition: Boolean) {
         if (stateModel.documentState.currentDirectory?.absolutePath != snapshot.directory.absolutePath) return
-        directorySnapshot = snapshot
-        directoryLoading = false
-        if (stateModel.documentState.selectedTopLevelItem == R.id.nav_directory) {
-            watchDirectory(snapshot.directory, snapshot.entries.filter { it.isDirectory && !it.restricted }.map { it.file })
-        }
+        pendingDirectorySnapshot = snapshot
+        if (stateModel.documentState.selectedTopLevelItem != R.id.nav_directory) return
         displayDirectoryFiles(restoreScrollPosition)
     }
 
     private fun displayDirectoryFiles(restoreScrollPosition: Boolean = false) {
         directorySearchController.cancel()
         searchInProgress = false
+        if (stateModel.documentState.selectedTopLevelItem != R.id.nav_directory) return
 
         val directory = stateModel.documentState.currentDirectory ?: run {
             publishScreenState()
@@ -883,27 +891,39 @@ class MainActivity : AppComposeActivity() {
         } else {
             ""
         }
-        val snapshots = directorySnapshot?.takeIf { it.directory.absolutePath == directory.absolutePath }
+        val snapshot = (pendingDirectorySnapshot ?: directorySnapshot)
+            ?.takeIf { it.directory.absolutePath == directory.absolutePath }
         // Sorting or clearing search during a jump must not publish an empty target list.
-        if (snapshots == null && directoryLoading) return
-        val directEntries = FileBrowserOrder.sortMetadata(
-            snapshots?.entries.orEmpty().filter { entry ->
-                (showHiddenFiles || !entry.file.name.startsWith(".")) &&
-                    (query.isEmpty() || entry.file.name.contains(query, ignoreCase = true)) &&
-                    (entry.isDirectory || FileBrowserPolicy.shouldDisplayFile(
-                        entry.file, showAllFileTypes, FileTypePolicy.videoExtensions,
-                        { it.extension.lowercase() in ArchiveManager.recognizedExtensions }, isFile = entry.isRegularFile
-                    ))
-            },
-            stateModel.documentState.sortField ?: FileSortField.NAME,
-            stateModel.documentState.sortDirection ?: FileSortDirection.ASCENDING
+        if (snapshot == null && directoryLoading) return
+        directoryDisplayPreparer.prepare(
+            snapshot ?: BrowserDirectorySnapshot(directory, emptyList()),
+            DirectoryDisplayOptions(
+                query, showHiddenFiles, showAllFileTypes,
+                stateModel.documentState.sortField ?: FileSortField.NAME,
+                stateModel.documentState.sortDirection ?: FileSortDirection.ASCENDING
+            ),
+            restoreScrollPosition
         )
-        val directMatches = directEntries.map { it.file }
-        val metadata = directEntries.associateBy { it.path }
+        publishScreenState()
+    }
+
+    private fun applyDirectoryDisplay(prepared: PreparedDirectoryDisplay, restoreScrollPosition: Boolean) {
+        val snapshot = prepared.snapshot
+        val directory = snapshot.directory
+        if (stateModel.documentState.currentDirectory?.absolutePath != directory.absolutePath) return
+        if (stateModel.documentState.selectedTopLevelItem != R.id.nav_directory) return
+        // Publish the path and prepared rows together, after the worker has finished.
+        directorySnapshot = snapshot
+        if (pendingDirectorySnapshot === snapshot) pendingDirectorySnapshot = null
+        directoryLoading = false
+        if (stateModel.documentState.selectedTopLevelItem == R.id.nav_directory) {
+            watchDirectory(directory, prepared.childDirectories)
+        }
+        val query = prepared.options.query
         if (query.isEmpty()) {
             showDirectoryFiles(
-                directMatches,
-                metadata = metadata,
+                prepared.files,
+                metadata = prepared.metadata,
                 showParent = true,
                 relativePathRoot = null,
                 searching = false,
@@ -914,8 +934,8 @@ class MainActivity : AppComposeActivity() {
 
         searchInProgress = true
         showDirectoryFiles(
-            directMatches,
-            metadata = metadata,
+            prepared.files,
+            metadata = prepared.metadata,
             showParent = false,
             relativePathRoot = directory,
             searching = true,
@@ -925,9 +945,9 @@ class MainActivity : AppComposeActivity() {
         directorySearchController.search(
             root = directory,
             query = query,
-            includeHidden = showHiddenFiles,
-            sortField = stateModel.documentState.sortField ?: FileSortField.NAME,
-            sortDirection = stateModel.documentState.sortDirection ?: FileSortDirection.ASCENDING,
+            includeHidden = prepared.options.showHiddenFiles,
+            sortField = prepared.options.sortField,
+            sortDirection = prepared.options.sortDirection,
             isCurrent = {
                 stateModel.documentState.currentDirectory?.absolutePath == directory.absolutePath &&
                     stateModel.documentState.searchQuery.trim() == query
@@ -943,8 +963,7 @@ class MainActivity : AppComposeActivity() {
         searching: Boolean,
         restoreScrollPosition: Boolean = false
     ) {
-        visibleFiles.clear()
-        visibleFiles.addAll(displayed)
+        visibleFiles = displayed
 
         val adapterItems = mutableListOf<File>()
         val directory = stateModel.documentState.currentDirectory
@@ -969,7 +988,6 @@ class MainActivity : AppComposeActivity() {
         }
         searchInProgress = searching
         updateSelectionUi()
-        publishScreenState()
     }
 
     private fun directoryPath(directory: File): String =

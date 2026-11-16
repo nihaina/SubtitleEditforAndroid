@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -49,6 +50,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -64,6 +66,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -139,7 +142,9 @@ internal fun ListeningStatsScreen(
         pageState.previousCurrentDate = currentDate
     }
 
-    LaunchedEffect(revision, refreshVersion, currentDate, selectedYear, granularity, selectedDate) {
+    val query = ListeningStatsQuery(revision, refreshVersion, currentDate, selectedYear, granularity, selectedDate)
+    LaunchedEffect(query) {
+        if (pageState.content != null && pageState.loadedQuery == query) return@LaunchedEffect
         val year = selectedYear
         val day = selectedDate
         val mode = granularity
@@ -166,6 +171,7 @@ internal fun ListeningStatsScreen(
                 )
             }
             pageState.content = loaded.copy(topItemsRange = range)
+            pageState.loadedQuery = query
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -227,6 +233,7 @@ internal fun ListeningStatsScreen(
                 selectedDate = selectedDate,
                 availableYears = availableYears,
                 selectedYear = selectedYear,
+                scrollState = pageState.heatmapScrollState(selectedYear),
                 onYearSelected = { year ->
                     pageState.selectedYear = year
                     pageState.selectedDate = if (year == currentYear) currentDate else "%04d-12-31".format(Locale.US, year)
@@ -719,6 +726,7 @@ private fun HeatmapSection(
     selectedDate: String,
     availableYears: List<Int>,
     selectedYear: Int,
+    scrollState: ScrollState,
     onYearSelected: (Int) -> Unit,
     onDayClick: (String) -> Unit
 ) {
@@ -757,11 +765,28 @@ private fun HeatmapSection(
             } else {
                 val columns = remember(days) { StatsCalculator.buildHeatmapColumns(days) }
                 val monthLabels = remember(columns) { StatsCalculator.buildMonthLabels(columns) }
-                val scrollState = remember(selectedYear, columns.size) { ScrollState(Int.MAX_VALUE) }
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val density = LocalDensity.current
+                val stridePx = with(density) { (CELL_SIZE + CELL_GAP).toPx() }
+                val gapPx = with(density) { CELL_GAP.toPx() }
+                val viewportWidthPx = constraints.maxWidth
+                // Keep the original horizontal ScrollState and month-label layout. Only the
+                // weeks in or next to the viewport need seven clickable cell compositions.
+                val visibleColumns by remember(scrollState, columns.size, stridePx, viewportWidthPx) {
+                    derivedStateOf {
+                        val width = viewportWidthPx.coerceAtLeast(1)
+                        val maxScroll = (columns.size * stridePx - gapPx - width).coerceAtLeast(0f)
+                        val offset = scrollState.value.toFloat().coerceIn(0f, maxScroll)
+                        val first = (offset / stridePx).toInt().minus(1).coerceAtLeast(0)
+                        val last = ((offset + width) / stridePx).toInt().plus(1).coerceAtMost(columns.lastIndex)
+                        first..last
+                    }
+                }
 
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .testTag("stats-heatmap-scroll")
                         .horizontalScroll(scrollState),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
@@ -781,8 +806,12 @@ private fun HeatmapSection(
                         }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(CELL_GAP)) {
-                        columns.forEach { week ->
-                            Column(verticalArrangement = Arrangement.spacedBy(CELL_GAP)) {
+                        columns.forEachIndexed { index, week ->
+                            // Keep one stable layout child for every week while cells enter/leave
+                            // the viewport. Swapping the Row's Spacer/Column nodes during a fling
+                            // can corrupt node insertion indices in the current Compose runtime.
+                            Box(Modifier.width(CELL_SIZE).height(CELL_SIZE * 7 + CELL_GAP * 6)) {
+                            if (index in visibleColumns) Column(verticalArrangement = Arrangement.spacedBy(CELL_GAP)) {
                                 week.forEach { day ->
                                     if (day == null) {
                                         Spacer(Modifier.size(CELL_SIZE))
@@ -793,6 +822,7 @@ private fun HeatmapSection(
                                         Box(
                                             modifier = Modifier
                                                 .size(CELL_SIZE)
+                                                .testTag("stats-heatmap-day:${day.date}")
                                                 .clip(shape)
                                                 .background(cellColor)
                                                 .then(
@@ -805,8 +835,10 @@ private fun HeatmapSection(
                                     }
                                 }
                             }
+                            }
                         }
                     }
+                }
                 }
 
                 Row(

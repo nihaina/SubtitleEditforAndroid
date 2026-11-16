@@ -6,12 +6,19 @@ import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.subtitleedit.R
@@ -22,6 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -57,11 +65,12 @@ class ListeningStatsTransitionTest {
         assertEquals("Loaded metrics must not push the calendar down", before.top, after.top, 0.5f)
     }
 
-    @Test fun returningToStatisticsRetainsItsSnapshotAndQueryWhileRefreshing() {
+    @Test fun returningToStatisticsReusesItsSnapshotAndOnlyRefreshesWhenRequested() {
         val today = ListeningDay.currentDate()
         val year = today.take(4).toInt()
         val state = ListeningStatsPageState(today).apply { granularity = StatsGranularity.WEEK }
         val visible = mutableStateOf(true)
+        val refreshVersion = mutableIntStateOf(0)
         val refreshGate = CompletableDeferred<Unit>()
         val reads = AtomicInteger()
         val loaded = content(today, year)
@@ -69,7 +78,7 @@ class ListeningStatsTransitionTest {
             SubtitleEditComposeTheme {
                 Surface(Modifier.requiredSize(360.dp, 600.dp)) {
                     if (visible.value) {
-                        ListeningStatsScreen(0, state) { _, requestedYear, mode, date ->
+                        ListeningStatsScreen(refreshVersion.intValue, state) { _, requestedYear, mode, date ->
                             assertEquals(year, requestedYear)
                             assertEquals(StatsGranularity.WEEK, mode)
                             assertEquals(today, date)
@@ -87,6 +96,11 @@ class ListeningStatsTransitionTest {
         compose.runOnIdle { visible.value = false }
         compose.onNodeWithText("Another page").assertIsDisplayed()
         compose.runOnIdle { visible.value = true }
+        compose.onNodeWithText("2m").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals("Re-entering an unchanged query must reuse the retained data", 1, reads.get())
+            refreshVersion.intValue++
+        }
         compose.waitUntil(5_000L) { reads.get() >= 2 }
 
         // The second read is still blocked, so these can only be the retained real values.
@@ -99,6 +113,42 @@ class ListeningStatsTransitionTest {
             assertEquals(today, state.selectedDate)
         }
         refreshGate.complete(Unit)
+    }
+
+    @Test fun calendarOnlyComposesVisibleWeeksAndRetainsItsHorizontalPositionOnReturn() {
+        val today = ListeningDay.currentDate()
+        val year = today.take(4).toInt() - 1
+        val visible = mutableStateOf(true)
+        val state = ListeningStatsPageState(today).apply {
+            selectedYear = year
+            selectedDate = "$year-01-01"
+        }
+        compose.setContent {
+            SubtitleEditComposeTheme {
+                Surface(Modifier.requiredSize(360.dp, 600.dp)) {
+                    if (visible.value) ListeningStatsScreen(0, state) { _, _, _, _ -> content(today, year) }
+                    else Text("Another page")
+                }
+            }
+        }
+        compose.waitUntil(5_000L) { state.content != null }
+        val days = SemanticsMatcher("Heatmap day") {
+            it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("stats-heatmap-day:") == true
+        }
+        val composedDays = compose.onAllNodes(days).fetchSemanticsNodes().size
+        assertTrue("Only viewport weeks should create clickable cells: $composedDays", composedDays in 1..200)
+        compose.onNodeWithTag("stats-heatmap-day:$year-12-31").assertIsDisplayed()
+            .performTouchInput { click() }
+        compose.runOnIdle { assertEquals("$year-12-31", state.selectedDate) }
+        compose.onNodeWithTag("stats-heatmap-scroll").performTouchInput { swipeRight() }
+        compose.waitForIdle()
+        val offset = state.heatmapScrollState(year).value
+        assertTrue("The horizontal gesture should reveal earlier weeks", offset < state.heatmapScrollState(year).maxValue)
+        compose.runOnIdle { visible.value = false }
+        compose.onNodeWithText("Another page").assertIsDisplayed()
+        compose.runOnIdle { visible.value = true }
+        compose.onNodeWithTag("stats-heatmap").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(offset, state.heatmapScrollState(year).value) }
     }
 
     @Test fun calendarStartsAtTheLatestMonthsBeforeTheFirstReadCompletes() {

@@ -34,11 +34,25 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 
 /** A paused frame checks page geometry and state while both navigation destinations exist. */
 @RunWith(AndroidJUnit4::class)
 class MainTopLevelTransitionTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun pageAnimationDoesNotHashTheDirectoryContents() {
+        val files = object : AbstractList<File>() {
+            override val size = 2_000
+            override fun get(index: Int) = File("/directory/track-$index.ogg")
+            override fun hashCode(): Int = error("Navigation must not hash every directory row")
+        }
+        val state = showPage(page(R.id.nav_directory, "Directory").copy(files = files))
+        changePage(state, page(R.id.nav_tools, "Categories").copy(files = files), 32L)
+        changePage(state, page(R.id.nav_directory, "Directory returned").copy(files = files), 32L)
+        compose.mainClock.advanceTimeBy(700L)
+        compose.onNodeWithTag(bodyTag(R.id.nav_directory)).assertIsDisplayed()
+    }
 
     @Test fun directoryKeepsItsHeaderAndBodyPositionWhileCategoryEnters() {
         val state = showPage(page(R.id.nav_directory, "Directory original", search = true))

@@ -76,7 +76,7 @@ internal fun MediaTrackDetailContent(
     LaunchedEffect(collectionKey, selectionResetKey) { if (globalSelection == null) selectedPaths = emptySet() }
     LaunchedEffect(visiblePaths, isActive, globalSelection) {
         if (globalSelection != null) {
-            if (isActive) globalSelection.updateVisiblePaths(visiblePaths)
+            if (isActive) globalSelection.refreshVisiblePaths(visiblePaths)
         } else selectedPaths = selectedPaths.intersect(visiblePaths.toSet())
     }
     BackHandler(enabled = isActive && localSelectionMode) { selectedPaths = emptySet() }
