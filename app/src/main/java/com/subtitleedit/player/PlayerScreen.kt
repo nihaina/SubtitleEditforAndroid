@@ -106,7 +106,8 @@ internal fun PlayerScreen(
     interactionsEnabled: Boolean = true,
     onCollapse: (() -> Unit)? = null,
     onNavigateToCategory: ((MediaCategoryRevealRequest) -> Unit)? = null,
-    embeddedArtworkBounds: Rect? = null
+    embeddedArtworkBounds: Rect? = null,
+    onLocate: ((String) -> Unit)? = null
 ) {
     val state by viewModel.state.collectAsState()
     val pageGradient = PlayerColors.pageGradient
@@ -419,7 +420,8 @@ internal fun PlayerScreen(
                     state = state,
                     onDismiss = viewModel::closeTrackInfoDialog,
                     onEditTags = onEditTags,
-                    onNavigateToCategory = onNavigateToCategory
+                    onNavigateToCategory = onNavigateToCategory,
+                    onLocate = onLocate
                 )
 
                 PlayerPlaylistPickerDialog(

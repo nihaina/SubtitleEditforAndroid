@@ -18,7 +18,8 @@ internal data class DirectoryDisplayOptions(
     val showHiddenFiles: Boolean,
     val showAllFileTypes: Boolean,
     val sortField: FileSortField,
-    val sortDirection: FileSortDirection
+    val sortDirection: FileSortDirection,
+    val revealPath: String? = null
 )
 
 internal data class PreparedDirectoryDisplay(
@@ -72,7 +73,7 @@ internal class DirectoryDisplayPreparer(
             val prepared = withContext(worker) {
                 val entries = snapshot.entries.filter { entry ->
                     ensureActive()
-                    (options.showHiddenFiles || !entry.file.name.startsWith(".")) &&
+                    entry.path == options.revealPath || (options.showHiddenFiles || !entry.file.name.startsWith(".")) &&
                         (options.query.isEmpty() || entry.file.name.contains(options.query, ignoreCase = true)) &&
                         (entry.isDirectory || includeFile(entry, options.showAllFileTypes))
                 }

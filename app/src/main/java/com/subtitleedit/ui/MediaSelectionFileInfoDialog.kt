@@ -25,7 +25,8 @@ internal fun MediaSelectionFileInfoDialog(
     onDismiss: () -> Unit,
     onEditTags: (String) -> Unit,
     immersive: Boolean = false,
-    onNavigateToCategory: ((MediaCategoryRevealRequest) -> Unit)? = null
+    onNavigateToCategory: ((MediaCategoryRevealRequest) -> Unit)? = null,
+    onLocate: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val file = remember(path) { File(path) }
@@ -55,6 +56,7 @@ internal fun MediaSelectionFileInfoDialog(
         onNavigateToCategory = onNavigateToCategory?.let { navigate ->
             { request -> onDismiss(); navigate(request) }
         },
-        immersive = immersive
+        immersive = immersive,
+        onLocate = onLocate
     )
 }

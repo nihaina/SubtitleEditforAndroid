@@ -109,6 +109,8 @@ internal data class MainDirectoryScrollRequest(
     val savedPosition: DirectoryScrollPosition?
 )
 
+internal data class MainDirectoryRevealRequest(val path: String, val token: Long)
+
 internal data class MainActivityScreenState(
     val selectedTopLevelItem: Int = R.id.nav_directory,
     val toolbarTitle: String = "",
@@ -123,6 +125,7 @@ internal data class MainActivityScreenState(
     val files: List<File> = emptyList(),
     val fileMetadata: Map<String, BrowserFileMetadata> = emptyMap(),
     val scrollRequest: MainDirectoryScrollRequest? = null,
+    val directoryRevealRequest: MainDirectoryRevealRequest? = null,
     val relativePathRoot: File? = null,
     val selectedPaths: Set<String> = emptySet(),
     val pendingOperation: FileOperation? = null,
@@ -204,7 +207,8 @@ internal fun MainActivityScreen(
     onCacheClearConfirm: (com.subtitleedit.ui.settings.SettingsCacheItem) -> Unit,
     onProcessMediaSelection: () -> Unit = {},
     miniPlayerSlot: @Composable () -> Unit = {},
-    categoryRevealRequest: MediaCategoryRevealRequest? = null
+    categoryRevealRequest: MediaCategoryRevealRequest? = null,
+    onDirectoryRevealFinished: (Long) -> Unit = {}
 ) {
     val directoryListState = rememberDirectoryListState(state)
     val directoryGridState = rememberDirectoryGridState(state)
@@ -470,7 +474,8 @@ internal fun MainActivityScreen(
                             onFileLongClick = onFileLongClick,
                             listState = directoryListState,
                             gridState = directoryGridState,
-                            isActive = state.selectedTopLevelItem == activeTopLevelItem
+                            isActive = state.selectedTopLevelItem == activeTopLevelItem,
+                            onRevealFinished = onDirectoryRevealFinished
                         )
                     } else {
                         MainTopLevelPages(

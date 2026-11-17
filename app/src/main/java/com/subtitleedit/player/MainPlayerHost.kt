@@ -38,6 +38,7 @@ internal fun MainPlayerHost(
     onImmersiveChanged: (Boolean, Boolean) -> Unit,
     enabled: Boolean = true,
     onNavigateToCategory: ((MediaCategoryRevealRequest) -> Unit)? = null,
+    onLocate: ((String) -> Unit)? = null,
     content: @Composable (@Composable () -> Unit) -> Unit
 ) {
     val state by viewModel.state.collectAsState()
@@ -194,7 +195,8 @@ internal fun MainPlayerHost(
                     PlayerScreen(viewModel, onEditTags = onEditTags, onPickSubtitle = onPickSubtitle,
                         embedded = true, interactionsEnabled = expanded && !dragging && progress >= 0.999f,
                         embeddedArtworkBounds = audioArtworkBounds,
-                        onCollapse = viewModel::collapse, onNavigateToCategory = onNavigateToCategory)
+                        onCollapse = viewModel::collapse, onNavigateToCategory = onNavigateToCategory,
+                        onLocate = onLocate)
                 }
                 if (progress < 0.34f) PlayerMiniBar(state, viewModel::expand, viewModel::togglePlay,
                     viewModel::previous, viewModel::next,

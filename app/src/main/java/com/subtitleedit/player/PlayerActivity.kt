@@ -107,7 +107,8 @@ class PlayerActivity : AppComposeActivity() {
                     viewModel.finishRequests.collect { requests -> if (requests > 0) finish() }
                 }
                 CompositionLocalProvider(LocalMediaSelection provides selectionModel.selection) {
-                    PlayerScreen(viewModel, onEditTags = ::openTagEditor, onPickSubtitle = ::openSubtitlePicker)
+                    PlayerScreen(viewModel, onEditTags = ::openTagEditor, onPickSubtitle = ::openSubtitlePicker,
+                        onLocate = ::locateMediaFile)
                     StandaloneMediaSelectionHost(
                         model = selectionModel,
                         player = viewModel,

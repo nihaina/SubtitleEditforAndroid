@@ -1,7 +1,6 @@
 package com.subtitleedit.player
 
-import android.content.ClipData
-import android.content.ClipboardManager
+import android.content.Intent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -61,6 +60,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import com.subtitleedit.R
+import com.subtitleedit.EXTRA_REVEAL_MEDIA_PATH
+import com.subtitleedit.MainActivity
 import com.subtitleedit.library.PlayerTrackDetails
 import com.subtitleedit.library.MediaLibraryRepository
 import com.subtitleedit.util.FavoriteDirectoryStore
@@ -81,7 +82,8 @@ internal fun PlayerTrackInfoDialog(
     onDismiss: () -> Unit,
     onEditTags: () -> Unit,
     onNavigateToCategory: ((MediaCategoryRevealRequest) -> Unit)? = null,
-    immersive: Boolean = true
+    immersive: Boolean = true,
+    onLocate: ((String) -> Unit)? = null
 ) {
     if (!state.showTrackInfoDialog) return
     val context = LocalContext.current
@@ -214,14 +216,13 @@ internal fun PlayerTrackInfoDialog(
                         TrackInfoLocationRow(
                             label = stringResource(R.string.player_info_location),
                             value = details.locationDisplay.ifBlank { details.filePath },
-                            onCopy = {
-                                val clipboard = context.getSystemService(ClipboardManager::class.java)
-                                clipboard?.setPrimaryClip(ClipData.newPlainText("path", details.filePath))
-                                android.widget.Toast.makeText(
-                                    context,
-                                    context.getString(R.string.player_info_path_copied),
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
+                            onLocate = {
+                                onDismiss()
+                                if (onLocate != null) onLocate(details.filePath)
+                                else context.startActivity(Intent(context, MainActivity::class.java).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                    putExtra(EXTRA_REVEAL_MEDIA_PATH, details.filePath)
+                                })
                             }
                         )
 
@@ -350,13 +351,14 @@ internal fun PlayerTrackInfoDialog(
 private fun TrackInfoLocationRow(
     label: String,
     value: String,
-    onCopy: () -> Unit
+    onLocate: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onCopy)
+            .testTag("player-info-open-location")
+            .clickable(onClickLabel = stringResource(R.string.media_selection_locate_directory), onClick = onLocate)
             .padding(vertical = 2.dp)
     ) {
         Row(

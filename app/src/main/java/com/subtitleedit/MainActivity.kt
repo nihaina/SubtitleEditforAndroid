@@ -51,6 +51,7 @@ import com.subtitleedit.feature.ui.MainActivityDialogUi
 import com.subtitleedit.feature.ui.MainActivityScreen
 import com.subtitleedit.feature.ui.MainActivityScreenState
 import com.subtitleedit.feature.ui.MainDirectoryScrollRequest
+import com.subtitleedit.feature.ui.MainDirectoryRevealRequest
 import com.subtitleedit.feature.ui.MainFileOperationDialogs
 import com.subtitleedit.feature.ui.MediaProcessingChooserDialog
 import com.subtitleedit.feature.ui.SubtitleConversionDialogUi
@@ -173,6 +174,7 @@ class MainActivity : AppComposeActivity() {
     private var searchExpanded = false
     private var directoryScrollPosition: (() -> DirectoryScrollPosition)? = null
     private var directoryScrollRequest: MainDirectoryScrollRequest? = null
+    private var directoryRevealRequest: MainDirectoryRevealRequest? = null
     private var nextDirectoryScrollGeneration = 0L
     private var screenState by mutableStateOf(MainActivityScreenState())
     private var subtitleConversionDialog by mutableStateOf<SubtitleConversionDialogUi?>(null)
@@ -383,6 +385,7 @@ class MainActivity : AppComposeActivity() {
                 MainPlayerHost(playerModel, playerController::openTagEditor, playerController::openSubtitlePicker,
                     onImmersiveChanged = ::updatePlayerWindow,
                     onNavigateToCategory = ::revealPlayerTrackInCategory,
+                    onLocate = ::locateMediaFile,
                     enabled = screenState.playerModeEnabled) { miniPlayerSlot ->
                 CompositionLocalProvider(
                     LocalPlayerLauncher provides if (screenState.playerModeEnabled) ::openPlayerQueue else null,
@@ -450,7 +453,13 @@ class MainActivity : AppComposeActivity() {
                         onCacheItemSelected = ::confirmSelectedMediaCacheClear,
                         onCacheClearConfirm = ::clearSelectedMediaCache,
                         miniPlayerSlot = miniPlayerSlot,
-                        categoryRevealRequest = categoryRevealRequest
+                        categoryRevealRequest = categoryRevealRequest,
+                        onDirectoryRevealFinished = { token ->
+                            if (directoryRevealRequest?.token == token) {
+                                directoryRevealRequest = null
+                                publishScreenState()
+                            }
+                        }
                 )
                 mediaProcessingSelection?.let { selection ->
                     MediaProcessingChooserDialog(
@@ -614,6 +623,7 @@ class MainActivity : AppComposeActivity() {
         playerModel.collapse()
         showTopLevelPage(R.id.nav_directory)
         clearFileSearch(refreshDirectory = false)
+        directoryRevealRequest = MainDirectoryRevealRequest(file.path, ++nextDirectoryScrollGeneration)
         val position = DirectoryScrollPosition(file.path, 0, 0,
             stateModel.documentState.viewMode ?: FileBrowserViewMode.DETAILED)
         stateModel.documentState.directoryScrollPositions[directoryPath(parent)] = position
@@ -662,6 +672,7 @@ class MainActivity : AppComposeActivity() {
             fileMetadata = displayedMetadata,
             playerModeEnabled = com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled,
             scrollRequest = directoryScrollRequest,
+            directoryRevealRequest = directoryRevealRequest,
             relativePathRoot = relativePathRoot,
             selectedPaths = document.selectedPaths.toSet(),
             pendingOperation = document.pendingFileOperation,
@@ -859,6 +870,9 @@ class MainActivity : AppComposeActivity() {
         }
         
         stateModel.documentState.currentDirectory = directory
+        if (directoryRevealRequest?.path?.let { File(it).parentFile?.absolutePath != directory.absolutePath } == true) {
+            directoryRevealRequest = null
+        }
         directoryDisplayPreparer.cancel()
         pendingDirectorySnapshot = null
         directorySearchController.cancel()
@@ -900,7 +914,8 @@ class MainActivity : AppComposeActivity() {
             DirectoryDisplayOptions(
                 query, showHiddenFiles, showAllFileTypes,
                 stateModel.documentState.sortField ?: FileSortField.NAME,
-                stateModel.documentState.sortDirection ?: FileSortDirection.ASCENDING
+                stateModel.documentState.sortDirection ?: FileSortDirection.ASCENDING,
+                revealPath = directoryRevealRequest?.path
             ),
             restoreScrollPosition
         )

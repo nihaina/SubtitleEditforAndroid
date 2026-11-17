@@ -161,7 +161,8 @@ internal fun MediaSelectionActionHost(
             onDismiss = { infoPath = null },
             onEditTags = { onEditTags(listOf(it)) },
             immersive = immersive,
-            onNavigateToCategory = onNavigateToCategory
+            onNavigateToCategory = onNavigateToCategory,
+            onLocate = onLocate
         )
     }
 }

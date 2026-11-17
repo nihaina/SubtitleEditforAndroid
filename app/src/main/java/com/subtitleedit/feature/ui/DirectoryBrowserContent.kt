@@ -13,6 +13,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -20,6 +22,8 @@ import com.subtitleedit.DirectoryScrollPosition
 import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.ui.theme.AppMotion
 import com.subtitleedit.ui.settings.settingsPageBackground
+import com.subtitleedit.ui.mediaTrackRevealPulse
+import com.subtitleedit.ui.mediaTrackRevealOpacity
 import java.io.File
 
 private fun initialDirectoryPosition(state: MainActivityScreenState): Pair<Int, Int> {
@@ -58,7 +62,8 @@ internal fun DirectoryBrowserContent(
     onFileLongClick: (File) -> Unit,
     listState: LazyListState = rememberDirectoryListState(state),
     gridState: LazyGridState = rememberDirectoryGridState(state),
-    isActive: Boolean = true
+    isActive: Boolean = true,
+    onRevealFinished: (Long) -> Unit = {}
 ) {
     // Directory long-press keeps file operations; only an already active media selection takes over.
     val mediaSelection = com.subtitleedit.ui.LocalMediaSelection.current?.takeIf { it.active }
@@ -96,6 +101,11 @@ internal fun DirectoryBrowserContent(
         else listState.scrollToItem(position.coerceIn(0, state.files.lastIndex), offset)
         appliedScrollGeneration = request.generation
     }
+    val (revealOpacity, revealPulse) = rememberDirectoryRevealHighlight(
+        state, isActive, scrollRequest == null || appliedScrollGeneration == scrollRequest.generation,
+        listState, gridState, onRevealFinished
+    )
+    val revealColor = MaterialTheme.colorScheme.primary
     Column(Modifier.fillMaxSize().background(settingsPageBackground())) {
         state.currentDirectory?.let { directory ->
             DirectoryBreadcrumbBar(
@@ -141,6 +151,17 @@ internal fun DirectoryBrowserContent(
                 adaptiveGrid = true
             ) { file ->
                 BrowserFileRow(
+                    modifier = Modifier.testTag("directory-file:${file.absolutePath}").then(
+                        if (isActive && file.absolutePath == state.directoryRevealRequest?.path) Modifier
+                            .drawWithContent {
+                                drawContent()
+                                drawRect(revealColor.copy(alpha = revealOpacity * 0.22f))
+                            }
+                            .semantics {
+                                mediaTrackRevealPulse = revealPulse
+                                mediaTrackRevealOpacity = revealOpacity
+                            } else Modifier
+                    ),
                     file = file,
                     metadata = state.fileMetadata[file.absolutePath],
                     relativePathRoot = state.relativePathRoot,

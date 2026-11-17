@@ -132,6 +132,26 @@ class DirectoryDisplayPreparerTest {
         }
     }
 
+    @Test fun `locating a hidden file reveals only that target without changing normal filters`() = runBlocking {
+        val target = metadata(".target.mp3")
+        val other = metadata(".other.mp3")
+        val visible = metadata("visible.mp3")
+        val snapshot = BrowserDirectorySnapshot(File("browser"), listOf(other, target, visible))
+        val owner = Job()
+        val results = Channel<PreparedDirectoryDisplay>(Channel.UNLIMITED)
+        val preparer = DirectoryDisplayPreparer(CoroutineScope(coroutineContext + owner), { result, _ ->
+            results.trySend(result)
+        })
+        try {
+            preparer.prepare(snapshot, options().copy(revealPath = target.path))
+            assertEquals(listOf(target.file, visible.file), withTimeout(5_000) { results.receive() }.files)
+            preparer.prepare(snapshot, options())
+            assertEquals(listOf(visible.file), withTimeout(5_000) { results.receive() }.files)
+        } finally {
+            owner.cancelAndJoin()
+        }
+    }
+
     @Test fun `unchanged snapshot and options reuse prepared rows without filtering again`() = runBlocking {
         val snapshot = BrowserDirectorySnapshot(File("browser"), listOf(metadata("a.srt"), metadata("b.srt")))
         val filteringCalls = AtomicInteger()
