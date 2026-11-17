@@ -80,6 +80,7 @@
     <string name="stats_most_played_empty">暂无播放次数记录</string>
     <string name="stats_never_played_empty">所有已索引的媒体都播放过了</string>
     <string name="stats_never_played_hint">扫描更多目录后，未播放的媒体会显示在这里</string>
+    <string name="stats_show_more">显示更多</string>
     <string name="stats_play_count">播放 %1$d 次</string>
     <string name="stats_empty_section">暂无相关记录</string>
     <string name="stats_day_empty">当日暂无收听记录</string>

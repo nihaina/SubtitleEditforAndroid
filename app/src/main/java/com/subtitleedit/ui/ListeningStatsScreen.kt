@@ -18,6 +18,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -47,17 +49,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,6 +70,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -99,6 +104,7 @@ import java.text.DateFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
@@ -132,6 +138,10 @@ internal fun ListeningStatsScreen(
     }
     val sessions = content.sessions
     val topItems = content.topItems
+    var insightTab by rememberSaveable { mutableStateOf(PlaybackInsightTab.RECENT) }
+    var neverPlayedLimit by rememberSaveable { mutableIntStateOf(INSIGHT_PAGE_SIZE) }
+    val historyTimeFormat = rememberStatsTimeFormat("MM-dd HH:mm")
+    val sessionTimeFormat = rememberStatsTimeFormat("HH:mm")
     val summaryRange = StatsCalculator.currentRange(currentDate, granularity)
     // A retained snapshot can belong to the previous period while the new query is running.
     val topArtworkPath = topItems.firstOrNull()?.mediaPath.takeIf { content.topItemsRange == summaryRange }
@@ -149,20 +159,32 @@ internal fun ListeningStatsScreen(
         val day = selectedDate
         val mode = granularity
         val range = StatsCalculator.currentRange(currentDate, mode)
+        // Picking another day, year or period leaves the database untouched, so only the parts
+        // that depend on that choice are queried again. Rebuilding the history lists (including
+        // the full never-played scan) on every tap made the page stutter.
+        val previous = pageState.content
+        val previousQuery = pageState.loadedQuery?.takeIf {
+            previous != null && contentLoader == null && it.revision == query.revision &&
+                it.refreshVersion == query.refreshVersion && it.currentDate == query.currentDate
+        }
         try {
             val loaded = withContext(Dispatchers.IO) {
                 contentLoader?.let { return@withContext it(currentDate, year, mode, day) }
-                val stats = repository.getAllDailyStats()
-                val (startDate, endDate) = StatsCalculator.yearRange(year, currentDate)
-                val yearStats = stats.filter { it.date in startDate..endDate }.associateBy { it.date }
-                val days = ListeningDay.datesBetween(startDate, endDate).map { date ->
-                    val duration = yearStats[date]?.durationMs ?: 0L
-                    StatsHeatmapDay(date, duration, StatsCalculator.levelFor(duration))
+                if (previous != null && previousQuery != null) {
+                    return@withContext previous.copy(
+                        heatmapDays = if (previousQuery.selectedYear == year) previous.heatmapDays
+                        else buildHeatmapDays(previous.allStats, year, currentDate),
+                        sessions = if (previousQuery.selectedDate == day) previous.sessions
+                        else repository.getSessionsForDate(day),
+                        topItems = if (previous.topItemsRange == range) previous.topItems
+                        else range?.let { repository.getTopListeningItems(it.first, it.second, limit = 5) }.orEmpty()
+                    )
                 }
+                val stats = repository.getAllDailyStats()
                 ListeningStatsContent(
                     allStats = stats,
                     availableYears = StatsCalculator.availableYears(stats.map { it.date }, currentYear),
-                    heatmapDays = days,
+                    heatmapDays = buildHeatmapDays(stats, year, currentDate),
                     sessions = repository.getSessionsForDate(day),
                     topItems = range?.let { repository.getTopListeningItems(it.first, it.second, limit = 5) }.orEmpty(),
                     recentHistory = repository.getPlaybackHistory(limit = 20),
@@ -213,60 +235,95 @@ internal fun ListeningStatsScreen(
             .background(settingsPageBackground())
             .testTag("listening-stats-page"),
         state = pageState.listState,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
     ) {
         item(key = "summary") {
-            SummarySection(
-                summary = summary,
-                granularity = granularity,
-                topArtworkPath = topArtworkPath,
-                artworkRefreshVersion = refreshVersion,
-                animateChanges = pageState.content != null,
-                onGranularitySelected = { pageState.granularity = it }
-            )
-        }
-
-        item(key = "heatmap") {
-            HeatmapSection(
-                days = heatmapDays,
-                selectedDate = selectedDate,
-                availableYears = availableYears,
-                selectedYear = selectedYear,
-                scrollState = pageState.heatmapScrollState(selectedYear),
-                onYearSelected = { year ->
-                    pageState.selectedYear = year
-                    pageState.selectedDate = if (year == currentYear) currentDate else "%04d-12-31".format(Locale.US, year)
-                },
-                onDayClick = { pageState.selectedDate = it }
-            )
-        }
-
-        if (topItems.isNotEmpty()) {
-            item(key = "top-works") {
-                TopWorksSection(
-                    items = topItems,
-                    onItemClick = { playFile(it.mediaPath) }
+            Box(Modifier.padding(bottom = 16.dp)) {
+                SummarySection(
+                    summary = summary,
+                    granularity = granularity,
+                    topArtworkPath = topArtworkPath,
+                    artworkRefreshVersion = refreshVersion,
+                    animateChanges = pageState.content != null,
+                    onGranularitySelected = { pageState.granularity = it }
                 )
             }
         }
 
-        item(key = "playback-insights") {
-            PlaybackInsightsSection(
-                recentHistory = content.recentHistory,
-                mostPlayed = content.mostPlayed,
-                neverPlayed = content.neverPlayed,
-                onTrackClick = { playFile(it.path) }
-            )
+        item(key = "heatmap") {
+            Box(Modifier.padding(bottom = 16.dp)) {
+                HeatmapSection(
+                    days = heatmapDays,
+                    selectedDate = selectedDate,
+                    availableYears = availableYears,
+                    selectedYear = selectedYear,
+                    scrollState = pageState.heatmapScrollState(selectedYear),
+                    onYearSelected = { year ->
+                        pageState.selectedYear = year
+                        pageState.selectedDate = if (year == currentYear) currentDate else "%04d-12-31".format(Locale.US, year)
+                    },
+                    onDayClick = { pageState.selectedDate = it }
+                )
+            }
         }
 
-        item(key = "timeline") {
-            DayTimelineSection(
-                date = selectedDate,
-                sessions = sessions,
-                onSessionClick = { playFile(it.mediaPath) }
-            )
+        if (topItems.isNotEmpty()) {
+            item(key = "top-works") {
+                Box(Modifier.padding(bottom = 16.dp)) {
+                    TopWorksSection(
+                        items = topItems,
+                        onItemClick = { playFile(it.mediaPath) }
+                    )
+                }
+            }
         }
+
+        playbackInsightsItems(
+            recentHistory = content.recentHistory,
+            mostPlayed = content.mostPlayed,
+            neverPlayed = content.neverPlayed,
+            selectedTab = insightTab,
+            neverPlayedLimit = neverPlayedLimit,
+            timeFormat = historyTimeFormat,
+            onTabSelected = { insightTab = it },
+            onShowMore = { neverPlayedLimit += INSIGHT_PAGE_SIZE },
+            onTrackClick = { playFile(it.path) }
+        )
+
+        item(key = "timeline") {
+            DayTimelineHeader(selectedDate)
+        }
+        if (sessions.isEmpty()) {
+            item(key = "timeline-empty") { EmptyDayTimeline() }
+        } else {
+            itemsIndexed(
+                sessions,
+                key = { _, session -> "session:${session.id}" },
+                contentType = { _, _ -> "session" }
+            ) { index, session ->
+                Box(Modifier.padding(bottom = if (index == sessions.lastIndex) 16.dp else 8.dp)) {
+                    TimelineRow(
+                        session = session,
+                        isLast = index == sessions.lastIndex,
+                        timeFormat = sessionTimeFormat,
+                        onClick = { playFile(session.mediaPath) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun buildHeatmapDays(
+    stats: List<ListeningDayStat>,
+    year: Int,
+    currentDate: String
+): List<StatsHeatmapDay> {
+    val (startDate, endDate) = StatsCalculator.yearRange(year, currentDate)
+    val yearStats = stats.filter { it.date in startDate..endDate }.associateBy { it.date }
+    return ListeningDay.datesBetween(startDate, endDate).map { date ->
+        val duration = yearStats[date]?.durationMs ?: 0L
+        StatsHeatmapDay(date, duration, StatsCalculator.levelFor(duration))
     }
 }
 
@@ -276,25 +333,21 @@ private enum class PlaybackInsightTab(val labelRes: Int, val iconRes: Int) {
     NEVER_PLAYED(R.string.stats_section_never_played, R.drawable.ic_block)
 }
 
-@Composable
-private fun PlaybackInsightsSection(
+// Each row is a separate lazy item, including after expanding the never-played list.
+// Adjacent surfaces retain the original single-card appearance without an eager inner Column.
+private fun LazyListScope.playbackInsightsItems(
     recentHistory: List<PlaybackHistoryEntry>,
     mostPlayed: List<PlaybackHistoryEntry>,
     neverPlayed: List<MediaLibraryTrack>,
+    selectedTab: PlaybackInsightTab,
+    neverPlayedLimit: Int,
+    timeFormat: SimpleDateFormat,
+    onTabSelected: (PlaybackInsightTab) -> Unit,
+    onShowMore: () -> Unit,
     onTrackClick: (MediaLibraryTrack) -> Unit
 ) {
-    var selectedTab by rememberSaveable { mutableStateOf(PlaybackInsightTab.RECENT) }
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 16.dp),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.cardContainer)
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+    item(key = "playback-insights", contentType = "insights-header") {
+        InsightCardPart(first = true) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -306,7 +359,7 @@ private fun PlaybackInsightsSection(
                     Surface(
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
-                            .clickable(role = Role.Button) { selectedTab = tab },
+                            .clickable(role = Role.Button) { onTabSelected(tab) },
                         shape = RoundedCornerShape(12.dp),
                         color = if (selected) MaterialTheme.colorScheme.secondaryContainer
                         else MaterialTheme.colorScheme.surfaceContainerHigh
@@ -335,88 +388,96 @@ private fun PlaybackInsightsSection(
                     }
                 }
             }
-
-            when (selectedTab) {
-                PlaybackInsightTab.RECENT -> PlaybackHistoryInsightList(
-                    entries = recentHistory,
-                    emptyText = stringResource(R.string.stats_recent_empty),
-                    timeLabel = { entry ->
-                        SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(entry.playedAtMs))
-                    },
-                    onTrackClick = onTrackClick
-                )
-
-                PlaybackInsightTab.MOST_PLAYED -> PlaybackHistoryInsightList(
-                    entries = mostPlayed,
-                    emptyText = stringResource(R.string.stats_most_played_empty),
-                    timeLabel = { entry -> stringResource(R.string.stats_play_count, entry.playCount) },
-                    onTrackClick = onTrackClick
-                )
-
-                PlaybackInsightTab.NEVER_PLAYED -> {
-                    if (neverPlayed.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.stats_never_played_empty),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+        }
+    }
+    val entries = when (selectedTab) {
+        PlaybackInsightTab.RECENT -> recentHistory
+        PlaybackInsightTab.MOST_PLAYED -> mostPlayed
+        PlaybackInsightTab.NEVER_PLAYED -> {
+            val shown = neverPlayed.take(neverPlayedLimit)
+            val hasMore = shown.size < neverPlayed.size
+            if (shown.isEmpty()) {
+                item(key = "insights-empty") {
+                    InsightCardPart(last = true) {
+                        InsightEmptyText(R.string.stats_never_played_empty)
+                        Spacer(Modifier.height(10.dp))
                         Text(
                             text = stringResource(R.string.stats_never_played_hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    } else {
-                        neverPlayed.forEach { track ->
-                            PlaybackInsightRow(
-                                track = track,
-                                label = listOf(track.artist, track.album)
-                                    .filter { it.isNotBlank() }
-                                    .joinToString(" · "),
-                                onClick = { onTrackClick(track) }
-                            )
+                    }
+                }
+            } else {
+                itemsIndexed(shown, key = { _, track -> "insight:never:${track.path}" }, contentType = { _, _ -> "insight-row" }) { index, track ->
+                    InsightCardPart(last = index == shown.lastIndex && !hasMore) {
+                        PlaybackInsightRow(
+                            track = track,
+                            label = listOf(track.artist, track.album).filter { it.isNotBlank() }.joinToString(" · "),
+                            onClick = { onTrackClick(track) }
+                        )
+                    }
+                }
+                if (hasMore) {
+                    item(key = "insights-more") {
+                        InsightCardPart(last = true) {
+                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                TextButton(onClick = onShowMore) { Text(stringResource(R.string.stats_show_more)) }
+                            }
                         }
                     }
                 }
+            }
+            return
+        }
+    }
+    if (entries.isEmpty()) {
+        item(key = "insights-empty") {
+            InsightCardPart(last = true) {
+                InsightEmptyText(if (selectedTab == PlaybackInsightTab.RECENT) R.string.stats_recent_empty else R.string.stats_most_played_empty)
+            }
+        }
+    } else {
+        itemsIndexed(entries, key = { _, entry -> "insight:${selectedTab.name}:${entry.path}" }, contentType = { _, _ -> "insight-row" }) { index, entry ->
+            val track = remember(entry) {
+                MediaLibraryTrack(entry.path, entry.title, entry.artist, entry.album, entry.isVideo, entry.durationMs, entry.playedAtMs)
+            }
+            InsightCardPart(last = index == entries.lastIndex) {
+                PlaybackInsightRow(
+                    track = track,
+                    label = if (selectedTab == PlaybackInsightTab.RECENT) timeFormat.format(Date(entry.playedAtMs))
+                    else stringResource(R.string.stats_play_count, entry.playCount),
+                    onClick = { onTrackClick(track) }
+                )
             }
         }
     }
 }
 
 @Composable
-private fun PlaybackHistoryInsightList(
-    entries: List<PlaybackHistoryEntry>,
-    emptyText: String,
-    timeLabel: @Composable (PlaybackHistoryEntry) -> String,
-    onTrackClick: (MediaLibraryTrack) -> Unit
-) {
-    if (entries.isEmpty()) {
-        Text(
-            text = emptyText,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(vertical = 8.dp)
-        )
-        return
-    }
-    entries.forEach { entry ->
-        val track = remember(entry) {
-            MediaLibraryTrack(
-                path = entry.path,
-                title = entry.title,
-                artist = entry.artist,
-                album = entry.album,
-                isVideo = entry.isVideo,
-                durationMs = entry.durationMs,
-                addedAtMs = entry.playedAtMs
-            )
+private fun InsightCardPart(first: Boolean = false, last: Boolean = false, content: @Composable () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(bottom = if (last) 32.dp else 0.dp),
+        shape = RoundedCornerShape(
+            topStart = if (first) 18.dp else 0.dp, topEnd = if (first) 18.dp else 0.dp,
+            bottomStart = if (last) 18.dp else 0.dp, bottomEnd = if (last) 18.dp else 0.dp
+        ),
+        color = MaterialTheme.colorScheme.cardContainer
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp).padding(top = if (first) 14.dp else 0.dp, bottom = if (last) 14.dp else 10.dp)) {
+            content()
         }
-        PlaybackInsightRow(
-            track = track,
-            label = timeLabel(entry),
-            onClick = { onTrackClick(track) }
-        )
     }
+}
+
+@Composable
+private fun InsightEmptyText(textRes: Int) {
+    Text(
+        text = stringResource(textRes),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(vertical = 8.dp)
+    )
 }
 
 @Composable
@@ -431,6 +492,7 @@ private fun PlaybackInsightRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .testTag("stats-insight-row:${track.path}")
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .padding(vertical = 4.dp, horizontal = 4.dp),
@@ -1003,55 +1065,51 @@ private fun TopWorksSection(
 }
 
 @Composable
-private fun DayTimelineSection(
-    date: String,
-    sessions: List<ListeningSessionRecord>,
-    onSessionClick: (ListeningSessionRecord) -> Unit
-) {
-    Column(
+private fun DayTimelineHeader(date: String) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 4.dp, bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+            .padding(top = 4.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_calendar),
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Text(
-                text = formatDateHeader(date),
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
+        Icon(
+            painter = painterResource(R.drawable.ic_calendar),
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Text(
+            text = formatDateHeader(date),
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
 
-        if (sessions.isEmpty()) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.cardContainer)
-            ) {
-                Text(
-                    text = stringResource(R.string.stats_day_empty),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp)
-                )
-            }
-        } else {
-            sessions.forEachIndexed { index, session ->
-                TimelineRow(
-                    session = session,
-                    isLast = index == sessions.lastIndex,
-                    onClick = { onSessionClick(session) }
-                )
-            }
+@Composable
+private fun EmptyDayTimeline() {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.cardContainer)
+    ) {
+        Text(
+            text = stringResource(R.string.stats_day_empty),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp)
+        )
+    }
+}
+
+@Composable
+private fun rememberStatsTimeFormat(pattern: String): SimpleDateFormat {
+    val locale = LocalConfiguration.current.locales[0] ?: Locale.getDefault()
+    val timeZone = TimeZone.getDefault()
+    return remember(pattern, locale, timeZone) {
+        SimpleDateFormat(pattern, locale).apply {
+            this.timeZone = timeZone
         }
     }
 }
@@ -1060,6 +1118,7 @@ private fun DayTimelineSection(
 private fun TimelineRow(
     session: ListeningSessionRecord,
     isLast: Boolean,
+    timeFormat: SimpleDateFormat,
     onClick: () -> Unit
 ) {
     val cover by produceState<Bitmap?>(initialValue = null, key1 = session.mediaPath) {
@@ -1068,6 +1127,7 @@ private fun TimelineRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .testTag("stats-timeline-row:${session.id}")
             .height(IntrinsicSize.Min),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -1076,7 +1136,9 @@ private fun TimelineRow(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(session.startAtMs)),
+                text = remember(session.startAtMs, timeFormat) {
+                    timeFormat.format(Date(session.startAtMs))
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1180,6 +1242,7 @@ private fun heatmapColor(level: Int): Color {
     }
 }
 
+private const val INSIGHT_PAGE_SIZE = 20
 private val CELL_SIZE = 13.dp
 private val CELL_GAP = 3.dp
 

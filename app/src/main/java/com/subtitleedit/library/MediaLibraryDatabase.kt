@@ -7,7 +7,7 @@ import android.database.sqlite.SQLiteOpenHelper
 
 /** Schema upgrades extend the original tables in place; user collections are never rebuilt. */
 internal class MediaLibraryDatabase(context: Context, name: String = NAME) :
-    SQLiteOpenHelper(context.applicationContext, name, null, 3) {
+    SQLiteOpenHelper(context.applicationContext, name, null, 4) {
 
     init {
         setWriteAheadLoggingEnabled(true)
@@ -17,6 +17,7 @@ internal class MediaLibraryDatabase(context: Context, name: String = NAME) :
         createOriginalTables(db)
         createAccountingTables(db)
         MediaAlbumMetadataStore.createTable(db)
+        createPathIndexes(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -34,6 +35,18 @@ internal class MediaLibraryDatabase(context: Context, name: String = NAME) :
         if (oldVersion < 3) {
             MediaAlbumMetadataStore.createTable(db)
         }
+        if (oldVersion < 4) {
+            createPathIndexes(db)
+        }
+    }
+
+    /**
+     * The statistics page looks rows up by media path (never-played tracks, top works). Without
+     * these indexes each lookup scans the whole table, once per library track.
+     */
+    private fun createPathIndexes(db: SQLiteDatabase) {
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_listening_sessions_path ON listening_sessions(media_path)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_listening_day_plays_path ON listening_day_plays(path,date)")
     }
 
     private fun createOriginalTables(db: SQLiteDatabase) {

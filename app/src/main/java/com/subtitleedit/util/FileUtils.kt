@@ -55,19 +55,22 @@ object FileUtils {
             get() = if (isAuto) SettingsManager.AUTO_ENCODING else charset.name()
     }
     
-    val SUPPORTED_ENCODINGS = listOf(
-        EncodingInfo(StandardCharsets.UTF_8, "自动", isAuto = true),
-        EncodingInfo(StandardCharsets.UTF_8, "UTF-8"),
-        EncodingInfo(StandardCharsets.UTF_16, "UTF-16"),
-        EncodingInfo(StandardCharsets.ISO_8859_1, "ISO-8859-1"),
-        EncodingInfo(Charset.forName("GBK"), "GBK"),
-        EncodingInfo(Charset.forName("GB2312"), "GB2312"),
-        EncodingInfo(Charset.forName("BIG5"), "BIG5 (繁体中文)"),
-        EncodingInfo(Charset.forName("Shift_JIS"), "Shift_JIS (日文)"),
-        EncodingInfo(Charset.forName("EUC-JP"), "EUC-JP (日文)"),
-        EncodingInfo(Charset.forName("EUC-KR"), "EUC-KR (韩文)"),
-        EncodingInfo(Charset.forName("windows-1252"), "Windows-1252 (西欧)")
-    )
+    // Extension-only callers should not initialize every charset during startup.
+    val SUPPORTED_ENCODINGS by lazy {
+        listOf(
+            EncodingInfo(StandardCharsets.UTF_8, "自动", isAuto = true),
+            EncodingInfo(StandardCharsets.UTF_8, "UTF-8"),
+            EncodingInfo(StandardCharsets.UTF_16, "UTF-16"),
+            EncodingInfo(StandardCharsets.ISO_8859_1, "ISO-8859-1"),
+            EncodingInfo(Charset.forName("GBK"), "GBK"),
+            EncodingInfo(Charset.forName("GB2312"), "GB2312"),
+            EncodingInfo(Charset.forName("BIG5"), "BIG5 (繁体中文)"),
+            EncodingInfo(Charset.forName("Shift_JIS"), "Shift_JIS (日文)"),
+            EncodingInfo(Charset.forName("EUC-JP"), "EUC-JP (日文)"),
+            EncodingInfo(Charset.forName("EUC-KR"), "EUC-KR (韩文)"),
+            EncodingInfo(Charset.forName("windows-1252"), "Windows-1252 (西欧)")
+        )
+    }
     
     /**
      * 检测文件编码

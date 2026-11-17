@@ -18,10 +18,13 @@ object UpdateChecker {
     private const val VERSION_URL =
         "https://nihaina.github.io/SubtitleEditforAndroid/version.json"
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .build()
+    // First used inside checkResult's IO block, keeping TLS setup off the startup thread.
+    private val client by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .build()
+    }
 
     data class UpdateInfo(
         val versionCode: Long,

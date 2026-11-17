@@ -15,6 +15,9 @@ import java.text.ParsePosition
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 
 object RuntimeLogManager {
     private const val LOG_DIR = "runtime_logs"
@@ -27,6 +30,7 @@ object RuntimeLogManager {
     private const val MAX_SIMPLE_DISPLAY_CHARS = 96_000
     private const val MAX_DETAILED_DISPLAY_CHARS = 180_000
     private const val MAX_DISPLAY_LINE_CHARS = 1_500
+    private const val LOGCAT_FLUSH_INTERVAL_MS = 1_000L
 
     private val fileTimeFormat = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
     private val displayTimeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
@@ -34,11 +38,14 @@ object RuntimeLogManager {
         """^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?:INFO|WARN|ERROR|FATAL|LOGCAT)/"""
     )
     private val lock = Any()
+    private val logIo = RuntimeLogIo()
 
     @Volatile
     private var installed = false
+    @Volatile
     private var appContext: Context? = null
     private var writer: BufferedWriter? = null
+    private var hasPendingWrites = false
     private var activeLogFile: File? = null
     private var logcatProcess: java.lang.Process? = null
     private var previousExceptionHandler: Thread.UncaughtExceptionHandler? = null
@@ -59,18 +66,25 @@ object RuntimeLogManager {
     fun install(application: Application) {
         synchronized(lock) {
             if (installed) return
-            installed = true
             appContext = application.applicationContext
-            pruneOldLogs(application, System.currentTimeMillis())
-            openWriterLocked(application, System.currentTimeMillis())
-            writeLocked("INFO", "RuntimeLog", "日志系统已启动，后台实时写入文件")
+            logIo.enqueue {
+                synchronized(lock) {
+                    pruneOldLogs(application, System.currentTimeMillis())
+                    openWriterLocked(application, System.currentTimeMillis())
+                    writeLocked("INFO", "RuntimeLog", "日志系统已启动，后台实时写入文件")
+                }
+            }
+            logIo.flushPeriodically(LOGCAT_FLUSH_INTERVAL_MS) {
+                synchronized(lock) { flushLocked() }
+            }
             previousExceptionHandler = Thread.getDefaultUncaughtExceptionHandler()
             Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-                recordCrash(thread, throwable)
+                runCatching { recordCrash(thread, throwable) }
                 previousExceptionHandler?.uncaughtException(thread, throwable)
             }
             application.registerActivityLifecycleCallbacks(createLifecycleCallbacks())
             startLogcatReader()
+            installed = true
         }
     }
 
@@ -79,8 +93,7 @@ object RuntimeLogManager {
         val now = System.currentTimeMillis()
         val appContext = context.applicationContext
         val since = maxOf(now - RETENTION_MS, getClearTime(appContext))
-        pruneOldLogs(context, now)
-        flush()
+        prepareRead(context, now)
 
         val packageName = appContext.packageName
         val collector = PreviewCollector(
@@ -114,8 +127,7 @@ object RuntimeLogManager {
         val now = System.currentTimeMillis()
         val appContext = context.applicationContext
         val since = maxOf(now - RETENTION_MS, getClearTime(appContext))
-        pruneOldLogs(context, now)
-        flush()
+        prepareRead(context, now)
 
         output.bufferedWriter(Charsets.UTF_8).use { writer ->
             writer.appendLine("TsumugiSub 运行日志")
@@ -131,7 +143,7 @@ object RuntimeLogManager {
     }
 
     fun exportFileName(now: Long = System.currentTimeMillis()): String {
-        return "subtitleedit-log-${fileTimeFormat.format(Date(now))}.txt"
+        return "subtitleedit-log-${formatFileTime(now)}.txt"
     }
 
     fun clear(context: Context) {
@@ -142,11 +154,13 @@ object RuntimeLogManager {
             .edit()
             .putLong(KEY_CLEAR_TIME, now)
             .apply()
-        synchronized(lock) {
-            closeWriterLocked()
-            logDir(appContext).listFiles()?.forEach { it.delete() }
-            openWriterLocked(appContext, now)
-            writeLocked("INFO", "RuntimeLog", "日志已清空并重新开始记录")
+        logIo.runAndWait {
+            synchronized(lock) {
+                closeWriterLocked()
+                logDir(appContext).listFiles()?.forEach { it.delete() }
+                openWriterLocked(appContext, now)
+                writeLocked("INFO", "RuntimeLog", "日志已清空并重新开始记录")
+            }
         }
     }
 
@@ -166,8 +180,13 @@ object RuntimeLogManager {
     }
 
     private fun pruneOldLogs(context: Context, now: Long) {
-        logDir(context).listFiles()
-            ?.filter { it.isFile && now - it.lastModified() > RETENTION_MS }
+        // A sparse buffered log may have an old mtime while its writer is still active.
+        pruneOldLogFiles(logDir(context), activeLogFile, now)
+    }
+
+    internal fun pruneOldLogFiles(directory: File, activeFile: File?, now: Long) {
+        directory.listFiles()
+            ?.filter { it != activeFile && it.isFile && now - it.lastModified() > RETENTION_MS }
             ?.forEach { it.delete() }
     }
 
@@ -179,7 +198,7 @@ object RuntimeLogManager {
 
     private fun openWriterLocked(context: Context, now: Long) {
         if (writer != null) return
-        activeLogFile = File(logDir(context), "runtime-live-${fileTimeFormat.format(Date(now))}.txt")
+        activeLogFile = File(logDir(context), "runtime-live-${formatFileTime(now)}.txt")
         writer = BufferedWriter(FileWriter(activeLogFile, true))
     }
 
@@ -189,34 +208,64 @@ object RuntimeLogManager {
             writer?.close()
         }
         writer = null
+        hasPendingWrites = false
         activeLogFile = null
     }
 
-    private fun flush() {
-        synchronized(lock) {
-            runCatching { writer?.flush() }
+    private fun prepareRead(context: Context, now: Long) {
+        // Drain queued app messages before reading, without waiting while holding the writer lock.
+        logIo.runAndWait {
+            synchronized(lock) {
+                flushLocked()
+                pruneOldLogs(context, now)
+            }
+        }
+    }
+
+    private fun flushLocked() {
+        if (!hasPendingWrites) return
+        runCatching {
+            writer?.flush()
+            hasPendingWrites = false
         }
     }
 
     private fun write(level: String, tag: String, message: String, throwable: Throwable? = null) {
-        synchronized(lock) {
-            val context = appContext ?: return
-            openWriterLocked(context, System.currentTimeMillis())
-            writeLocked(level, tag, message, throwable)
+        val context = appContext ?: return
+        val timestamp = System.currentTimeMillis()
+        val append = {
+            synchronized(lock) {
+                openWriterLocked(context, timestamp)
+                writeLocked(level, tag, message, throwable, timestamp)
+            }
         }
+        // Keep logcat backpressure on its reader thread; UI/lifecycle logs never wait for disk.
+        if (level == "LOGCAT") runCatching { append() } else logIo.enqueue(append)
     }
 
-    private fun writeLocked(level: String, tag: String, message: String, throwable: Throwable? = null) {
-        val timestamp = formatDisplayTime(System.currentTimeMillis())
+    private fun writeLocked(
+        level: String,
+        tag: String,
+        message: String,
+        throwable: Throwable? = null,
+        timestampMs: Long = System.currentTimeMillis()
+    ) {
+        val timestamp = formatDisplayTime(timestampMs)
         writer?.apply {
+            hasPendingWrites = true
             write("$timestamp $level/$tag: $message")
             newLine()
             if (throwable != null) {
                 write(stackTraceToString(throwable))
                 newLine()
             }
-            flush()
+            // Batch logcat bursts, but persist sparse output within the periodic flush interval.
+            if (level != "LOGCAT") flushLocked()
         }
+    }
+
+    private fun formatFileTime(timestamp: Long): String = synchronized(fileTimeFormat) {
+        fileTimeFormat.format(Date(timestamp))
     }
 
     private fun formatDisplayTime(timestamp: Long): String = synchronized(displayTimeFormat) {
@@ -390,28 +439,30 @@ object RuntimeLogManager {
     }
 
     private fun recordCrash(thread: Thread, throwable: Throwable) {
-        synchronized(lock) {
-            val context = appContext
-            if (context != null) {
-                openWriterLocked(context, System.currentTimeMillis())
+        logIo.runAndWait {
+            synchronized(lock) {
+                val context = appContext
+                if (context != null) {
+                    openWriterLocked(context, System.currentTimeMillis())
+                }
+                writeLocked("FATAL", "Crash", "未捕获异常，线程=${thread.name}", throwable)
+                val recentLogcat = runLogcat(
+                    listOf(
+                        "logcat",
+                        "-d",
+                        "-v",
+                        "time",
+                        "-t",
+                        MAX_LOGCAT_CRASH_LINES.toString(),
+                        "--pid",
+                        AndroidProcess.myPid().toString()
+                    )
+                ).trim()
+                if (recentLogcat.isNotBlank()) {
+                    writeLocked("FATAL", "CrashLogcat", "\n$recentLogcat")
+                }
+                flushLocked()
             }
-            writeLocked("FATAL", "Crash", "未捕获异常，线程=${thread.name}", throwable)
-            val recentLogcat = runLogcat(
-                listOf(
-                    "logcat",
-                    "-d",
-                    "-v",
-                    "time",
-                    "-t",
-                    MAX_LOGCAT_CRASH_LINES.toString(),
-                    "--pid",
-                    AndroidProcess.myPid().toString()
-                )
-            ).trim()
-            if (recentLogcat.isNotBlank()) {
-                writeLocked("FATAL", "CrashLogcat", "\n$recentLogcat")
-            }
-            runCatching { writer?.flush() }
         }
     }
 
@@ -432,5 +483,41 @@ object RuntimeLogManager {
         val stringWriter = StringWriter()
         throwable.printStackTrace(PrintWriter(stringWriter))
         return stringWriter.toString()
+    }
+}
+
+/** Serializes app log I/O and provides a barrier for readers, clearing and Java crash handling. */
+internal class RuntimeLogIo(
+    private val executor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { task ->
+        Thread(task, "RuntimeLogWriter").apply { isDaemon = true }
+    }
+) {
+    private val onWriterThread = ThreadLocal<Boolean>()
+
+    fun enqueue(block: () -> Unit) {
+        executor.execute { runOnWriter { runCatching(block) } }
+    }
+
+    fun runAndWait(block: () -> Unit) {
+        if (onWriterThread.get() == true) block()
+        else executor.submit { runOnWriter(block) }.get()
+    }
+
+    fun flushPeriodically(intervalMs: Long, block: () -> Unit) {
+        executor.scheduleWithFixedDelay(
+            { runOnWriter { runCatching(block) } },
+            intervalMs,
+            intervalMs,
+            TimeUnit.MILLISECONDS
+        )
+    }
+
+    private fun runOnWriter(block: () -> Unit) {
+        onWriterThread.set(true)
+        try {
+            block()
+        } finally {
+            onWriterThread.remove()
+        }
     }
 }
