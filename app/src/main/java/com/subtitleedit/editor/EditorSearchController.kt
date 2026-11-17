@@ -35,6 +35,9 @@ class EditorSearchController(
     private val engine = SearchReplaceEngine()
     private val searchReplaceSubtitle = SearchReplaceSubtitleUseCase()
     private var listResultEntries: List<SubtitleEntry> = emptyList()
+    private var searchedEntries: List<SubtitleEntry>? = null
+    private var searchedEntryCount = 0
+    private var listMatcher: Regex? = null
     private var matchCase = false
     private var wholeWord = false
     private var applyingSourceReplacement = false
@@ -77,8 +80,9 @@ class EditorSearchController(
         performSearch(announce = false)
     }
 
-    fun onDocumentChanged() {
+    fun onDocumentChanged(changedPositions: List<Int>? = null) {
         if (applyingEntryReplacement || !isSearchVisible() || engine.query.isEmpty()) return
+        if (!isSourceViewMode() && changedPositions != null && updateListResults(changedPositions)) return
         performSearch(
             announce = false,
             scrollToCurrent = false,
@@ -86,10 +90,40 @@ class EditorSearchController(
         )
     }
 
+    /** Field-only edits keep positions stable. Recheck just those rows, retaining all other matches. */
+    private fun updateListResults(changedPositions: List<Int>): Boolean {
+        val current = entries()
+        val matcher = listMatcher ?: return false
+        if (current !== searchedEntries || current.size != searchedEntryCount) return false
+        var updatedResults: MutableList<Int>? = null
+        for (position in changedPositions) {
+            val entry = current.getOrNull(position) ?: return false
+            val oldIndex = engine.results.binarySearch(position)
+            val matches = matchesListEntry(entry, matcher)
+            if (matches == (oldIndex >= 0) &&
+                (oldIndex < 0 || listResultEntries[oldIndex] === entry)) continue
+
+            val results = updatedResults ?: engine.results.toMutableList().also { updatedResults = it }
+            val index = results.binarySearch(position)
+            if (matches && index < 0) results.add(-index - 1, position)
+            else if (!matches && index >= 0) results.removeAt(index)
+        }
+        // Normal timing MOVE events leave membership unchanged: no result copies, count or highlight refresh.
+        val results = updatedResults ?: return true
+        val resultEntries = results.map { current[it] }
+        val retainedIndex = SearchResultRetention.preferredIndex(listResultEntries, engine.currentIndex, resultEntries)
+        engine.setResults(results, preferredIndex = retainedIndex)
+        listResultEntries = resultEntries
+        updateResultCount()
+        highlightCurrentListResult()
+        return true
+    }
+
     /** 在源码视图切换前丢弃搜索结果和高亮，避免旧 Spannable 继续保留大文本。 */
     fun clearSourceWorkForTransition() {
         applyingSourceReplacement = false
         engine.clearResults()
+        clearListSearch()
         clearSourceHighlights()
         updateResultCount()
     }
@@ -104,7 +138,7 @@ class EditorSearchController(
                 if (!engine.setQueryIfChanged(query)) return
                 if (query.isEmpty()) {
                     engine.clearResults()
-                    listResultEntries = emptyList()
+                    clearListSearch()
                     clearHighlights()
                     updateResultCount()
                 } else {
@@ -330,7 +364,7 @@ class EditorSearchController(
         scrollToCurrent: Boolean = true
     ) {
         val content = binding.etSourceView.getDocumentText()
-        listResultEntries = emptyList()
+        clearListSearch()
         if (engine.query.isEmpty() || content.isEmpty()) {
             engine.clearResults()
             clearSourceHighlights()
@@ -356,25 +390,23 @@ class EditorSearchController(
         val query = engine.query
         if (query.isEmpty()) {
             engine.clearResults()
-            listResultEntries = emptyList()
+            clearListSearch()
             subtitleAdapter.clearSearchHighlight()
             updateResultCount()
             return
         }
+        val current = entries()
+        val matcher = SearchTextMatcher.literalRegex(query, matchCase, wholeWord) ?: return
         val previousResultEntries = listResultEntries
         val previousIndex = engine.currentIndex
-        val matchingEntries = entries().mapIndexedNotNull { index, entry ->
-            val matchesText = SearchTextMatcher.contains(entry.text, query, matchCase, wholeWord)
-            val matchesTime = SearchTextMatcher.contains(
-                TimeUtils.formatForDisplay(entry.startTime),
-                query,
-                matchCase,
-                wholeWord
-            )
-            if (matchesText || matchesTime) index to entry else null
+        val results = ArrayList<Int>()
+        val newResultEntries = ArrayList<SubtitleEntry>()
+        current.forEachIndexed { index, entry ->
+            if (matchesListEntry(entry, matcher)) {
+                results.add(index)
+                newResultEntries.add(entry)
+            }
         }
-        val results = matchingEntries.map { it.first }
-        val newResultEntries = matchingEntries.map { it.second }
         val retainedIndex = if (
             retainCurrentResult &&
             preferredResultPosition == null &&
@@ -390,6 +422,9 @@ class EditorSearchController(
         }
         engine.setResults(results, preferredResultPosition, preferredIndex ?: retainedIndex)
         listResultEntries = newResultEntries
+        searchedEntries = current
+        searchedEntryCount = current.size
+        listMatcher = matcher
         updateResultCount()
         if (announce) announceResults()
         if (scrollToCurrent) {
@@ -398,6 +433,9 @@ class EditorSearchController(
             highlightCurrentListResult()
         }
     }
+
+    private fun matchesListEntry(entry: SubtitleEntry, matcher: Regex): Boolean =
+        matcher.containsMatchIn(entry.text) || matcher.containsMatchIn(TimeUtils.formatForDisplay(entry.startTime))
 
     private fun highlightSourceResults(contentLength: Int, scrollToCurrent: Boolean) {
         clearSourceHighlights()
@@ -543,9 +581,16 @@ class EditorSearchController(
 
     private fun clearSearchState() {
         engine.clearAll()
-        listResultEntries = emptyList()
+        clearListSearch()
         clearHighlights()
         updateResultCount()
+    }
+
+    private fun clearListSearch() {
+        listResultEntries = emptyList()
+        searchedEntries = null
+        listMatcher = null
+        searchedEntryCount = 0
     }
 
     private fun isSearchVisible(): Boolean = binding.searchBar.isVisible

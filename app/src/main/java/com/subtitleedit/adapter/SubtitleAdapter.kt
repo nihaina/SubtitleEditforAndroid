@@ -62,17 +62,30 @@ class SubtitleAdapter(
     override fun onBindViewHolder(holder: SubtitleViewHolder, position: Int) {
         holder.bind(getItem(position), position, isSelected(position))
     }
+
+    override fun onCurrentListChanged(previousList: MutableList<SubtitleEntry>, currentList: MutableList<SubtitleEntry>) {
+        super.onCurrentListChanged(previousList, currentList)
+        if (searchQuery.isEmpty()) return
+        val previousId = previousList.getOrNull(searchHighlightPosition)?.stableId
+        if (previousId == currentList.getOrNull(searchHighlightPosition)?.stableId) return
+        // A remove/move may reuse a holder at the same search position without rebinding its text/background.
+        val movedPosition = previousId?.let { id -> currentList.indexOfFirst { it.stableId == id } } ?: -1
+        setOf(movedPosition, searchHighlightPosition).filter { it in currentList.indices }
+            .forEach { notifyItemChanged(it, PAYLOAD_SEARCH_HIGHLIGHT) }
+    }
     
     override fun onBindViewHolder(holder: SubtitleViewHolder, position: Int, payloads: MutableList<Any>) {
         if (payloads.isEmpty() || payloads.any {
-                it != PAYLOAD_PLAYING && it != PAYLOAD_SELECTION && it != PAYLOAD_TIME_CONFLICT && it != PAYLOAD_INDEX
+                it != PAYLOAD_PLAYING && it != PAYLOAD_SELECTION && it != PAYLOAD_TIME_CONFLICT &&
+                    it != PAYLOAD_INDEX && it != PAYLOAD_SEARCH_HIGHLIGHT
             }) {
             onBindViewHolder(holder, position)
             return
         }
         if (PAYLOAD_TIME_CONFLICT in payloads) holder.bindTimeColors(currentList, position)
         if (PAYLOAD_INDEX in payloads) holder.bindIndex(getItem(position).index)
-        if (PAYLOAD_PLAYING in payloads) holder.bindPlaying(position == currentPlayingPosition)
+        if (PAYLOAD_PLAYING in payloads) holder.bindBackground(position)
+        if (PAYLOAD_SEARCH_HIGHLIGHT in payloads) holder.bindSearchHighlight(getItem(position), position)
         if (PAYLOAD_SELECTION in payloads) holder.bindSelection(isSelected(position))
     }
 
@@ -94,6 +107,7 @@ class SubtitleAdapter(
         const val PAYLOAD_PLAYING   = "playing"
         const val PAYLOAD_TIME_CONFLICT = "time_conflict"
         const val PAYLOAD_INDEX = "index"
+        const val PAYLOAD_SEARCH_HIGHLIGHT = "search_highlight"
         private const val SELECTION_REFRESH_THRESHOLD = 200
     }
 
@@ -254,6 +268,7 @@ class SubtitleAdapter(
     private var searchQuery: String = ""
     private var searchMatchCase: Boolean = false
     private var searchWholeWord: Boolean = false
+    private var searchMatcher: Regex? = null
     
     // 当前播放的字幕位置（用于音频播放时高亮）
     private var currentPlayingPosition: Int = -1
@@ -267,22 +282,32 @@ class SubtitleAdapter(
         matchCase: Boolean = false,
         wholeWord: Boolean = false
     ) {
+        if (searchHighlightPosition == position && searchQuery == query &&
+            searchMatchCase == matchCase && searchWholeWord == wholeWord) return
+        val previousPosition = searchHighlightPosition
+        if (searchQuery != query || searchMatchCase != matchCase || searchWholeWord != wholeWord) {
+            searchMatcher = SearchTextMatcher.literalRegex(query, matchCase, wholeWord)
+        }
         searchHighlightPosition = position
         searchQuery = query
         searchMatchCase = matchCase
         searchWholeWord = wholeWord
-        notifyAllItemsChanged()
+        setOf(previousPosition, position).filter { it in 0 until itemCount }
+            .forEach { notifyItemChanged(it, PAYLOAD_SEARCH_HIGHLIGHT) }
     }
     
     /**
      * 清除搜索高亮
      */
     fun clearSearchHighlight() {
+        if (searchHighlightPosition == -1 && searchQuery.isEmpty()) return
+        val previousPosition = searchHighlightPosition
         searchHighlightPosition = -1
         searchQuery = ""
         searchMatchCase = false
         searchWholeWord = false
-        notifyAllItemsChanged()
+        searchMatcher = null
+        if (previousPosition in 0 until itemCount) notifyItemChanged(previousPosition, PAYLOAD_SEARCH_HIGHLIGHT)
     }
     
     /**
@@ -341,13 +366,47 @@ class SubtitleAdapter(
         /**
          * 只刷新播放高亮背景（用于 payload 刷新）
          */
-        fun bindPlaying(isPlaying: Boolean) {
+        fun bindBackground(position: Int) {
             itemView.setBackgroundColor(
-                if (isPlaying)
-                    ContextCompat.getColor(itemView.context, R.color.playing_highlight)
-                else
-                    android.graphics.Color.TRANSPARENT
+                when {
+                    position == searchHighlightPosition && searchQuery.isNotEmpty() ->
+                        ContextCompat.getColor(itemView.context, R.color.primary_container)
+                    position == currentPlayingPosition -> ContextCompat.getColor(itemView.context, R.color.playing_highlight)
+                    else -> android.graphics.Color.TRANSPARENT
+                }
             )
+        }
+
+        fun bindSearchHighlight(entry: SubtitleEntry, position: Int) {
+            bindBackground(position)
+            // 保留字幕中的换行，由 TextView 的 maxLines 限制列表预览高度。
+            val displayText = entry.text
+            
+            // 检查是否需要高亮搜索
+            if (position == searchHighlightPosition && searchQuery.isNotEmpty()) {
+                // 高亮文本中的搜索词
+                val matchRange = searchMatcher?.find(displayText)?.range
+                if (matchRange != null) {
+                    val spannable = SpannableString(displayText)
+                    spannable.setSpan(
+                        BackgroundColorSpan(ContextCompat.getColor(itemView.context, R.color.inverse_primary)),
+                        matchRange.first,
+                        matchRange.last + 1,
+                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                    spannable.setSpan(
+                        StyleSpan(Typeface.BOLD),
+                        matchRange.first,
+                        matchRange.last + 1,
+                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                    tvSubtitleText.text = spannable
+                } else {
+                    tvSubtitleText.text = displayText
+                }
+            } else {
+                tvSubtitleText.text = displayText
+            }
         }
 
         fun bind(entry: SubtitleEntry, position: Int, isSelected: Boolean) {
@@ -375,49 +434,7 @@ class SubtitleAdapter(
             // 根据是否为音频文件模式控制按钮显示
             btnJumpToTime.visibility = if (hasPlayableMedia) View.VISIBLE else View.GONE
             btnSetTime.visibility = if (hasPlayableMedia) View.VISIBLE else View.GONE
-
-            // 保留字幕中的换行，由 TextView 的 maxLines 限制列表预览高度。
-            val displayText = entry.text
-            
-            // 检查是否需要高亮搜索
-            if (position == searchHighlightPosition && searchQuery.isNotEmpty()) {
-                // 高亮整个条目背景
-                itemView.setBackgroundColor(ContextCompat.getColor(itemView.context, R.color.primary_container))
-                
-                // 高亮文本中的搜索词
-                val matchRange = SearchTextMatcher.firstMatchRange(
-                    displayText,
-                    searchQuery,
-                    searchMatchCase,
-                    searchWholeWord
-                )
-                if (matchRange != null) {
-                    val spannable = SpannableString(displayText)
-                    spannable.setSpan(
-                        BackgroundColorSpan(ContextCompat.getColor(itemView.context, R.color.inverse_primary)),
-                        matchRange.first,
-                        matchRange.last + 1,
-                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-                    )
-                    spannable.setSpan(
-                        StyleSpan(Typeface.BOLD),
-                        matchRange.first,
-                        matchRange.last + 1,
-                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-                    )
-                    tvSubtitleText.text = spannable
-                } else {
-                    tvSubtitleText.text = displayText
-                }
-            } else if (position == currentPlayingPosition) {
-                // 高亮当前播放的字幕（使用淡黄色，避免遮挡时间轴）
-                itemView.setBackgroundColor(ContextCompat.getColor(itemView.context, R.color.playing_highlight))
-                tvSubtitleText.text = displayText
-            } else {
-                // 恢复正常背景
-                itemView.setBackgroundColor(ContextCompat.getColor(itemView.context, android.R.color.transparent))
-                tvSubtitleText.text = displayText
-            }
+            bindSearchHighlight(entry, position)
 
             // 设置选中状态
             ivSelected.visibility = if (isSelected) View.VISIBLE else View.GONE

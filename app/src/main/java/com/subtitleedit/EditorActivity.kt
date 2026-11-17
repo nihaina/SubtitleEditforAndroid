@@ -3896,7 +3896,7 @@ class EditorActivity : AppCompatActivity() {
             markAsChanged()
         }
         if (::playbackController.isInitialized) playbackController.invalidateHighlightCache()
-        if (::searchController.isInitialized) searchController.onDocumentChanged()
+        if (::searchController.isInitialized) searchController.onDocumentChanged(positionList)
         scheduleSubtitlePreview()
         renderVersion?.let(::hideListLoadingAfterRender)
     }
