@@ -58,6 +58,9 @@ class SettingsPageLayoutTest {
         }
         val backup = compose.activity.getString(R.string.settings_backup)
         val restore = compose.activity.getString(R.string.settings_restore)
+        // The general section is longer than this viewport. Its lower rows must be deferred,
+        // while still becoming reachable through normal list scrolling.
+        compose.onNodeWithText(compose.activity.getString(R.string.activity_settings_software_directory)).assertDoesNotExist()
         compose.onNodeWithText(backup).assertDoesNotExist()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText(backup))
         val row = compose.onNodeWithText(backup)

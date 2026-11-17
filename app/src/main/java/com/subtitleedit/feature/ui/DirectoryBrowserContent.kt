@@ -42,14 +42,14 @@ private fun initialDirectoryPosition(state: MainActivityScreenState): Pair<Int, 
 @Composable
 internal fun rememberDirectoryListState(state: MainActivityScreenState): LazyListState =
     key(state.currentDirectory?.absolutePath, state.viewMode) {
-        val (index, offset) = initialDirectoryPosition(state)
+        val (index, offset) = remember { initialDirectoryPosition(state) }
         rememberLazyListState(index, offset)
     }
 
 @Composable
 internal fun rememberDirectoryGridState(state: MainActivityScreenState): LazyGridState =
     key(state.currentDirectory?.absolutePath, state.viewMode) {
-        val (index, _) = initialDirectoryPosition(state)
+        val (index, _) = remember { initialDirectoryPosition(state) }
         rememberLazyGridState(index, 0)
     }
 
@@ -64,6 +64,31 @@ internal fun DirectoryBrowserContent(
     gridState: LazyGridState = rememberDirectoryGridState(state),
     isActive: Boolean = true,
     onRevealFinished: (Long) -> Unit = {}
+) {
+    DirectoryBrowserPage(
+        state = rememberDirectoryBrowserState(state),
+        onScrollPosition = onScrollPosition,
+        onDirectoryBreadcrumbClick = onDirectoryBreadcrumbClick,
+        onFileClick = onFileClick,
+        onFileLongClick = onFileLongClick,
+        listState = listState,
+        gridState = gridState,
+        isActive = isActive,
+        onRevealFinished = onRevealFinished,
+    )
+}
+
+@Composable
+private fun DirectoryBrowserPage(
+    state: DirectoryBrowserState,
+    onScrollPosition: (() -> DirectoryScrollPosition) -> Unit,
+    onDirectoryBreadcrumbClick: (File) -> Boolean,
+    onFileClick: (File) -> Unit,
+    onFileLongClick: (File) -> Unit,
+    listState: LazyListState,
+    gridState: LazyGridState,
+    isActive: Boolean,
+    onRevealFinished: (Long) -> Unit,
 ) {
     // Directory long-press keeps file operations; only an already active media selection takes over.
     val mediaSelection = com.subtitleedit.ui.LocalMediaSelection.current?.takeIf { it.active }

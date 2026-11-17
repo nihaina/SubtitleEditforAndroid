@@ -21,7 +21,6 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.PaddingValues
@@ -65,7 +64,6 @@ import com.subtitleedit.ui.components.SectionHeader
 import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.ui.theme.AppSpacing
 import com.subtitleedit.ui.components.AppOption
-import com.subtitleedit.ui.components.SettingsGroup
 import com.subtitleedit.ui.components.SettingsRow as SharedSettingsRow
 import com.subtitleedit.ui.components.SettingsSwitchRow as SharedSettingsSwitchRow
 import java.util.Locale
@@ -149,11 +147,10 @@ fun SettingsScreen(
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(AppSpacing.Page),
-            verticalArrangement = Arrangement.spacedBy(AppSpacing.CardGap)
         ) {
-            item(key = "appearance") {
-                SettingsPageGroup(useMaterial3Visuals) {
-                    SettingsPageRow(
+            settingsGroupItems("appearance", 2, useMaterial3Visuals) { index ->
+                when (index) {
+                    0 -> SettingsPageRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.activity_settings_text_01),
                         iconRes = if (useMaterial3Visuals) R.drawable.ic_encoding else null,
@@ -162,7 +159,7 @@ fun SettingsScreen(
                         showArrow = true,
                         onClick = { showEncodingDialog = true }
                     )
-                    SettingsPageRow(
+                    1 -> SettingsPageRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.activity_settings_text_02),
                         value = state.themeLabel.ifBlank { stringResource(R.string.settings_theme_system) },
@@ -171,50 +168,50 @@ fun SettingsScreen(
                     )
                 }
             }
-            item(key = "appearance-gap") {
-                Spacer(Modifier.height(if (useMaterial3Visuals) 8.dp else 20.dp))
+            item(key = "appearance-gap", contentType = "group-gap") {
+                Spacer(Modifier.height(AppSpacing.CardGap * 2 + if (useMaterial3Visuals) 8.dp else 20.dp))
             }
-            item(key = "general") {
-                SettingsPageGroup(useMaterial3Visuals) {
-                    SettingsPageRow(
+            settingsGroupItems("general", 8, useMaterial3Visuals) { index ->
+                when (index) {
+                    0 -> SettingsPageRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.activity_settings_text_04),
                         iconRes = R.drawable.ic_model,
                         onClick = onOpenModelManagement
                     )
-                    SettingsPageRow(
+                    1 -> SettingsPageRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.activity_settings_ai_entry),
                         iconRes = R.drawable.ic_ai_translate,
                         onClick = onOpenAiSettings
                     )
-                    SettingsPageRow(
+                    2 -> SettingsPageRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.tts_settings),
                         iconRes = R.drawable.ic_tts,
                         onClick = onOpenTtsSettings
                     )
-                    SettingsPageRow(
+                    3 -> SettingsPageRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.activity_settings_text_05),
                         value = state.cacheSize,
                         iconRes = R.drawable.ic_delete_normal,
                         onClick = { showCacheDialog = true }
                     )
-                    SettingsPageRow(
+                    4 -> SettingsPageRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.activity_settings_text_06),
                         iconRes = R.drawable.ic_document,
                         onClick = onOpenLogs
                     )
-                    SettingsPageRow(
+                    5 -> SettingsPageRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.about),
                         iconRes = R.drawable.ic_info,
                         showArrow = true,
                         onClick = onOpenAbout
                     )
-                    SettingsPageRow(
+                    6 -> SettingsPageRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.activity_settings_software_directory),
                         value = state.softwareDirectory.ifBlank {
@@ -225,7 +222,7 @@ fun SettingsScreen(
                         showArrow = true,
                         onClick = onSelectSoftwareDirectory
                     )
-                    SettingsPageSwitchRow(
+                    7 -> SettingsPageSwitchRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.activity_settings_text_07),
                         description = stringResource(R.string.activity_settings_text_08),
@@ -234,12 +231,12 @@ fun SettingsScreen(
                     )
                 }
             }
-            item(key = "general-gap") {
-                Spacer(Modifier.height(if (useMaterial3Visuals) 8.dp else 20.dp))
+            item(key = "general-gap", contentType = "group-gap") {
+                Spacer(Modifier.height(AppSpacing.CardGap * 2 + if (useMaterial3Visuals) 8.dp else 20.dp))
             }
-            item(key = "directories") {
-                SettingsPageGroup(useMaterial3Visuals) {
-                    SettingsPageSwitchRow(
+            settingsGroupItems("directories", 1, useMaterial3Visuals) { index ->
+                when (index) {
+                    0 -> SettingsPageSwitchRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.activity_settings_text_17),
                         description = stringResource(R.string.activity_settings_text_18),
@@ -248,22 +245,22 @@ fun SettingsScreen(
                     )
                 }
             }
-            item(key = "directories-gap") {
-                Spacer(Modifier.height(if (useMaterial3Visuals) 8.dp else 20.dp))
+            item(key = "directories-gap", contentType = "group-gap") {
+                Spacer(Modifier.height(AppSpacing.CardGap * 2 + if (useMaterial3Visuals) 8.dp else 20.dp))
             }
-            item(key = "editor-heading") {
-                SectionHeader(stringResource(R.string.activity_settings_text_09))
+            item(key = "editor-heading", contentType = "heading") {
+                SectionHeader(stringResource(R.string.activity_settings_text_09), Modifier.padding(bottom = AppSpacing.CardGap))
             }
-            item(key = "editor") {
-                SettingsPageGroup(useMaterial3Visuals) {
-                    SettingsPageSwitchRow(
+            settingsGroupItems("editor", 2, useMaterial3Visuals) { index ->
+                when (index) {
+                    0 -> SettingsPageSwitchRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.activity_settings_text_10),
                         description = stringResource(R.string.activity_settings_text_11),
                         checked = state.loopSelectedSubtitle,
                         onCheckedChange = onLoopSelectedChanged
                     )
-                    SettingsPageSwitchRow(
+                    1 -> SettingsPageSwitchRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.activity_settings_text_19),
                         description = stringResource(R.string.activity_settings_text_20),
@@ -272,8 +269,8 @@ fun SettingsScreen(
                     )
                 }
             }
-            item(key = "editor-gap") {
-                Spacer(Modifier.height(if (useMaterial3Visuals) 8.dp else 20.dp))
+            item(key = "editor-gap", contentType = "group-gap") {
+                Spacer(Modifier.height(AppSpacing.CardGap * 2 + if (useMaterial3Visuals) 8.dp else 20.dp))
             }
             item(key = "backup") {
                 if (useMaterial3Visuals) SettingsBackupActions(
@@ -579,22 +576,6 @@ private fun SettingsPageSwitchRow(
                 { Icon(painterResource(R.drawable.ic_check), contentDescription = null, modifier = Modifier.size(SwitchDefaults.IconSize)) }
             } else null
         )
-    }
-}
-
-@Composable
-private fun SettingsPageGroup(
-    useMaterial3Visuals: Boolean,
-    content: @Composable ColumnScope.() -> Unit
-) {
-    if (useMaterial3Visuals) {
-        Column(
-            modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.extraLarge),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-            content = content
-        )
-    } else {
-        SettingsGroup(content = content)
     }
 }
 

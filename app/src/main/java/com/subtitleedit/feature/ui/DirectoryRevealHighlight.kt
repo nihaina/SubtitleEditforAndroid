@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.first
 /** Locating a file is distinct from restoring ordinary directory scroll positions. */
 @Composable
 internal fun rememberDirectoryRevealHighlight(
-    state: MainActivityScreenState,
+    state: DirectoryBrowserState,
     isActive: Boolean,
     scrollReady: Boolean,
     listState: LazyListState,
