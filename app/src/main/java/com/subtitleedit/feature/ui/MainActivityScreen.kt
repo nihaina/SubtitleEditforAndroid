@@ -3,19 +3,17 @@ package com.subtitleedit.feature.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -27,8 +25,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,13 +34,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.layout.WindowInsets
@@ -67,7 +61,6 @@ import com.subtitleedit.model.FileSortField
 import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.model.BrowserFileMetadata
 import java.io.File
-import com.subtitleedit.ui.theme.AppMotion
 
 private val EditorBottomNavigationItems = listOf(
     Triple(R.id.nav_directory, R.drawable.ic_nav_folder, R.string.nav_directory),
@@ -85,7 +78,7 @@ private val PlayerBottomNavigationItems = listOf(
     Triple(R.id.nav_settings, R.drawable.ic_settings, R.string.menu_main_title_02)
 )
 
-private fun bottomNavigationItems(playerModeEnabled: Boolean) =
+internal fun bottomNavigationItems(playerModeEnabled: Boolean) =
     if (playerModeEnabled) PlayerBottomNavigationItems else EditorBottomNavigationItems
 
 internal data class MainDirectoryScrollRequest(
@@ -538,71 +531,5 @@ private fun SelectionAction(modifier: Modifier, icon: Int, label: String, onClic
             style = MaterialTheme.typography.labelMedium,
             maxLines = 1
         )
-    }
-}
-
-@Composable
-internal fun MainBottomNavigation(selectedItemId: Int, playerModeEnabled: Boolean, onSelected: (Int) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().height(60.dp).background(MaterialTheme.colorScheme.surfaceContainer),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        bottomNavigationItems(playerModeEnabled).forEach { (id, icon, title) ->
-            val label = stringResource(title)
-            val selected = selectedItemId == id
-            val indicatorAlpha by animateFloatAsState(
-                targetValue = if (selected) 1f else 0f,
-                animationSpec = AppMotion.enter(),
-                label = "bottom-nav-indicator"
-            )
-            val indicatorScale by animateFloatAsState(
-                targetValue = if (selected) 1f else 0.6f,
-                animationSpec = AppMotion.enter(),
-                label = "bottom-nav-indicator-scale"
-            )
-            val tint by animateColorAsState(
-                targetValue = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-                animationSpec = AppMotion.fast(),
-                label = "bottom-nav-tint"
-            )
-            val interactionSource = remember { MutableInteractionSource() }
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .padding(vertical = 4.dp)
-                    .selectable(
-                        selected = selected,
-                        enabled = !selected,
-                        role = Role.Tab,
-                        interactionSource = interactionSource,
-                        indication = null,
-                        onClick = { if (!selected) onSelected(id) }
-                    ),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(width = 56.dp, height = 28.dp)
-                        .clip(MaterialTheme.shapes.extraLarge)
-                        .graphicsLayer {
-                            scaleX = indicatorScale
-                            scaleY = indicatorScale
-                        }
-                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = indicatorAlpha)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        painter = painterResource(icon),
-                        contentDescription = label,
-                        modifier = Modifier.size(24.dp),
-                        tint = tint
-                    )
-                }
-                Text(label, color = tint, style = MaterialTheme.typography.labelMedium, maxLines = 1)
-            }
-        }
     }
 }
