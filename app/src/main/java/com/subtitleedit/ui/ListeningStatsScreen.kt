@@ -828,79 +828,47 @@ private fun HeatmapSection(
                 val columns = remember(days) { StatsCalculator.buildHeatmapColumns(days) }
                 val monthLabels = remember(columns) { StatsCalculator.buildMonthLabels(columns) }
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val density = LocalDensity.current
-                val stridePx = with(density) { (CELL_SIZE + CELL_GAP).toPx() }
-                val gapPx = with(density) { CELL_GAP.toPx() }
-                val viewportWidthPx = constraints.maxWidth
-                // Keep the original horizontal ScrollState and month-label layout. Only the
-                // weeks in or next to the viewport need seven clickable cell compositions.
-                val visibleColumns by remember(scrollState, columns.size, stridePx, viewportWidthPx) {
-                    derivedStateOf {
-                        val width = viewportWidthPx.coerceAtLeast(1)
-                        val maxScroll = (columns.size * stridePx - gapPx - width).coerceAtLeast(0f)
-                        val offset = scrollState.value.toFloat().coerceIn(0f, maxScroll)
-                        val first = (offset / stridePx).toInt().minus(1).coerceAtLeast(0)
-                        val last = ((offset + width) / stridePx).toInt().plus(1).coerceAtMost(columns.lastIndex)
-                        first..last
-                    }
-                }
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("stats-heatmap-scroll")
-                        .horizontalScroll(scrollState),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(CELL_GAP)) {
-                        monthLabels.forEach { (label, span) ->
-                            Box(
-                                modifier = Modifier.width(CELL_SIZE * span + CELL_GAP * (span - 1)),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                Text(
-                                    text = label,
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1
-                                )
-                            }
+                    val density = LocalDensity.current
+                    val stridePx = with(density) { (STATS_HEATMAP_CELL_SIZE + STATS_HEATMAP_CELL_GAP).toPx() }
+                    val gapPx = with(density) { STATS_HEATMAP_CELL_GAP.toPx() }
+                    val viewportWidthPx = constraints.maxWidth
+                    // Keep the original horizontal ScrollState and month-label layout. Only the
+                    // weeks in or next to the viewport need seven clickable cell compositions.
+                    val visibleColumns by remember(scrollState, columns.size, stridePx, viewportWidthPx) {
+                        derivedStateOf {
+                            val width = viewportWidthPx.coerceAtLeast(1)
+                            val maxScroll = (columns.size * stridePx - gapPx - width).coerceAtLeast(0f)
+                            val offset = scrollState.value.toFloat().coerceIn(0f, maxScroll)
+                            val first = (offset / stridePx).toInt().minus(1).coerceAtLeast(0)
+                            val last = ((offset + width) / stridePx).toInt().plus(1).coerceAtMost(columns.lastIndex)
+                            first..last
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(CELL_GAP)) {
-                        columns.forEachIndexed { index, week ->
-                            // Keep one stable layout child for every week while cells enter/leave
-                            // the viewport. Swapping the Row's Spacer/Column nodes during a fling
-                            // can corrupt node insertion indices in the current Compose runtime.
-                            Box(Modifier.width(CELL_SIZE).height(CELL_SIZE * 7 + CELL_GAP * 6)) {
-                            if (index in visibleColumns) Column(verticalArrangement = Arrangement.spacedBy(CELL_GAP)) {
-                                week.forEach { day ->
-                                    if (day == null) {
-                                        Spacer(Modifier.size(CELL_SIZE))
-                                    } else {
-                                        val isSelected = day.date == selectedDate
-                                        val cellColor = heatmapColor(day.level)
-                                        val shape = RoundedCornerShape(3.dp)
-                                        Box(
-                                            modifier = Modifier
-                                                .size(CELL_SIZE)
-                                                .testTag("stats-heatmap-day:${day.date}")
-                                                .clip(shape)
-                                                .background(cellColor)
-                                                .then(
-                                                    if (isSelected) Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, shape)
-                                                    else if (day.level == 0) Modifier.border(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), shape)
-                                                    else Modifier
-                                                )
-                                                .clickable { onDayClick(day.date) }
-                                        )
-                                    }
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("stats-heatmap-scroll")
+                            .horizontalScroll(scrollState),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(STATS_HEATMAP_CELL_GAP)) {
+                            monthLabels.forEach { (label, span) ->
+                                Box(
+                                    modifier = Modifier.width(STATS_HEATMAP_CELL_SIZE * span + STATS_HEATMAP_CELL_GAP * (span - 1)),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
                                 }
                             }
-                            }
                         }
+                        StatsHeatmapGrid(columns, visibleColumns, selectedDate, onDayClick)
                     }
-                }
                 }
 
                 Row(
@@ -1236,21 +1204,7 @@ private fun loadStatsArtwork(path: String, size: Int, allowVideoFrame: Boolean =
     }
 }
 
-@Composable
-private fun heatmapColor(level: Int): Color {
-    val base = MaterialTheme.colorScheme.primary
-    return when (level) {
-        0 -> MaterialTheme.colorScheme.surfaceContainerHighest
-        1 -> base.copy(alpha = 0.28f)
-        2 -> base.copy(alpha = 0.50f)
-        3 -> base.copy(alpha = 0.74f)
-        else -> base
-    }
-}
-
 private const val INSIGHT_PAGE_SIZE = 20
-private val CELL_SIZE = 13.dp
-private val CELL_GAP = 3.dp
 
 private fun formatStatsDuration(ms: Long): String {
     val totalMinutes = ms.coerceAtLeast(0L) / 60_000L

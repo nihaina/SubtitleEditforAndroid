@@ -19,6 +19,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.swipeRight
+import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.subtitleedit.R
@@ -175,6 +176,32 @@ class ListeningStatsTransitionTest {
         compose.onNodeWithText("1月").assertIsNotDisplayed()
         compose.runOnIdle { assertNull(state.content) }
         gate.complete(Unit)
+    }
+
+    @Test fun calendarHandlesRepeatedReverseGesturesResizeAndYearReplacement() {
+        val today = ListeningDay.currentDate()
+        val year = today.take(4).toInt() - 1
+        val state = ListeningStatsPageState(today).apply { selectedYear = year; selectedDate = "$year-12-31" }
+        val width = mutableStateOf(300.dp)
+        compose.setContent {
+            SubtitleEditComposeTheme {
+                Surface(Modifier.requiredSize(width.value, 600.dp)) {
+                    ListeningStatsScreen(0, state) { _, requestedYear, _, _ -> content(today, requestedYear) }
+                }
+            }
+        }
+        compose.waitUntil(5_000L) { state.content != null }
+        val calendar = compose.onNodeWithTag("stats-heatmap-scroll")
+        repeat(4) { index ->
+            calendar.performTouchInput { swipeRight(durationMillis = 100L) }
+            compose.runOnIdle { width.value = if (index % 2 == 0) 360.dp else 300.dp }
+            calendar.performTouchInput { swipeLeft(durationMillis = 100L) }
+        }
+        compose.runOnIdle { state.selectedYear = year - 1; state.selectedDate = "${year - 1}-12-31" }
+        compose.waitUntil(5_000L) { state.content?.heatmapDays?.firstOrNull()?.date == "${year - 1}-01-01" }
+        compose.onNodeWithTag("stats-heatmap-day:${year - 1}-12-31").assertIsDisplayed().performTouchInput { click() }
+        compose.runOnIdle { assertEquals("${year - 1}-12-31", state.selectedDate) }
+        compose.onNodeWithTag("stats-heatmap-day:$year-12-31").assertDoesNotExist()
     }
 
     private fun content(today: String, year: Int): ListeningStatsContent {
