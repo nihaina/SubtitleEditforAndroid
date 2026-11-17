@@ -156,6 +156,29 @@ class BrowserFileMetadataRefreshTest {
         }
     }
 
+    @Test
+    fun switchingBetweenHostSnapshotsAndFallbackRestartsOnlyTheRequiredSource() {
+        withSourceFile { file ->
+            val supplied = mutableStateOf<BrowserFileMetadata?>(
+                BrowserFileMetadata(file, false, 20L, 1000L, revision = 1L)
+            )
+            compose.setContent {
+                val metadata = rememberBrowserFileMetadata(file, metadata = supplied.value)
+                Text("Size ${metadata?.size}")
+            }
+            compose.onNodeWithText("Size 20").assertIsDisplayed()
+            compose.runOnIdle { supplied.value = null }
+            compose.waitUntil(5000) { compose.onAllNodesWithText("Size 4").fetchSemanticsNodes().isNotEmpty() }
+            file.writeText("changed-data")
+            SharedFileCache.attributes.invalidate(file.path)
+            compose.waitUntil(5000) { compose.onAllNodesWithText("Size 12").fetchSemanticsNodes().isNotEmpty() }
+            compose.runOnIdle { supplied.value = BrowserFileMetadata(file, false, 30L, 2000L, revision = 2L) }
+            compose.onNodeWithText("Size 30").assertIsDisplayed()
+            SharedFileCache.attributes.invalidate(file.path)
+            compose.onNodeWithText("Size 30").assertIsDisplayed()
+        }
+    }
+
     private fun withSourceFile(block: (File) -> Unit) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val file = File(context.cacheDir, "metadata-refresh-${System.nanoTime()}.srt").apply { writeText("text") }

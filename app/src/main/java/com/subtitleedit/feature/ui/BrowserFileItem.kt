@@ -115,15 +115,14 @@ internal fun rememberBrowserFileMetadata(
     metadataRefreshKey: Any? = null,
     initialMetadata: BrowserFileMetadata? = null
 ): BrowserFileMetadata? {
+    // The directory loader already owns this snapshot. A second state/effect per row
+    // would only publish the same value and add work to the first directory frame.
+    if (metadata != null) return metadata
     val fallback by key(file.absolutePath) {
         produceState<BrowserFileMetadata?>(
-            metadata ?: initialMetadata ?: SharedFileCache.attributes.peek(file.absolutePath), file.absolutePath, metadata,
-            metadataRefreshKey.takeIf { metadata == null }
+            initialMetadata ?: SharedFileCache.attributes.peek(file.absolutePath), file.absolutePath,
+            metadataRefreshKey
         ) {
-            if (metadata != null) {
-                value = metadata
-                return@produceState
-            }
             // A conflated signal cannot miss this path during a burst. Other paths
             // remain cache hits, so they never trigger a metadata stat here.
             var first = true
@@ -137,7 +136,7 @@ internal fun rememberBrowserFileMetadata(
             }
         }
     }
-    return metadata ?: fallback?.takeIf { it.path == file.absolutePath }
+    return fallback?.takeIf { it.path == file.absolutePath }
 }
 
 @Composable

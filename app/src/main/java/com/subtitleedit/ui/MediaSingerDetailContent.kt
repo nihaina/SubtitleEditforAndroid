@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -124,7 +125,8 @@ internal fun MediaSingerDetailContent(
                             ) {
                                 MediaAlbumArtwork(
                                     mediaAlbumArtworkPaths(album, options.albumSortField, options.albumAscending),
-                                    Modifier.size(40.dp), album.tracks.map { it.modifiedAtMs }
+                                    Modifier.size(40.dp), album.tracks.map { it.modifiedAtMs },
+                                    with(LocalDensity.current) { 40.dp.roundToPx() }
                                 )
                                 Column(Modifier.weight(1f)) {
                                     Text(

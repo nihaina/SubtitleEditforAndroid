@@ -24,7 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
@@ -140,6 +140,13 @@ internal fun MediaAlbumBrowseContent(
                 // At phone width the reference sizes are four, three and two columns.
                 // Wider windows add columns while retaining each size's visual density.
                 val columns = (options.gridSize.compactColumns * (maxWidth.value / 360f).coerceAtLeast(1f)).toInt()
+                // Match GridCells.Fixed's pixel distribution, including remainder pixels.
+                // The size is known before cell composition, so artwork needs no subcomposition
+                // or after-measure state update of its own.
+                val density = LocalDensity.current
+                val artworkSpace = with(density) {
+                    (constraints.maxWidth - 8.dp.roundToPx() * 2 - 10.dp.roundToPx() * (columns - 1)).coerceAtLeast(0)
+                }
                 LazyVerticalGrid(
                     state = gridState,
                     columns = GridCells.Fixed(columns),
@@ -148,8 +155,9 @@ internal fun MediaAlbumBrowseContent(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(albums, key = { it.key }) { album ->
-                        AlbumGridCard(album, options, onClick = { onOpenAlbum(album) })
+                    itemsIndexed(albums, key = { _, album -> album.key }) { index, album ->
+                        val artworkWidth = artworkSpace / columns + if (index % columns < artworkSpace % columns) 1 else 0
+                        AlbumGridCard(album, options, artworkWidth, onClick = { onOpenAlbum(album) })
                     }
                 }
                 AppLazyGridScrollbar(gridState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
@@ -178,14 +186,14 @@ internal fun MediaAlbumBrowseContent(
 }
 
 @Composable
-private fun AlbumGridCard(album: MediaAlbum, options: MediaAlbumViewOptions, onClick: () -> Unit) {
+private fun AlbumGridCard(album: MediaAlbum, options: MediaAlbumViewOptions, artworkWidthPx: Int, onClick: () -> Unit) {
     OutlinedCard(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().testTag("album-item:${album.key}"),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        SortedAlbumArtwork(album, options, Modifier.fillMaxWidth().aspectRatio(1f))
+        SortedAlbumArtwork(album, options, Modifier.fillMaxWidth().aspectRatio(1f), artworkWidthPx)
         Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)) {
             Text(
                 album.name.ifBlank { stringResource(R.string.album_browse_unknown) },
@@ -213,7 +221,8 @@ private fun AlbumListRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (showArtwork) {
-            SortedAlbumArtwork(album, options, Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)))
+            SortedAlbumArtwork(album, options, Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
+                with(LocalDensity.current) { 48.dp.roundToPx() })
             Spacer(Modifier.width(12.dp))
         }
         Column(Modifier.weight(1f)) {
@@ -230,11 +239,11 @@ private fun AlbumListRow(
 }
 
 @Composable
-private fun SortedAlbumArtwork(album: MediaAlbum, options: MediaAlbumViewOptions, modifier: Modifier) {
+private fun SortedAlbumArtwork(album: MediaAlbum, options: MediaAlbumViewOptions, modifier: Modifier, targetSizePx: Int) {
     val paths = remember(album, options.sortField, options.ascending) {
         mediaAlbumArtworkPaths(album, options.sortField, options.ascending)
     }
-    MediaAlbumArtwork(paths, modifier, album.tracks.map { it.modifiedAtMs })
+    MediaAlbumArtwork(paths, modifier, album.tracks.map { it.modifiedAtMs }, targetSizePx)
 }
 
 @Composable
@@ -264,41 +273,50 @@ private fun AlbumMoreInfo(album: MediaAlbum) {
 
 /** Artwork work is tied to visible cells, uses bounded decoding, and never blocks composition. */
 @Composable
-internal fun MediaAlbumArtwork(paths: List<String>, modifier: Modifier = Modifier, reloadKey: Any? = null) {
-    BoxWithConstraints(
-        modifier = modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .testTag("album-artwork"),
-        contentAlignment = Alignment.Center
-    ) {
-        val density = LocalDensity.current
-        val targetSize = with(density) { maxWidth.toPx().toInt().coerceIn(32, 1024) }
-        var cover by remember(paths, targetSize, reloadKey) { mutableStateOf<Bitmap?>(null) }
-        LaunchedEffect(paths, targetSize, reloadKey) {
-            cover = withContext(Dispatchers.IO) {
-                var found: Bitmap? = null
-                for (path in paths.distinct()) {
-                    currentCoroutineContext().ensureActive()
-                    found = SharedFileCache.attributes.get(File(path))?.let { metadata -> SharedMediaCache.artwork(metadata, targetSize, allowVideoFrame = false) }
-                    if (found != null) break
-                }
-                found
+internal fun MediaAlbumArtwork(
+    paths: List<String>, modifier: Modifier = Modifier, reloadKey: Any? = null, targetSizePx: Int? = null,
+) {
+    val container = modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh).testTag("album-artwork")
+    if (targetSizePx != null) {
+        Box(container, contentAlignment = Alignment.Center) {
+            MediaAlbumArtworkContent(paths, targetSizePx.coerceIn(32, 1024), reloadKey)
+        }
+    } else {
+        BoxWithConstraints(container, contentAlignment = Alignment.Center) {
+            val targetSize = with(LocalDensity.current) { maxWidth.toPx().toInt().coerceIn(32, 1024) }
+            MediaAlbumArtworkContent(paths, targetSize, reloadKey)
+        }
+    }
+}
+
+@Composable
+private fun MediaAlbumArtworkContent(paths: List<String>, targetSize: Int, reloadKey: Any?) {
+    var cover by remember(paths, targetSize, reloadKey) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(paths, targetSize, reloadKey) {
+        cover = withContext(Dispatchers.IO) {
+            var found: Bitmap? = null
+            for (path in paths.distinct()) {
+                currentCoroutineContext().ensureActive()
+                found = SharedFileCache.attributes.get(File(path))?.let { metadata -> SharedMediaCache.artwork(metadata, targetSize, allowVideoFrame = false) }
+                if (found != null) break
             }
+            found
         }
-        val bitmap = cover
-        if (bitmap != null) {
-            Image(
-                bitmap.asImageBitmap(),
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        } else {
-            Icon(
-                painterResource(R.drawable.ic_nav_album),
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(0.5f),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
-            )
-        }
+    }
+    val bitmap = cover
+    if (bitmap != null) {
+        Image(
+            bitmap.asImageBitmap(),
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        Icon(
+            painterResource(R.drawable.ic_nav_album),
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(0.5f),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+        )
     }
 }
