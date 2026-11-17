@@ -38,7 +38,7 @@ internal object MediaLibraryFileObserver {
                 coverage.value = paths
             },
             onDirectoriesUpdated = directoryUpdates::publish,
-            configuredRoots = { FavoriteDirectoryStore(app).load().paths },
+            configuredRoots = { FavoriteDirectoryStore(app).load().mediaLibraryPaths },
             onIndexingChanged = { _indexing.value = it }).also { instance = it }
     }
 
@@ -80,6 +80,7 @@ internal class MediaLibraryObservation(
     private val pending = linkedMapOf<Pair<String, Long>, Pending>()
     private var flushScheduled = false
     private var roots = emptySet<String>()
+    private var retainedCatalogRoots: Set<String>? = null
     private var publishedCoverage = emptySet<String>()
     private val readyRoots = linkedSetOf<String>()
     private var appContext: Context? = null
@@ -96,7 +97,10 @@ internal class MediaLibraryObservation(
                             checkScanVersion(request.version)
                             appContext = request.context
                             // A picker scan may be queued after its directory has already been removed.
-                            val configured = configuredRoots?.invoke()
+                            val configured = configuredRootPaths()
+                            if (configured != null) {
+                                changeRoots(Request.Roots(request.context, configured, request.version))
+                            }
                             val directories = request.directories.filter { configured == null || it.absolutePath in configured }
                             if (request.directories.isNotEmpty() && directories.isEmpty()) {
                                 throw CancellationException("Scan directories were removed")
@@ -169,20 +173,32 @@ internal class MediaLibraryObservation(
 
     private fun changeRoots(request: Request.Roots, retainedPaths: Set<String> = request.paths) {
         appContext = request.context
-        if (roots == request.paths && request.removedPaths.isEmpty()) return
-        val added = request.paths - roots
-        roots = request.paths
+        val configured = configuredRootPaths()
+        val requestedPaths = configured ?: request.paths
+        if (roots == requestedPaths && request.removedPaths.isEmpty()) return
+        val added = requestedPaths - roots
+        roots = requestedPaths
         readyRoots.retainAll(roots)
         removeWatches { path -> roots.none { within(path, it) || File(it).parentFile?.absolutePath == path } }
-        val retainedDirectories = retainedPaths.map(::File)
-        // Root snapshots may briefly be empty while navigation reloads preferences.
-        // Only an explicit removal deletes the persisted catalog.
+        val retainedDirectories = (configured ?: retainedPaths).map(::File)
+        // Without an authoritative configuration, an empty navigation snapshot
+        // alone is not a removal. Configured roots are pruned separately above.
         request.removedPaths.forEach { repository.removeDirectoryFromLibrary(File(it), retainedDirectories) }
         added.mapNotNull { File(it).parentFile }.forEach(::observe)
         val unfinished = if (request.removedPaths.isNotEmpty()) roots - readyRoots else added
         if (unfinished.isNotEmpty() && request.version == scanVersion.get()) {
             reconcileNow(request.context, unfinished.map(::File), request.version)
         }
+    }
+
+    /** Preferences, when supplied, distinguish library roots from ordinary directory shortcuts. */
+    private fun configuredRootPaths(): Set<String>? {
+        val configured = configuredRoots?.invoke() ?: return null
+        if (configured != retainedCatalogRoots) {
+            repository.retainLibraryDirectories(configured.map(::File))
+            retainedCatalogRoots = configured.toSet()
+        }
+        return configured
     }
 
     private fun checkScanVersion(version: Long) {
@@ -234,8 +250,11 @@ internal class MediaLibraryObservation(
     }
 
     private fun applyChanges(request: Request.Changes) {
+        val context = appContext ?: return
+        configuredRoots?.invoke()?.takeIf { it != roots }?.let {
+            changeRoots(Request.Roots(context, it, request.version))
+        }
         if (watches[request.directory]?.token != request.token) return
-        if (appContext == null) return
         var paths = request.paths.filterTo(linkedSetOf()) { path -> roots.any { within(path, it) } }
         if (request.reset) {
             removeWatches { within(it, request.directory) }

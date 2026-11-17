@@ -22,6 +22,7 @@ import com.subtitleedit.library.MediaLibraryRepository
 import com.subtitleedit.library.PlayerTrackMetadataReader
 import com.subtitleedit.mpv.MPVLib
 import com.subtitleedit.ui.MediaCategory
+import com.subtitleedit.util.FavoriteDirectoryStore
 import java.io.Closeable
 import java.io.File
 import java.nio.ByteBuffer
@@ -74,7 +75,7 @@ class PlayerCategoryNavigationTest {
                     ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED)
                         .any { it is EditorActivity || it is MediaTagEditorActivity }
                 })
-                assertEquals("Navigation must not add a favorite directory", emptySet<String>(), f.favoritePaths())
+                assertEquals("Navigation must not change configured library directories", setOf(f.root.path), f.favoritePaths())
                 assertTrue("Grouping remains enabled after locating a file", f.groupingStores.all {
                     it.getBoolean("group_tracks", false)
                 })
@@ -97,7 +98,25 @@ class PlayerCategoryNavigationTest {
                 it.currentTrack?.path == track.path && it.ready && it.playing && !it.showTrackInfoDialog &&
                     !session.model.expanded.value
             }
-            assertEquals(emptySet<String>(), f.favoritePaths())
+            assertEquals(setOf(f.root.path), f.favoritePaths())
+        }
+    }
+
+    @Test fun externalFileInformationReadsTagsWithoutOfferingCatalogExpansion() = Fixture().use { f ->
+        val track = f.wav("external-info.wav")
+        f.writeTags(track)
+        f.open(track, registerLibrary = false).use { session ->
+            openInfo(session.model)
+            awaitState(session.model, "external information loads complete tags") {
+                it.trackInfo?.title == "Reveal Title" && it.trackInfo.artist == "Reveal Singer" &&
+                    it.trackInfo.genre == "Reveal Genre"
+            }
+            Thread.sleep(300L)
+            assertNull(findTag("player-info-open:GENRES"))
+            assertNull(findTag("player-info-open:SINGERS"))
+            assertNull(findTag("player-info-open:ALBUMS"))
+            assertTrue(f.favoritePaths().isEmpty())
+            assertFalse(MediaLibraryRepository.getInstance(app).isIndexedTrack(track.path))
         }
     }
 
@@ -163,6 +182,7 @@ class PlayerCategoryNavigationTest {
         private val previousPlayer = keys.associateWith { player.all[it] }
         private val favorites = app.getSharedPreferences("favorite_directories", Context.MODE_PRIVATE)
         private val previousFavoritePaths = favorites.all["paths"]
+        private val previousLibraryPaths = favorites.all["media_library_paths"]
         val groupingStores = listOf("media_album_view", "media_singer_view", "media_artist_view",
             "media_composer_view", "media_genre_view").map { app.getSharedPreferences(it, Context.MODE_PRIVATE) }
         private val previousGrouping = groupingStores.map { it.all["group_tracks"] }
@@ -173,7 +193,7 @@ class PlayerCategoryNavigationTest {
             assertTrue(player.edit().putBoolean("player_mode_enabled", true).putString("default_play_mode", PlayerPlayMode.SEQUENCE.name)
                 .putFloat("default_speed", 1f).putBoolean("resume_playback", false).putBoolean("eq_enabled", false)
                 .putBoolean("show_loudness_waveform", false).putBoolean("end_behavior_enabled", false).commit())
-            assertTrue(favorites.edit().putStringSet("paths", emptySet()).commit())
+            assertTrue(favorites.edit().putStringSet("paths", emptySet()).putStringSet("media_library_paths", emptySet()).commit())
             groupingStores.forEach { assertTrue(it.edit().putBoolean("group_tracks", true).commit()) }
         }
 
@@ -195,9 +215,15 @@ class PlayerCategoryNavigationTest {
                     MediaConvertMetadataField.COMPOSER, MediaConvertMetadataField.GENRE)))
             PlayerTrackMetadataReader.invalidate(file.path)
         }
-        fun open(track: File): Session = Session(ActivityScenario.launch(MainActivity::class.java)).also { session ->
-            onMain { session.model.openQueue(listOf(PlayerTrack(track.path, track.name, false)), 0) }
-            awaitState(session.model, "main audio playback starts") { it.ready && it.playing && it.positionMs > 250L }
+        fun open(track: File, registerLibrary: Boolean = true): Session {
+            if (registerLibrary) {
+                FavoriteDirectoryStore(app).addMediaLibrary(root)
+                repository.indexTrack(track.path)
+            }
+            return Session(ActivityScenario.launch(MainActivity::class.java)).also { session ->
+                onMain { session.model.openQueue(listOf(PlayerTrack(track.path, track.name, false)), 0) }
+                awaitState(session.model, "main audio playback starts") { it.ready && it.playing && it.positionMs > 250L }
+            }
         }
         override fun close() {
             val paths = root.walkTopDown().filter { it.isFile }.map { it.path }.toSet()
@@ -212,7 +238,10 @@ class PlayerCategoryNavigationTest {
             previousPlayer.forEach { (key, value) -> restore(playerEditor, key, value) }
             paths.forEach { playerEditor.remove("last_position_$it"); PlayerTrackMetadataReader.invalidate(it) }
             assertTrue(playerEditor.commit())
-            assertTrue(favorites.edit().also { restore(it, "paths", previousFavoritePaths) }.commit())
+            assertTrue(favorites.edit().also {
+                restore(it, "paths", previousFavoritePaths)
+                restore(it, "media_library_paths", previousLibraryPaths)
+            }.commit())
             groupingStores.zip(previousGrouping).forEach { (store, value) ->
                 assertTrue(store.edit().also { restore(it, "group_tracks", value) }.commit())
             }

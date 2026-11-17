@@ -30,7 +30,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Information links use path membership, including empty tags and songs outside scan roots. */
+/** Information links may locate existing catalog members, including songs with empty tags. */
 @RunWith(AndroidJUnit4::class)
 class MediaCategoryNavigationRevealTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
@@ -94,7 +94,7 @@ class MediaCategoryNavigationRevealTest {
         compose.onNodeWithTag("genre-detail").assertIsDisplayed()
     }
 
-    @Test fun anOutsideRootSongIsTemporaryAndNeverChangesTheScannedCatalogOrDirectories() {
+    @Test fun anOutsideRootSongCannotBeInsertedIntoClassificationThroughAnInformationLink() {
         val directory = File(root, "scanned").apply { mkdirs() }
         val scanned = albumTrack("scanned/indexed", "Indexed", "Singer", "Artist", "Composer", "Genre")
         val outside = wav("outside/target.wav")
@@ -104,19 +104,20 @@ class MediaCategoryNavigationRevealTest {
         val loadedRoots = mutableListOf<List<String>>()
         compose.setContent {
             SubtitleEditComposeTheme {
-                MediaAlbumScreen(refreshVersion = 0, favoriteDirectories = listOf(directory), isActive = true,
+                MediaAlbumScreen(refreshVersion = 0, mediaLibraryDirectories = listOf(directory), isActive = true,
                     pageState = state, catalogLoader = { roots -> loadedRoots += roots; listOf(scanned) })
             }
         }
-        compose.waitUntil(12_000L) { state.revealTrack?.track?.path == outside.path && state.prepared != null }
-        compose.onNodeWithTag("genre-detail").assertIsDisplayed()
-        compose.onNodeWithTag("genre-track:${outside.path}").assertIsDisplayed()
+        compose.waitUntil(12_000L) { state.revealRequest == null && state.prepared != null }
+        compose.onNodeWithTag("genre-detail").assertDoesNotExist()
+        compose.onNodeWithTag("genre-track:${outside.path}").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(listOf(scanned), state.catalog?.tracks)
             assertEquals(listOf(scanned), state.prepared?.catalog?.tracks)
             assertTrue(loadedRoots.isNotEmpty())
             assertTrue(loadedRoots.all { it == listOf(directory.path + "/") })
             assertTrue(state.prepared?.albums?.flatMap { it.tracks }?.none { it.track.path == outside.path } == true)
+            assertNull(state.revealTrack)
         }
     }
 
@@ -129,7 +130,7 @@ class MediaCategoryNavigationRevealTest {
         }
         compose.setContent {
             SubtitleEditComposeTheme {
-                MediaAlbumScreen(refreshVersion = 0, favoriteDirectories = listOf(root), isActive = true,
+                MediaAlbumScreen(refreshVersion = 0, mediaLibraryDirectories = listOf(root), isActive = true,
                     pageState = state, catalogLoader = { listOf(stale) })
             }
         }
@@ -140,6 +141,33 @@ class MediaCategoryNavigationRevealTest {
         compose.runOnIdle {
             assertEquals("The original scan snapshot is kept intact", listOf(stale), state.catalog?.tracks)
             assertEquals("The current file has no genre tag", "", state.revealTrack?.genre)
+        }
+    }
+
+    @Test fun removingALibraryRootClearsItsPreviouslyLocatedSong() {
+        val target = albumTrack("removed/target", "Album", "Singer", "Artist", "Composer", "Genre")
+        val directories = mutableStateOf(listOf(root))
+        val state = MediaAlbumPageState().apply {
+            revealRequest = MediaCategoryRevealRequest(MediaCategory.GENRES, target.track.path)
+        }
+        compose.setContent {
+            SubtitleEditComposeTheme {
+                MediaAlbumScreen(0, directories.value, true, state, catalogLoader = { roots ->
+                    if (roots.isEmpty()) emptyList() else listOf(target)
+                })
+            }
+        }
+        compose.waitUntil(12_000L) { state.revealTrack != null && state.prepared != null }
+        compose.onNodeWithTag("genre-track:${target.track.path}").assertIsDisplayed()
+        compose.runOnIdle { directories.value = emptyList() }
+        compose.waitUntil(12_000L) {
+            state.revealTrack == null && state.catalog?.key?.directories?.isEmpty() == true &&
+                state.prepared?.catalog?.key?.directories?.isEmpty() == true
+        }
+        compose.onNodeWithTag("genre-track:${target.track.path}").assertDoesNotExist()
+        compose.runOnIdle {
+            assertTrue(state.prepared?.albums?.flatMap { it.tracks }?.isEmpty() == true)
+            assertNull(state.resolvedRevealToken)
         }
     }
 

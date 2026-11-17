@@ -30,7 +30,8 @@ internal data class PlayerTrackDetails(
     val language: String,
     val durationText: String,
     val fileSizeText: String,
-    val canEditTags: Boolean
+    val canEditTags: Boolean,
+    val tagsAvailable: Boolean = true
 )
 
 /** Model mapping only. All media and filesystem reads belong to the shared caches. */
@@ -40,9 +41,9 @@ internal object PlayerTrackMetadataReader {
         SharedMediaCache.invalidate(path)
     }
 
-    fun readLibraryTrack(metadata: BrowserFileMetadata, durationMs: Long = 0L): MediaLibraryTrack {
+    fun readLibraryTrack(metadata: BrowserFileMetadata, durationMs: Long = 0L, cacheDirectory: File? = null): MediaLibraryTrack {
         if (durationMs > 0L) SharedMediaCache.seedDuration(metadata, durationMs)
-        val snapshot = SharedMediaCache.read(metadata)
+        val snapshot = SharedMediaCache.read(metadata, cacheDirectory)
         val file = metadata.file
         return MediaLibraryTrack(
             path = metadata.path,
@@ -55,8 +56,8 @@ internal object PlayerTrackMetadataReader {
         )
     }
 
-    fun readAlbumMetadata(metadata: BrowserFileMetadata): MediaAlbumMetadata {
-        val tags = SharedMediaCache.read(metadata).tags
+    fun readAlbumMetadata(metadata: BrowserFileMetadata, cacheDirectory: File? = null): MediaAlbumMetadata {
+        val tags = SharedMediaCache.read(metadata, cacheDirectory).tags
         return MediaAlbumMetadata(
             albumArtist = tags.albumArtist,
             composer = tags.composer,
@@ -67,12 +68,15 @@ internal object PlayerTrackMetadataReader {
         )
     }
 
-    fun read(file: File, fallbackDurationMs: Long = 0L, cacheDirectory: File? = null): PlayerTrackDetails {
+    fun read(file: File, fallbackDurationMs: Long = 0L, cacheDirectory: File? = null, readTags: Boolean = true): PlayerTrackDetails {
         val metadata = SharedFileCache.attributes.get(file)
         if (metadata != null && fallbackDurationMs > 0L) SharedMediaCache.seedDuration(metadata, fallbackDurationMs)
-        val snapshot = metadata?.let(SharedMediaCache::read) ?: SharedMediaMetadata(MediaConvertMetadata(), 0L)
+        val snapshot = metadata?.let {
+            if (readTags) SharedMediaCache.read(it, cacheDirectory)
+            else SharedMediaMetadata(MediaConvertMetadata(), SharedMediaCache.duration(it))
+        } ?: SharedMediaMetadata(MediaConvertMetadata(), 0L)
         val isVideo = FileTypePolicy.isVideo(file)
-        val videoTags = if (isVideo && cacheDirectory != null && metadata != null) {
+        val videoTags = if (readTags && isVideo && cacheDirectory != null && metadata != null) {
             SharedMediaCache.videoDetails(metadata, cacheDirectory)
         } else null
         val tags = if (videoTags == null) snapshot.tags else {
@@ -101,7 +105,8 @@ internal object PlayerTrackMetadataReader {
             language = tags.language,
             durationText = formatDuration(fallbackDurationMs.takeIf { it > 0L } ?: snapshot.durationMs),
             fileSizeText = metadata?.takeIf { it.isRegularFile }?.let { FileUtils.formatFileSize(it.size) }.orEmpty(),
-            canEditTags = metadata?.isRegularFile == true && (FileUtils.isAudioFile(file) || isVideo)
+            canEditTags = metadata?.isRegularFile == true && (FileUtils.isAudioFile(file) || isVideo),
+            tagsAvailable = readTags
         )
     }
 

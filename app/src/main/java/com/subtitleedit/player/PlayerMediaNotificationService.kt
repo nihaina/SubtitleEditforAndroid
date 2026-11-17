@@ -19,7 +19,7 @@ import android.os.Looper
 import android.os.SystemClock
 import com.subtitleedit.MainActivity
 import com.subtitleedit.R
-import com.subtitleedit.util.SharedFileCache
+import com.subtitleedit.library.MediaLibraryRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,8 +27,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -120,18 +118,17 @@ class PlayerMediaNotificationService : Service() {
             details = null
             metadataJob?.cancel()
             metadataJob = scope.launch {
-                SharedFileCache.attributes.invalidationRevision.map {
-                    withContext(Dispatchers.IO) { SharedFileCache.attributes.get(state.track.file)?.cacheKey }
-                }.distinctUntilChanged().collectLatest {
-                    val loaded = withContext(Dispatchers.IO) {
-                        PlayerMediaNotificationMetadata.load(applicationContext, state.track, state.durationMs)
+                observePlayerStoredMedia(state.track.path, MediaLibraryRepository.getInstance(applicationContext))
+                    .collectLatest {
+                        val loaded = withContext(Dispatchers.IO) {
+                            PlayerMediaNotificationMetadata.load(applicationContext, state.track, state.durationMs)
+                        }
+                        if (current?.sessionId == state.sessionId && current?.track?.path == loaded.path) {
+                            details = loaded
+                            updateMetadata()
+                            publishNotification()
+                        }
                     }
-                    if (current?.sessionId == state.sessionId && current?.track?.path == loaded.path) {
-                        details = loaded
-                        updateMetadata()
-                        publishNotification()
-                    }
-                }
             }
         }
         updateMetadata()

@@ -147,7 +147,7 @@ class MediaSelectionPagesTest {
                 val holder = rememberSaveableStateHolder()
                 Surface(Modifier.fillMaxSize()) {
                     if (showing.value) holder.SaveableStateProvider("library") {
-                        MediaLibraryScreen(0, 1, { value, _, _ -> title = value }, favoriteDirectories = listOf(root),
+                        MediaLibraryScreen(0, 1, { value, _, _ -> title = value }, mediaLibraryDirectories = listOf(root),
                             pageState = pageState, libraryRepository = repo)
                     } else Text("Another page")
                 }

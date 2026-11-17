@@ -3,6 +3,7 @@ package com.subtitleedit.util
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
+import com.subtitleedit.library.SharedMediaCache
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -26,7 +27,7 @@ internal object MediaFilePropertiesReader {
         "ts", "3gp", "mpg", "mpeg", "mts", "m2ts"
     )
 
-    fun read(file: File): FilePropertiesInfo {
+    fun read(file: File, readTags: Boolean = false, cacheDirectory: File? = null): FilePropertiesInfo {
         val isAudioFile = FileUtils.isAudioFile(file)
         val isVideoFile = file.extension.lowercase() in VIDEO_EXTENSIONS
         val type = if (file.isDirectory) "文件夹" else file.extension.uppercase().ifBlank { "未知" } + " 文件"
@@ -38,8 +39,8 @@ internal object MediaFilePropertiesReader {
             else -> null
         }
         val mediaDetails = when {
-            isAudioFile -> readAudioProperties(file)
-            isVideoFile -> readVideoProperties(file)
+            isAudioFile -> readAudioProperties(file) + if (readTags) softwareTags(file, cacheDirectory) else emptyList()
+            isVideoFile -> readVideoProperties(file) + if (readTags) softwareTags(file, cacheDirectory) else emptyList()
             else -> emptyList()
         }
         return FilePropertiesInfo(
@@ -55,7 +56,6 @@ internal object MediaFilePropertiesReader {
 
     private fun readAudioProperties(file: File): List<PropertyDetail> {
         val technicalDetails = mutableListOf<PropertyDetail>()
-        val embeddedDetails = mutableListOf<PropertyDetail>()
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(file.absolutePath)
@@ -68,20 +68,6 @@ internal object MediaFilePropertiesReader {
                 ?.takeIf { it > 0L }
                 ?.let { technicalDetails += PropertyDetail("比特率", "${it / 1000L} kbps") }
 
-            fun addEmbeddedDetail(label: String, metadataKey: Int) {
-                retriever.extractMetadata(metadataKey)
-                    ?.trim()
-                    ?.takeIf { it.isNotEmpty() && !it.equals("<unknown>", ignoreCase = true) }
-                    ?.let { embeddedDetails += PropertyDetail(label, it) }
-            }
-
-            addEmbeddedDetail("歌曲名", MediaMetadataRetriever.METADATA_KEY_TITLE)
-            addEmbeddedDetail("歌手", MediaMetadataRetriever.METADATA_KEY_ARTIST)
-            addEmbeddedDetail("专辑", MediaMetadataRetriever.METADATA_KEY_ALBUM)
-            addEmbeddedDetail("艺术家", MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST)
-            addEmbeddedDetail("作曲", MediaMetadataRetriever.METADATA_KEY_COMPOSER)
-            addEmbeddedDetail("流派", MediaMetadataRetriever.METADATA_KEY_GENRE)
-            addEmbeddedDetail("年份", MediaMetadataRetriever.METADATA_KEY_YEAR)
         } catch (_: Exception) {
             // Unsupported or damaged media can still show its regular file properties.
         } finally {
@@ -116,15 +102,18 @@ internal object MediaFilePropertiesReader {
         } finally {
             runCatching { extractor.release() }
         }
-        // TagLib handles formats such as WAV whose Android extractor exposes no text tags.
-        // A supported file's tag map is authoritative, including fields explicitly cleared.
-        val fileTags = runCatching { MediaTagPropertyDetails.read(file) }.getOrNull()
-        return technicalDetails + (fileTags ?: embeddedDetails)
+        return technicalDetails
     }
+
+    private fun softwareTags(file: File, cacheDirectory: File?): List<PropertyDetail> =
+        runCatching {
+            SharedFileCache.attributes.get(file)?.let {
+                MediaTagPropertyDetails.fromMetadata(SharedMediaCache.read(it, cacheDirectory).tags)
+            }.orEmpty()
+        }.getOrDefault(emptyList())
 
     private fun readVideoProperties(file: File): List<PropertyDetail> {
         val technicalDetails = linkedMapOf<String, String>()
-        val embeddedDetails = linkedMapOf<String, String>()
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(file.absolutePath)
@@ -154,17 +143,6 @@ internal object MediaFilePropertiesReader {
                 ?.takeIf { it > 0.0 }
                 ?.let { technicalDetails["帧率"] = formatFrameRate(it) }
 
-            fun addEmbeddedDetail(label: String, metadataKey: Int) {
-                retriever.extractMetadata(metadataKey)
-                    ?.trim()
-                    ?.takeIf { it.isNotEmpty() && !it.equals("<unknown>", ignoreCase = true) }
-                    ?.let { embeddedDetails[label] = it }
-            }
-
-            addEmbeddedDetail("标题", MediaMetadataRetriever.METADATA_KEY_TITLE)
-            addEmbeddedDetail("歌手", MediaMetadataRetriever.METADATA_KEY_ARTIST)
-            addEmbeddedDetail("作者", MediaMetadataRetriever.METADATA_KEY_AUTHOR)
-            addEmbeddedDetail("日期", MediaMetadataRetriever.METADATA_KEY_DATE)
         } catch (_: Exception) {
             // Unsupported or damaged media can still show its regular file properties.
         } finally {
@@ -217,8 +195,7 @@ internal object MediaFilePropertiesReader {
         } finally {
             runCatching { extractor.release() }
         }
-        return technicalDetails.map { PropertyDetail(it.key, it.value) } +
-            embeddedDetails.map { PropertyDetail(it.key, it.value) }
+        return technicalDetails.map { PropertyDetail(it.key, it.value) }
     }
 
     private fun formatMediaDuration(durationMs: Long): String {

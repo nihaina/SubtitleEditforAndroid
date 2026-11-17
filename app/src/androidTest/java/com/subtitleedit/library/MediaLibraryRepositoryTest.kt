@@ -43,6 +43,63 @@ class MediaLibraryRepositoryTest {
         }
     }
 
+    @Test fun externalPlaybackRecordsDoNotReadTagsOrAddTheFileToTheIndexedLibrary() {
+        val name = "external-playback-tags-${System.nanoTime()}.db"
+        val reads = AtomicInteger()
+        val repository = MediaLibraryRepository.open(context, name,
+            albumMetadataReader = { error("External playback must not read album tags") }) { _, _ ->
+            reads.incrementAndGet()
+            error("External playback must not parse tags")
+        }
+        try {
+            val path = "/ordinary-folder/File name.wav"
+            repository.recordPlaybackProgress(path, "external-run", 12_000L, 800L)
+            repository.recordListeningInterval(path, "external-run", 10_000L, 500L)
+
+            assertEquals(0, reads.get())
+            assertFalse(repository.isIndexedTrack(path))
+            assertNull(repository.getStoredTrack(path))
+            assertTrue(repository.getIndexedTracks().isEmpty())
+            val history = repository.getPlaybackHistory().single()
+            assertEquals("File name", history.title)
+            assertEquals("", history.artist)
+            assertEquals(12_000L, history.durationMs)
+            assertEquals("File name", repository.getSessionsForDate(ListeningDay.dateOf(10_000L)).single().title)
+        } finally {
+            repository.close()
+            context.deleteDatabase(name)
+        }
+    }
+
+    @Test fun playbackReusesPlaylistMetadataWithoutReparsingTheSource() {
+        val name = "playlist-playback-tags-${System.nanoTime()}.db"
+        val reads = AtomicInteger()
+        val repository = MediaLibraryRepository.open(context, name) { snapshot, _ ->
+            reads.incrementAndGet()
+            MediaLibraryTrack(snapshot.path, "Saved title", "Saved artist", "Saved album")
+        }
+        try {
+            val path = "/ordinary-folder/Playlist file.wav"
+            val playlistId = requireNotNull(repository.createPlaylist("Saved collection"))
+            assertTrue(repository.addTrackToPlaylist(playlistId, path))
+            val stored = requireNotNull(repository.getStoredTrack(path))
+            assertEquals("Saved title", stored.title)
+            assertEquals(1, reads.get())
+
+            repository.recordPlaybackProgress(path, "playlist-run", 12_000L, 800L)
+            repository.recordListeningInterval(path, "playlist-run", 10_000L, 500L)
+
+            assertEquals(1, reads.get())
+            assertFalse(repository.isIndexedTrack(path))
+            assertEquals("Saved title", repository.getPlaybackHistory().single().title)
+            assertEquals("Saved artist", repository.getPlaybackHistory().single().artist)
+            assertEquals("Saved album", repository.getSessionsForDate(ListeningDay.dateOf(10_000L)).single().album)
+        } finally {
+            repository.close()
+            context.deleteDatabase(name)
+        }
+    }
+
     @Test
     fun emptyAndPopulatedSearchCoverEverySourceWithHistoryTimestampMapping() =
         Fixture(context).use { f ->
@@ -57,7 +114,7 @@ class MediaLibraryRepositoryTest {
                 r.searchLibrary("").map { it.path }.toSet(),
             )
             assertEquals("/history.wav", r.searchLibrary("HISTORY").single().path)
-            assertEquals(3, r.searchLibrary("artist").size)
+            assertEquals(2, r.searchLibrary("artist").size)
         }
 
     @Test
@@ -342,6 +399,77 @@ class MediaLibraryRepositoryTest {
             r.close()
             context.deleteDatabase(name)
             directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun refreshingEditedCollectionMetadataDoesNotAddAnIndexedTrack() {
+        val name = "collection-tag-refresh-${System.nanoTime()}.db"
+        val file = File.createTempFile("collection-tag-refresh-", ".wav", context.cacheDir)
+        var title = "Before"
+        val reads = AtomicInteger()
+        val r = MediaLibraryRepository.open(context, name,
+            albumMetadataReader = { error("Unindexed collections do not need album-index metadata") }) { snapshot, duration ->
+            reads.incrementAndGet()
+            MediaLibraryTrack(snapshot.path, title, "$title artist", "$title album", durationMs = duration)
+        }
+        try {
+            val id = requireNotNull(r.createPlaylist("Edited collection"))
+            r.toggleFavorite(file.path)
+            r.addTrackToPlaylist(id, file.path)
+            r.recordPlaybackProgress(file.path, "run", 30_000L, 8_000L, 10_000L)
+            val addedToFavoritesAt = r.getFavorites().single().addedAtMs
+            val addedToPlaylistAt = r.getPlaylistTracks(id).single().addedAtMs
+            val catalogRevision = r.catalogRevision.value
+            val revision = r.revision.value
+            title = "After"
+
+            r.refreshStoredTrack(file.path, 40_000L)
+
+            assertEquals(3, reads.get())
+            assertEquals("After", r.getFavorites().single().title)
+            assertEquals("After artist", r.getPlaylistTracks(id).single().artist)
+            assertEquals("After album", requireNotNull(r.getStoredTrack(file.path)).album)
+            assertEquals(addedToFavoritesAt, r.getFavorites().single().addedAtMs)
+            assertEquals(addedToPlaylistAt, r.getPlaylistTracks(id).single().addedAtMs)
+            val history = r.getPlaybackHistory().single()
+            assertEquals("After", history.title)
+            assertEquals(8_000L, history.positionMs)
+            assertEquals(1, history.playCount)
+            assertEquals(40_000L, history.durationMs)
+            assertFalse(r.isIndexedTrack(file.path))
+            assertTrue(r.getIndexedTracks().isEmpty())
+            assertEquals(catalogRevision, r.catalogRevision.value)
+            assertTrue(r.revision.value > revision)
+        } finally {
+            r.close()
+            context.deleteDatabase(name)
+            file.delete()
+        }
+    }
+
+    @Test
+    fun refreshingEditedOrdinaryFileDoesNotReadTagsOrExpandTheLibrary() {
+        val name = "ordinary-tag-refresh-${System.nanoTime()}.db"
+        val file = File.createTempFile("ordinary-tag-refresh-", ".wav", context.cacheDir)
+        val r = MediaLibraryRepository.open(context, name,
+            albumMetadataReader = { error("Ordinary files must not read album tags") }) { _, _ ->
+            error("Ordinary files must not read tags after editing")
+        }
+        try {
+            r.recordPlaybackProgress(file.path, "run", 30_000L, 8_000L, 10_000L)
+            val revision = r.revision.value
+
+            r.refreshStoredTrack(file.path, 40_000L)
+
+            assertNull(r.getStoredTrack(file.path))
+            assertTrue(r.getIndexedTracks().isEmpty())
+            assertEquals(file.nameWithoutExtension, r.getPlaybackHistory().single().title)
+            assertEquals(revision, r.revision.value)
+        } finally {
+            r.close()
+            context.deleteDatabase(name)
+            file.delete()
         }
     }
 

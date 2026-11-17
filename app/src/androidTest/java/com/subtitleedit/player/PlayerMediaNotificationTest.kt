@@ -24,6 +24,7 @@ import com.subtitleedit.MediaConvertCoverMode
 import com.subtitleedit.MediaConvertMetadata
 import com.subtitleedit.MediaConvertMetadataField
 import com.subtitleedit.MediaTagAudioRepository
+import com.subtitleedit.library.MediaLibraryRepository
 import com.subtitleedit.library.PlayerTrackMetadataReader
 import com.subtitleedit.mpv.MPVLib
 import java.io.Closeable
@@ -47,24 +48,45 @@ class PlayerMediaNotificationTest {
     @Test fun metadataCoverAndSystemControlsFollowTheExistingPlayer() = Fixture().use { f ->
         val first = f.wav("covered.wav").also { f.addTagsAndCover(it) }
         val second = f.wav("second.wav")
+        // An external file still shows artwork, while its text stays filename-only.
         f.openMain(listOf(first, second)).use { session ->
             val model = session.model
             val controller = awaitController()
-            await("embedded title and cover reach the system session") {
+            await("external artwork and filename reach the system session without text tags") {
                 val metadata = controller.metadata
-                metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) == TITLE &&
-                    metadata.getString(MediaMetadata.METADATA_KEY_ARTIST) == ARTIST &&
-                    metadata.getString(MediaMetadata.METADATA_KEY_ALBUM) == ALBUM &&
+                metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) == "covered" &&
+                    metadata.getString(MediaMetadata.METADATA_KEY_ARTIST).isNullOrBlank() &&
+                    metadata.getString(MediaMetadata.METADATA_KEY_ALBUM).isNullOrBlank() &&
                     metadata.getLong(MediaMetadata.METADATA_KEY_DURATION) >= 59_000L && isRed(artwork(metadata))
             }
-            await("notification title matches embedded metadata") {
-                notification()?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString() == TITLE
+            await("external notification title uses the filename") {
+                notification()?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString() == "covered"
             }
             assertEquals(Notification.CATEGORY_TRANSPORT, requireNotNull(notification()).category)
             assertTrue("Playback is protected by a foreground service",
                 requireNotNull(notification()).flags and Notification.FLAG_FOREGROUND_SERVICE != 0)
             await("system session reports playing") { controller.playbackState?.state == PlaybackState.STATE_PLAYING }
             captureNotificationIfRequested()
+
+            val repository = MediaLibraryRepository.getInstance(app)
+            try {
+                assertTrue(repository.toggleFavorite(first.path))
+                await("favoriting the playing file enables library text and preserves its cover") {
+                    val metadata = controller.metadata
+                    metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) == TITLE &&
+                        metadata.getString(MediaMetadata.METADATA_KEY_ARTIST) == ARTIST &&
+                        metadata.getString(MediaMetadata.METADATA_KEY_ALBUM) == ALBUM && isRed(artwork(metadata))
+                }
+                assertTrue(repository.getIndexedTracks().none { it.path == first.path })
+            } finally {
+                repository.removeFavorite(first.path)
+            }
+            await("removing the collection clears text tags while preserving the external cover") {
+                val metadata = controller.metadata
+                metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) == "covered" &&
+                    metadata.getString(MediaMetadata.METADATA_KEY_ARTIST).isNullOrBlank() &&
+                    metadata.getString(MediaMetadata.METADATA_KEY_ALBUM).isNullOrBlank() && isRed(artwork(metadata))
+            }
 
             onMain { controller.transportControls.pause() }
             awaitPaused(model)
@@ -303,6 +325,7 @@ class PlayerMediaNotificationTest {
         }
 
         override fun close() {
+            MediaLibraryRepository.getInstance(app).removeDirectoryFromLibrary(root, emptyList())
             val editor = preferences.edit()
             saved.forEach { (key, value) -> restore(editor, key, value) }
             root.walkTopDown().filter { it.isFile }.forEach {

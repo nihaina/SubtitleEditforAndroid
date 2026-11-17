@@ -60,6 +60,7 @@ class PlayerLibraryWorkflowTest {
                     val history = fixture.repository.getPlaybackHistory().single()
                     assertEquals(fixture.tracks[0].path, history.path)
                     assertEquals(1, history.playCount)
+                    assertTrue("Ordinary playback must not add files to the media catalog", fixture.repository.getIndexedTracks().isEmpty())
                     val durationBefore = fixture.repository.getAllDailyStats().sumOf { it.durationMs }
                     assertTrue("A short actual play must retain its subsecond listening tail", durationBefore > 0L)
                     Thread.sleep(500L)
@@ -121,6 +122,8 @@ class PlayerLibraryWorkflowTest {
                         fixture.repository.getPlaybackHistory().first { it.path == fixture.tracks[0].path }.playCount >= 3
                     }
                     onMain { model.pause(); model.saveProgress() }
+                    barrier()
+                    assertFalse("Playing the external second file must not index it", fixture.repository.isIndexedTrack(fixture.tracks[1].path))
                 }
             } finally {
                 onMain { store.clear() }

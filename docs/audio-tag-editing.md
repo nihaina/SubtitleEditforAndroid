@@ -56,3 +56,49 @@ documented under `app/src/androidTest/assets/media-tags`. The optional
 `taglibSampleRoot` instrumentation argument accepts a directory containing
 `user.wav` and `user.mp3`; tests copy them before writing and leave the results
 under the app's external files directory for independent tag-reader inspection.
+
+## Reading outside the editor
+
+Embedded pictures now go through `SoftwareMediaCoverReader`, shared by the
+browser, library, player and notifications. TagLib reads ordinary tag families
+including MP4 and ASF video covers; bounded Matroska, Ogg and ID3 readers cover
+picture attachments, multiplexed Vorbis comments and RF64/BW64 ID3 chunks.
+Android's `embeddedPicture` is not used. Text tags use TagLib, with a cached
+FFprobe fallback for unsupported containers when library indexing or explicit
+tag inspection supplies a private probe directory. Matroska text tags prefer
+FFprobe because TagLib omits the Segment Info title and some FFmpeg tag aliases.
+A supported empty native tag
+map remains authoritative, so cleared fields are not refilled by another reader.
+
+Files outside the scanned library, favorites and user playlists are not parsed
+for full text tags during normal browsing or playback. Rows, history and
+notifications use file names. Opening an information/properties view or the tag
+editor explicitly reads complete tags temporarily, without adding the file to
+the catalog. Embedded covers are
+read and displayed independently of text tags, including in ordinary file
+previews, player artwork, information views and notifications. Technical duration
+and video frame thumbnails also remain available.
+Scanning a directory or adding a
+track to a collection opts it into library metadata. Playback and returning from
+the tag editor never create a catalog entry. Editing an existing library or
+collection member refreshes its stored tags. Adding or removing collection
+membership updates the current notification's text; the embedded cover remains
+available in either case.
+
+Technical duration, stream properties and video frame thumbnails still use the
+platform APIs. The software change concerns embedded artwork and text tags,
+not playback decoding. Cover-only requests do not request complete text tags;
+reading tags in an information view or the editor does not enable their automatic
+display during ordinary browsing or playback.
+
+Common-directory shortcuts and library roots remain separate sources. Adding a
+common shortcut only enables ordinary file browsing; it never enrolls the
+directory in recursive media indexing or category catalogs. A library root is
+also visible in the shortcuts page. Adding an existing common shortcut through
+the library picker promotes the same path to a library root without duplication
+or downgrade. Only explicit library roots feed the file catalog and recursive
+observer; files under a retained nested library root stay indexed when a broader
+shortcut/root is removed. Startup and configuration changes prune previously
+misindexed rows and album metadata outside the configured library roots, while
+preserving explicit collections and playback/listening records. Information
+views are temporary reads; category links only locate existing catalog members.

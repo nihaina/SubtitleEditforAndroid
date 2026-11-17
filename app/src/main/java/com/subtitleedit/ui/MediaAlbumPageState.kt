@@ -39,7 +39,7 @@ internal class MediaAlbumPageState {
     var library by mutableStateOf<MediaAlbumLibrarySnapshot?>(null)
     var prepared by mutableStateOf<MediaAlbumPreparedSnapshot?>(null)
     var revealRequest by mutableStateOf<MediaCategoryRevealRequest?>(null)
-    // A directly opened song may sit outside the user's scanned favorite directories.
+    // Information links may refresh a current catalog member, never expand its membership.
     var revealTrack by mutableStateOf<MediaAlbumTrack?>(null)
     var resolvedRevealToken by mutableStateOf<Long?>(null)
 }

@@ -40,7 +40,7 @@ class MediaTagNativeWorkflowTest {
             for (field in MediaConvertMetadata.audioFields) assertEquals("$extension $field",
                 expected.value(field), saved.metadata.value(field))
             assertEquals(extension, hash, audioHash(file, root))
-            val properties = MediaFilePropertiesReader.read(file).mediaDetails.associate { it.label to it.value }
+            val properties = MediaFilePropertiesReader.read(file, readTags = true).mediaDetails.associate { it.label to it.value }
             assertEquals(extension, expected.title, properties["歌曲名"])
             assertEquals(extension, expected.artist, properties["歌手"])
             assertEquals(extension, expected.albumArtist, properties["艺术家"])

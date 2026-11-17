@@ -3,6 +3,7 @@ package com.subtitleedit.util
 import android.os.ParcelFileDescriptor
 import com.subtitleedit.MediaTagAudioMetadata
 import com.subtitleedit.MediaTagNative
+import com.subtitleedit.MediaConvertMetadata
 import java.io.File
 
 /** The properties dialog uses the same file-tag parser as the audio tag editor. */
@@ -16,6 +17,10 @@ internal object MediaTagPropertyDetails {
         require(pairs.size % 2 == 0)
         val tags = pairs.toList().chunked(2).groupBy({ it[0] }, { it[1] })
         val metadata = MediaTagAudioMetadata.decode(tags)
+        return fromMetadata(metadata)
+    }
+
+    internal fun fromMetadata(metadata: MediaConvertMetadata): List<PropertyDetail> {
         return listOf(
             "歌曲名" to metadata.title, "歌手" to metadata.artist, "专辑" to metadata.album,
             "艺术家" to metadata.albumArtist, "作曲" to metadata.composer,

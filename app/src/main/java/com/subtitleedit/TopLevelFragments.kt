@@ -64,6 +64,8 @@ import kotlinx.coroutines.withContext
 internal class MainTopLevelPagesState {
     var favoriteDirectories by mutableStateOf(emptyList<File>())
     var mediaLibraryDirectoryPaths by mutableStateOf(emptySet<String>())
+    val mediaLibraryDirectories: List<File>
+        get() = favoriteDirectories.filter { it.absolutePath in mediaLibraryDirectoryPaths }
     var pendingFavoriteRemoval by mutableStateOf<File?>(null)
     var currentDraftFolder by mutableStateOf("")
     var drafts by mutableStateOf(emptyList<DraftsActivity.DraftItem>())
@@ -119,9 +121,10 @@ internal fun MainTopLevelPages(
     }
 
     fun removeFavoriteDirectory(directory: File) {
+        val wasMediaLibrary = directory.absolutePath in directoryStore.load().mediaLibraryPaths
         directoryStore.remove(directory)
         loadFavoriteDirectories()
-        MediaLibraryFileObserver.removeDirectory(context, directory, state.favoriteDirectories)
+        if (wasMediaLibrary) MediaLibraryFileObserver.removeDirectory(context, directory, state.mediaLibraryDirectories)
     }
 
     fun switchSoftwareDirectory(targetRoot: File, migrateModels: Boolean) {
@@ -205,8 +208,9 @@ internal fun MainTopLevelPages(
         exportDraft(context, state, uri)
     }
 
-    LaunchedEffect(state.favoriteDirectories, playerModeEnabled) {
-        if (playerModeEnabled) MediaLibraryFileObserver.syncRoots(context, state.favoriteDirectories)
+    val mediaLibraryDirectories = state.mediaLibraryDirectories
+    LaunchedEffect(mediaLibraryDirectories, playerModeEnabled) {
+        if (playerModeEnabled) MediaLibraryFileObserver.syncRoots(context, mediaLibraryDirectories)
     }
 
     val backupExporter = rememberLauncherForActivityResult(
@@ -367,7 +371,7 @@ internal fun MainTopLevelPages(
                     }
                 }
             },
-            favoriteDirectories = state.favoriteDirectories,
+            mediaLibraryDirectories = mediaLibraryDirectories,
             isActive = isActive,
             scanPickerPending = libraryScanPickerPending,
             onRemoveFavoriteDirectory = ::removeFavoriteDirectory
@@ -454,7 +458,7 @@ internal fun MainTopLevelPages(
         R.id.nav_tools -> if (playerModeEnabled) {
             MediaAlbumScreen(
                 refreshVersion = refreshVersion,
-                favoriteDirectories = state.favoriteDirectories,
+                mediaLibraryDirectories = mediaLibraryDirectories,
                 isActive = isActive,
                 pageState = state.mediaAlbumPage
             )

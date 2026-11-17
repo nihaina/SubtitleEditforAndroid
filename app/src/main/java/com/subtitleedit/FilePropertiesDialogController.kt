@@ -40,7 +40,9 @@ internal class FilePropertiesDialogController(
         }
         val loadJob = activity.lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { MediaFilePropertiesReader.read(file) }
+                runCatching {
+                    MediaFilePropertiesReader.read(file, readTags = true, cacheDirectory = activity.cacheDir)
+                }
             }
             if (!dialog.isShowing) return@launch
             state.value = FilePropertiesDialogUiState.Single(

@@ -62,9 +62,17 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import com.subtitleedit.R
 import com.subtitleedit.library.PlayerTrackDetails
+import com.subtitleedit.library.MediaLibraryRepository
+import com.subtitleedit.util.FavoriteDirectoryStore
 import com.subtitleedit.ui.MediaCategory
 import com.subtitleedit.ui.MediaCategoryRevealRequest
 import com.subtitleedit.ui.components.AppDialog
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,6 +88,25 @@ internal fun PlayerTrackInfoDialog(
     val track = state.currentTrack
     val details = state.trackInfo
     val unknownText = stringResource(R.string.player_info_unknown)
+    var canNavigateCategories by remember(details?.filePath) { mutableStateOf(false) }
+    LaunchedEffect(details?.filePath, onNavigateToCategory != null) {
+        val path = details?.filePath ?: return@LaunchedEffect
+        if (onNavigateToCategory == null) return@LaunchedEffect
+        val repository = MediaLibraryRepository.getInstance(context)
+        try {
+            repository.revision.map {
+                withContext(Dispatchers.IO) {
+                    val roots = FavoriteDirectoryStore(context).load().mediaLibraryPaths
+                    roots.any { path.startsWith(it.trimEnd('/') + "/") } && repository.isIndexedTrack(path)
+                }
+            }.distinctUntilChanged().collect { canNavigateCategories = it }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            canNavigateCategories = false
+        }
+    }
+    val categoryNavigator = onNavigateToCategory?.takeIf { canNavigateCategories && details?.tagsAvailable == true }
 
     BasicAlertDialog(
         onDismissRequest = onDismiss,
@@ -214,7 +241,7 @@ internal fun PlayerTrackInfoDialog(
                             value = details.genre.ifBlank { unknownText },
                             showActionIcon = true,
                             actionTag = "player-info-open:GENRES",
-                            onActionClick = onNavigateToCategory?.let { navigate ->
+                            onActionClick = categoryNavigator?.let { navigate ->
                                 { navigate(MediaCategoryRevealRequest(MediaCategory.GENRES, details.filePath)) }
                             }
                         )
@@ -227,7 +254,7 @@ internal fun PlayerTrackInfoDialog(
                             value = details.artist.ifBlank { unknownText },
                             showActionIcon = true,
                             actionTag = "player-info-open:SINGERS",
-                            onActionClick = onNavigateToCategory?.let { navigate ->
+                            onActionClick = categoryNavigator?.let { navigate ->
                                 { navigate(MediaCategoryRevealRequest(MediaCategory.SINGERS, details.filePath)) }
                             }
                         )
@@ -236,7 +263,7 @@ internal fun PlayerTrackInfoDialog(
                             value = details.album.ifBlank { unknownText },
                             showActionIcon = true,
                             actionTag = "player-info-open:ALBUMS",
-                            onActionClick = onNavigateToCategory?.let { navigate ->
+                            onActionClick = categoryNavigator?.let { navigate ->
                                 { navigate(MediaCategoryRevealRequest(MediaCategory.ALBUMS, details.filePath)) }
                             }
                         )
@@ -249,7 +276,7 @@ internal fun PlayerTrackInfoDialog(
                             value = details.albumArtist.ifBlank { unknownText },
                             showActionIcon = true,
                             actionTag = "player-info-open:ARTISTS",
-                            onActionClick = onNavigateToCategory?.let { navigate ->
+                            onActionClick = categoryNavigator?.let { navigate ->
                                 { navigate(MediaCategoryRevealRequest(MediaCategory.ARTISTS, details.filePath)) }
                             }
                         )
@@ -258,7 +285,7 @@ internal fun PlayerTrackInfoDialog(
                             value = details.composer.ifBlank { unknownText },
                             showActionIcon = true,
                             actionTag = "player-info-open:COMPOSERS",
-                            onActionClick = onNavigateToCategory?.let { navigate ->
+                            onActionClick = categoryNavigator?.let { navigate ->
                                 { navigate(MediaCategoryRevealRequest(MediaCategory.COMPOSERS, details.filePath)) }
                             }
                         )

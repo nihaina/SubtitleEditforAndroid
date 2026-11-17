@@ -49,7 +49,7 @@ private data class AlbumPlaylistRequest(val tracks: List<MediaLibraryTrack>, val
 @Composable
 internal fun MediaAlbumScreen(
     refreshVersion: Int,
-    favoriteDirectories: List<File>,
+    mediaLibraryDirectories: List<File>,
     isActive: Boolean,
     pageState: MediaAlbumPageState = remember { MediaAlbumPageState() },
     catalogLoader: MediaAlbumCatalogLoader? = null
@@ -72,16 +72,22 @@ internal fun MediaAlbumScreen(
         options = preferences.load()
         creditOptions = creditPreferences.mapValues { it.value.load() }
     }
-    val roots = remember(favoriteDirectories) {
-        favoriteDirectories.map { it.absolutePath.trimEnd('/') + "/" }.distinct().sorted()
+    val roots = remember(mediaLibraryDirectories) {
+        mediaLibraryDirectories.map { it.absolutePath.trimEnd('/') + "/" }.distinct().sorted()
     }
     val catalogKey = MediaAlbumCatalogKey(catalogRevision, roots)
     val catalog = pageState.catalog
     val history = pageState.library?.history.orEmpty()
     val prepared = pageState.prepared?.takeIf { it.catalog.key.directories == roots }
     val revealRequest = pageState.revealRequest
-    val albums = remember(prepared?.albums, pageState.revealTrack) {
-        mediaAlbumsWithRevealTrack(prepared?.albums.orEmpty(), pageState.revealTrack)
+    val catalogPaths = remember(catalog, roots) {
+        catalog?.takeIf { it.key.directories == roots }?.tracks?.mapTo(hashSetOf()) { it.track.path }.orEmpty()
+    }
+    val revealTrack = pageState.revealTrack?.takeIf { candidate ->
+        candidate.track.path in catalogPaths && roots.any { candidate.track.path.startsWith(it) }
+    }
+    val albums = remember(prepared?.albums, revealTrack) {
+        mediaAlbumsWithRevealTrack(prepared?.albums.orEmpty(), revealTrack)
     }
     var refreshing by remember { mutableStateOf(prepared == null) }
     val loading = prepared == null && (refreshing || catalog?.key?.directories == roots)
@@ -91,12 +97,25 @@ internal fun MediaAlbumScreen(
     var playlistRequest by remember { mutableStateOf<AlbumPlaylistRequest?>(null) }
     var infoPath by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(revealRequest?.token) {
+    LaunchedEffect(roots, catalogPaths) {
+        if (pageState.revealTrack != null && revealTrack == null) {
+            pageState.revealTrack = null
+            pageState.resolvedRevealToken = null
+        }
+    }
+    LaunchedEffect(revealRequest?.token, catalog, roots) {
         val request = revealRequest ?: return@LaunchedEffect
+        if (catalog?.key?.directories != roots) return@LaunchedEffect
+        if (request.trackPath !in catalogPaths || roots.none { request.trackPath.startsWith(it) }) {
+            pageState.revealRequest = null
+            pageState.revealTrack = null
+            pageState.resolvedRevealToken = null
+            return@LaunchedEffect
+        }
         try {
             val target = withContext(Dispatchers.IO) {
                 val file = File(request.trackPath)
-                if (!file.isFile || !file.canRead()) null else loadMediaCategoryRevealTrack(request.trackPath)
+                if (!file.isFile || !file.canRead()) null else loadMediaCategoryRevealTrack(request.trackPath, context.cacheDir)
             }
             if (pageState.revealRequest?.token != request.token) return@LaunchedEffect
             if (target == null) {

@@ -881,7 +881,9 @@ internal class PlayerViewModel @JvmOverloads constructor(
         PlayerLibraryWriter.submit {
             libraryRepository.recordPlaybackProgress(track.path, progress.playbackId,
                 progress.durationMs, progress.positionMs, playedAt)
-            if (newPlayback) libraryRepository.indexTrack(track.path, progress.durationMs, forceFileRevision = false)
+            if (newPlayback && libraryRepository.isIndexedTrack(track.path)) {
+                libraryRepository.indexTrack(track.path, progress.durationMs, forceFileRevision = false)
+            }
         }
     }
 
@@ -937,7 +939,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
             val duration = _state.value.durationMs
             PlayerLibraryWriter.submit {
                 PlayerTrackMetadataReader.invalidate(saved.path)
-                libraryRepository.indexTrack(saved.path, duration)
+                libraryRepository.refreshStoredTrack(saved.path, duration)
             }
             loadCurrent(resume = false, autoplay = playOnAttach && !scheduledStart.active,
                 resumeAt = saved.positionMs, subtitle = saved.subtitle, preservePlayback = true)

@@ -621,6 +621,31 @@ private constructor(
         catalogChanged()
     }
 
+    /** Refresh edited tags only for existing library/collection members, without expanding the index. */
+    fun refreshStoredTrack(path: String, durationMs: Long = 0L) {
+        if (getStoredTrack(path) == null) return
+        val file = SharedFileCache.attributes.refresh(File(path), forceRevision = true) ?: return
+        if (!isMediaFile(file)) return
+        val indexed = if (isIndexedTrack(path)) indexedTrack(file, durationMs)
+            else IndexedTrack(readMetadata(file, durationMs), null)
+        val (updated, updatedIndex) = write {
+            when {
+                exists("SELECT 1 FROM library_tracks WHERE path=?", path) -> {
+                    storeIndexedTrack(indexed.track)
+                    indexed.albumMetadata?.let { MediaAlbumMetadataStore.put(this, it) }
+                    true to true
+                }
+                exists("SELECT 1 FROM favorites WHERE path=?", path) ||
+                    exists("SELECT 1 FROM playlist_items WHERE path=?", path) -> {
+                    updateStoredTrackMetadata(indexed.track)
+                    true to false
+                }
+                else -> false to false
+            }
+        }
+        if (updatedIndex) catalogChanged() else if (updated) changed()
+    }
+
     /** FileObserver batches refresh only their paths; newly created folders discover their subtree. */
     fun updateObservedPaths(
         paths: Set<String>,
@@ -675,6 +700,25 @@ private constructor(
         }
     }
 
+    /** Removes stale catalog rows outside authoritative library roots without reading source metadata. */
+    fun retainLibraryDirectories(directories: List<File>): Int {
+        val retainedRoots = directories.map { it.absolutePath }
+        val removed = write {
+            val paths = rawQuery("SELECT path FROM library_tracks UNION SELECT path FROM album_metadata", null).use { cursor ->
+                buildList {
+                    while (cursor.moveToNext()) {
+                        val path = cursor.getString(0)
+                        if (retainedRoots.none { isWithin(path, it) }) add(path)
+                    }
+                }
+            }
+            paths.forEach { removeIndexedPath(it) }
+            paths.size
+        }
+        if (removed > 0) catalogChanged()
+        return removed
+    }
+
     /** Drops only the removed root's persistent catalog; shared caches and user collections remain intact. */
     fun removeDirectoryFromLibrary(directory: File, retainedDirectories: List<File>): Int {
         val removedRoot = directory.absolutePath
@@ -716,6 +760,10 @@ private constructor(
             track.values().apply { put("added_at_ms", added) },
             SQLiteDatabase.CONFLICT_REPLACE,
         )
+        updateStoredTrackMetadata(track)
+    }
+
+    private fun SQLiteDatabase.updateStoredTrackMetadata(track: MediaLibraryTrack) {
         val values =
             track.values().apply {
                 remove("path")
@@ -732,6 +780,15 @@ private constructor(
     /** Scanned/indexed files only; collections and listening history do not expand the catalog. */
     fun getIndexedTracks(): List<MediaLibraryTrack> =
         tracks("SELECT $TRACK_COLUMNS FROM library_tracks ORDER BY path")
+
+    /** Playback may reuse library tags, but must not parse an unrelated file just to show them. */
+    fun getStoredTrack(path: String): MediaLibraryTrack? =
+        tracks("SELECT $TRACK_COLUMNS FROM library_tracks WHERE path=?", path).firstOrNull()
+            ?: tracks("SELECT $TRACK_COLUMNS FROM favorites WHERE path=?", path).firstOrNull()
+            ?: tracks("SELECT $TRACK_COLUMNS FROM playlist_items WHERE path=? ORDER BY id LIMIT 1", path).firstOrNull()
+
+    fun isIndexedTrack(path: String): Boolean =
+        db.exists("SELECT 1 FROM library_tracks WHERE path=?", path)
 
     /** Classification rendering consumes the persisted index, never source files. */
     fun getPersistedAlbumTracks(
@@ -772,11 +829,12 @@ private constructor(
     }
 
     private fun cachedMetadata(path: String, durationMs: Long): MediaLibraryTrack {
-        val existing =
-            tracks("SELECT $TRACK_COLUMNS FROM library_tracks WHERE path=?", path).firstOrNull()
-                ?: tracks("SELECT $TRACK_COLUMNS FROM favorites WHERE path=?", path).firstOrNull()
+        val existing = getStoredTrack(path)
         return existing?.copy(durationMs = maxOf(durationMs, existing.durationMs))
-            ?: metadata(path, durationMs)
+            ?: File(path).let { file ->
+                MediaLibraryTrack(path, file.nameWithoutExtension.ifBlank { file.name },
+                    isVideo = FileTypePolicy.isVideo(file), durationMs = durationMs)
+            }
     }
 
     private fun tracks(sql: String, vararg args: String): List<MediaLibraryTrack> {
@@ -844,12 +902,13 @@ private constructor(
         fun getInstance(context: Context): MediaLibraryRepository =
             instance
                 ?: synchronized(this) {
+                    val app = context.applicationContext
                     instance
                         ?: MediaLibraryRepository(
-                                MediaLibraryDatabase(context),
-                                PlayerTrackMetadataReader::readLibraryTrack,
-                                PlayerTrackMetadataReader::readAlbumMetadata,
-                                context.getString(R.string.media_lib_tab_favorites),
+                                MediaLibraryDatabase(app),
+                                { metadata, duration -> PlayerTrackMetadataReader.readLibraryTrack(metadata, duration, app.cacheDir) },
+                                { metadata -> PlayerTrackMetadataReader.readAlbumMetadata(metadata, app.cacheDir) },
+                                app.getString(R.string.media_lib_tab_favorites),
                             )
                             .also { instance = it }
                 }
@@ -862,9 +921,9 @@ private constructor(
             context: Context,
             name: String,
             albumMetadataReader: (BrowserFileMetadata) -> MediaAlbumMetadata =
-                PlayerTrackMetadataReader::readAlbumMetadata,
+                { metadata -> PlayerTrackMetadataReader.readAlbumMetadata(metadata, context.cacheDir) },
             metadataReader: (BrowserFileMetadata, Long) -> MediaLibraryTrack =
-                PlayerTrackMetadataReader::readLibraryTrack,
+                { metadata, duration -> PlayerTrackMetadataReader.readLibraryTrack(metadata, duration, context.cacheDir) },
         ): MediaLibraryRepository =
             MediaLibraryRepository(
                 MediaLibraryDatabase(context, name),

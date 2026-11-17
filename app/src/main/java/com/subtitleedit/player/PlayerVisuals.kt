@@ -73,6 +73,9 @@ import com.subtitleedit.util.SharedFileCache
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 /** Embedded artwork, or the default vinyl, with the audio's recent measured loudness. */
@@ -113,15 +116,26 @@ internal fun PlayerAudioVisual(
     }
     DisposableEffect(Unit) { onDispose { boundsCallback?.invoke(null) } }
     LaunchedEffect(trackPath, targetSizePx, artworkRevision) {
-        artwork = if (trackPath == null) null else withContext(Dispatchers.IO) {
-            try {
-                SharedFileCache.attributes.get(File(trackPath))?.let { metadata -> SharedMediaCache.artwork(metadata, targetSizePx, allowVideoFrame = false) }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                null
-            }
+        if (trackPath == null) {
+            artwork = null
+            return@LaunchedEffect
         }
+        SharedFileCache.attributes.invalidationRevision
+            .map { withContext(Dispatchers.IO) { SharedFileCache.attributes.get(File(trackPath)) } }
+            .distinctUntilChangedBy { it?.cacheKey }
+            .collectLatest { metadata ->
+                artwork = withContext(Dispatchers.IO) {
+                    try {
+                        metadata?.let {
+                            SharedMediaCache.artwork(it, targetSizePx, allowVideoFrame = false)
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+            }
     }
     // Stack the two actual drawing areas: top padding on a centered overlay allows
     // the waveform to grow back into the artwork's lower edge.

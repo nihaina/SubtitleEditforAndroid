@@ -6,10 +6,11 @@ import android.graphics.Canvas
 import androidx.annotation.WorkerThread
 import androidx.core.content.ContextCompat
 import com.subtitleedit.R
+import com.subtitleedit.library.MediaLibraryRepository
 import com.subtitleedit.library.SharedMediaCache
 import com.subtitleedit.util.SharedFileCache
 
-/** Notification metadata shares the browser's versioned tags and embedded artwork. */
+/** Notifications reuse indexed text tags; starting playback never parses an external file's tags. */
 internal data class PlayerMediaNotificationMetadata(
     val path: String,
     val title: String,
@@ -24,25 +25,26 @@ internal data class PlayerMediaNotificationMetadata(
 
         /** Load for a track or file revision change, never for a playback progress tick. */
         @WorkerThread
-        fun load(context: Context, track: PlayerTrack, fallbackDurationMs: Long): PlayerMediaNotificationMetadata {
+        fun load(context: Context, track: PlayerTrack, fallbackDurationMs: Long,
+                 repository: MediaLibraryRepository = MediaLibraryRepository.getInstance(context)): PlayerMediaNotificationMetadata {
             val file = track.file
             val metadata = try { SharedFileCache.attributes.get(file) } catch (_: Exception) { null }
             if (metadata != null && fallbackDurationMs > 0L) {
                 SharedMediaCache.seedDuration(metadata, fallbackDurationMs)
             }
-            val cached = try { metadata?.let(SharedMediaCache::read) } catch (_: Exception) { null }
+            val stored = try { repository.getStoredTrack(track.path) } catch (_: Exception) { null }
             val cover = try {
                 metadata?.let { SharedMediaCache.artwork(it, ARTWORK_SIZE, allowVideoFrame = false) }
                     ?.let(::boundedArtwork)
             } catch (_: Exception) { null }
             return PlayerMediaNotificationMetadata(
                 path = track.path,
-                title = cached?.tags?.title?.takeIf { it.isNotBlank() }
+                title = stored?.title?.takeIf { it.isNotBlank() }
                     ?: file.nameWithoutExtension.ifBlank { track.name.ifBlank { file.name } },
-                artist = cached?.tags?.artist.orEmpty(),
-                album = cached?.tags?.album.orEmpty(),
+                artist = stored?.artist.orEmpty(),
+                album = stored?.album.orEmpty(),
                 artwork = cover ?: defaultArtwork(context, track.isVideo),
-                durationMs = fallbackDurationMs.takeIf { it > 0L } ?: cached?.durationMs?.coerceAtLeast(0L) ?: 0L
+                durationMs = fallbackDurationMs.takeIf { it > 0L } ?: stored?.durationMs?.coerceAtLeast(0L) ?: 0L
             )
         }
 

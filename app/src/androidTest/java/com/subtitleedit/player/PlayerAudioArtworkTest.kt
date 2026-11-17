@@ -36,6 +36,7 @@ import com.subtitleedit.MediaConvertCoverMode
 import com.subtitleedit.MediaConvertMetadata
 import com.subtitleedit.MediaTagAudioRepository
 import com.subtitleedit.library.PlayerTrackMetadataReader
+import com.subtitleedit.library.MediaLibraryRepository
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import java.io.File
 import java.nio.ByteBuffer
@@ -55,6 +56,7 @@ class PlayerAudioArtworkTest {
     private var directory: File? = null
 
     @After fun removeFixtures() {
+        directory?.let { MediaLibraryRepository.getInstance(compose.activity).removeDirectoryFromLibrary(it, emptyList()) }
         directory?.listFiles()?.forEach { PlayerTrackMetadataReader.invalidate(it.path) }
         directory?.deleteRecursively()
     }
@@ -110,6 +112,25 @@ class PlayerAudioArtworkTest {
 
         waitForCover(Color.Blue)
         compose.onNodeWithTag("player-audio-vinyl").assertDoesNotExist()
+    }
+
+    @Test fun externalCoverStaysVisibleWhenAddingAndRemovingFavorites() {
+        val track = createWave(fixtureRoot(), "membership-cover.wav")
+        attachCover(track, AndroidColor.RED, index = false)
+        val repository = MediaLibraryRepository.getInstance(compose.activity)
+        try {
+            showVisual(track)
+            waitForCover(Color.Red)
+            assertTrue(repository.toggleFavorite(track.path))
+            waitForCover(Color.Red)
+
+            repository.removeFavorite(track.path)
+            waitForCover(Color.Red)
+            compose.onNodeWithTag("player-audio-vinyl").assertDoesNotExist()
+            assertTrue(repository.getIndexedTracks().none { it.path == track.path })
+        } finally {
+            repository.removeFavorite(track.path)
+        }
     }
 
     @Test fun embeddedArtworkTouchBoundsFollowCoverWaveformOrientationAndTransforms() {
@@ -238,7 +259,7 @@ class PlayerAudioArtworkTest {
         }.array())
     }
 
-    private fun attachCover(track: File, color: Int) {
+    private fun attachCover(track: File, color: Int, index: Boolean = true) {
         val image = File(track.parentFile, "cover-$color.png")
         val bitmap = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888)
         try {
@@ -252,5 +273,6 @@ class PlayerAudioArtworkTest {
             coverPath = image.path
         ))
         PlayerTrackMetadataReader.invalidate(track.path)
+        if (index) MediaLibraryRepository.getInstance(compose.activity).indexTrack(track.path)
     }
 }

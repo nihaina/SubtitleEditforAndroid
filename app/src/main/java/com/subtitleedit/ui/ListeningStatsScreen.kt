@@ -487,7 +487,7 @@ private fun PlaybackInsightRow(
     onClick: () -> Unit
 ) {
     val cover by produceState<Bitmap?>(initialValue = null, key1 = track.path) {
-        value = withContext(Dispatchers.IO) { SharedFileCache.attributes.get(File(track.path))?.let { metadata -> SharedMediaCache.artwork(metadata, 128) } }
+        value = withContext(Dispatchers.IO) { loadStatsArtwork(track.path, 128) }
     }
     Row(
         modifier = Modifier
@@ -558,7 +558,7 @@ private fun SummarySection(
     var cover by remember(topArtworkPath, granularity, artworkRefreshVersion) { mutableStateOf<Bitmap?>(null) }
     LaunchedEffect(topArtworkPath, granularity, artworkRefreshVersion) {
         cover = topArtworkPath?.let {
-            withContext(Dispatchers.IO) { SharedFileCache.attributes.get(File(it))?.let { metadata -> SharedMediaCache.artwork(metadata, 480, allowVideoFrame = false) } }
+            withContext(Dispatchers.IO) { loadStatsArtwork(it, 480, allowVideoFrame = false) }
         }
     }
 
@@ -992,7 +992,7 @@ private fun TopWorksSection(
             )
             items.forEachIndexed { index, item ->
                 val cover by produceState<Bitmap?>(initialValue = null, key1 = item.mediaPath) {
-                    value = withContext(Dispatchers.IO) { SharedFileCache.attributes.get(File(item.mediaPath))?.let { metadata -> SharedMediaCache.artwork(metadata, 128) } }
+                    value = withContext(Dispatchers.IO) { loadStatsArtwork(item.mediaPath, 128) }
                 }
                 Row(
                     modifier = Modifier
@@ -1122,7 +1122,7 @@ private fun TimelineRow(
     onClick: () -> Unit
 ) {
     val cover by produceState<Bitmap?>(initialValue = null, key1 = session.mediaPath) {
-        value = withContext(Dispatchers.IO) { SharedFileCache.attributes.get(File(session.mediaPath))?.let { metadata -> SharedMediaCache.artwork(metadata, 128) } }
+        value = withContext(Dispatchers.IO) { loadStatsArtwork(session.mediaPath, 128) }
     }
     Row(
         modifier = Modifier
@@ -1227,6 +1227,12 @@ private fun TimelineRow(
                 }
             }
         }
+    }
+}
+
+private fun loadStatsArtwork(path: String, size: Int, allowVideoFrame: Boolean = true): Bitmap? {
+    return SharedFileCache.attributes.get(File(path))?.let {
+        SharedMediaCache.artwork(it, size, allowVideoFrame = allowVideoFrame)
     }
 }
 

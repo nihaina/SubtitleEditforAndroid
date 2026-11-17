@@ -143,7 +143,8 @@ internal data class MediaLibraryQueryKey(
     val repository: MediaLibraryRepository,
     val revision: Long,
     val refreshVersion: Int,
-    val playlistId: Long?
+    val playlistId: Long?,
+    val directories: List<String>
 )
 
 private class MediaLibraryTracksKey(private val tracks: List<MediaLibraryTrack>) {
@@ -166,7 +167,7 @@ internal fun MediaLibraryScreen(
     onToolbarChanged: (String, Boolean, (() -> Unit)?) -> Unit,
     onRequestScanDirectory: () -> Unit = {},
     onRemoveFavoriteDirectory: (File) -> Unit = {},
-    favoriteDirectories: List<File> = emptyList(),
+    mediaLibraryDirectories: List<File> = emptyList(),
     isActive: Boolean = true,
     scanPickerPending: Boolean = false,
     pageState: MediaLibraryPageState = remember { MediaLibraryPageState() },
@@ -247,7 +248,15 @@ internal fun MediaLibraryScreen(
         selectedFilePaths = emptySet()
     }
 
-    val rootPaths = remember(favoriteDirectories) { favoriteDirectories.map { it.absolutePath } }
+    val rootPaths = remember(mediaLibraryDirectories) { mediaLibraryDirectories.map { it.absolutePath } }
+    LaunchedEffect(rootPaths, browseRootPath) {
+        val currentRoot = browseRootPath
+        if (currentRoot != null && currentRoot !in rootPaths) {
+            browseRootPath = null
+            browsePath = null
+            selectedFilePaths = emptySet()
+        }
+    }
     val tracksKey = MediaLibraryTracksKey(content.allTracks)
     val browseIndex = pageState.browseIndex?.takeIf {
         it.tracks === content.allTracks && it.rootPaths == rootPaths
@@ -317,10 +326,10 @@ internal fun MediaLibraryScreen(
         if (selectedFilePaths.isNotEmpty()) selectedFilePaths = emptySet() else leaveFolder()
     }
 
-    LaunchedEffect(repository, isActive, revision, refreshVersion, openedPlaylistId) {
+    LaunchedEffect(repository, isActive, revision, refreshVersion, openedPlaylistId, rootPaths) {
         if (!isActive) return@LaunchedEffect
         val playlistId = openedPlaylistId
-        val query = MediaLibraryQueryKey(repository, revision, refreshVersion, playlistId)
+        val query = MediaLibraryQueryKey(repository, revision, refreshVersion, playlistId, rootPaths)
         if (pageState.loadedQuery == query) return@LaunchedEffect
         val previousTracks = pageState.content.allTracks
         try {
@@ -332,7 +341,9 @@ internal fun MediaLibraryScreen(
                     history = repository.getPlaybackHistory(),
                     // Queue/history changes also bump the repository revision. Keep the
                     // unchanged track source so its prepared folder/index remains usable.
-                    allTracks = repository.searchLibrary("").let { tracks ->
+                    allTracks = repository.getIndexedTracks().filter { track ->
+                        rootPaths.any { track.path.startsWith(it.trimEnd('/') + "/") }
+                    }.let { tracks ->
                         if (tracks == previousTracks) previousTracks else tracks
                     },
                     playlistId = playlistId,
@@ -468,7 +479,7 @@ internal fun MediaLibraryScreen(
                     )
 
                     MediaLibraryTab.FILES -> FilesTabContent(
-                        roots = favoriteDirectories,
+                        roots = mediaLibraryDirectories,
                         isActive = isActive,
                         metadataRefreshKey = refreshVersion,
                         rootPath = browseRootPath,
@@ -1155,11 +1166,14 @@ internal fun MediaFileInfoDialog(
     immersive: Boolean = false,
     allowTagEditing: Boolean = true
 ) {
+    val context = LocalContext.current
     var details by remember(path) { mutableStateOf<PlayerTrackDetails?>(null) }
     var loaded by remember(path) { mutableStateOf(false) }
     LaunchedEffect(path) {
         details = withContext(Dispatchers.IO) {
-            runCatching { PlayerTrackMetadataReader.read(File(path)) }.getOrNull()
+            runCatching {
+                PlayerTrackMetadataReader.read(File(path), cacheDirectory = context.cacheDir)
+            }.getOrNull()
         }
         loaded = true
     }
@@ -1384,7 +1398,11 @@ internal fun MediaTrackCard(
     modifier: Modifier = Modifier
 ) {
     val cover by produceState<Bitmap?>(initialValue = null, key1 = track.path) {
-        value = withContext(Dispatchers.IO) { SharedFileCache.attributes.get(File(track.path))?.let { metadata -> SharedMediaCache.artwork(metadata, 128) } }
+        value = withContext(Dispatchers.IO) {
+            SharedFileCache.attributes.get(File(track.path))?.let { metadata ->
+                SharedMediaCache.artwork(metadata, 128)
+            }
+        }
     }
     Card(
         modifier = modifier

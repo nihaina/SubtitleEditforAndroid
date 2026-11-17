@@ -16,21 +16,31 @@ import java.util.Locale
 
 internal data class SharedMediaMetadata(val tags: MediaConvertMetadata, val durationMs: Long)
 internal data class SharedMediaPreview(val bitmap: Bitmap?, val durationMs: Long)
+private data class SoftwareMediaTags(val value: MediaConvertMetadata = MediaConvertMetadata(), val supported: Boolean = false)
 
 /** Application-wide media data; directory previews and library scans enrich the same version. */
 internal object SharedMediaCache {
-    private val matroskaExtensions = setOf("mkv", "mka", "mks", "webm")
+    private val matroskaExtensions = setOf("mkv", "mka", "webm")
     private val cache = IncrementalMediaCache(
-        emptyTags = MediaConvertMetadata(),
+        emptyTags = SoftwareMediaTags(),
         load = ::loadMissingFields,
         artworkWeight = Bitmap::getByteCount
     )
 
-    fun read(metadata: BrowserFileMetadata): SharedMediaMetadata {
+    fun read(metadata: BrowserFileMetadata, cacheDirectory: File? = null): SharedMediaMetadata {
         if (!metadata.isRegularFile) return SharedMediaMetadata(MediaConvertMetadata(), 0L)
         val data = cache.get(metadata, needDuration = true, needTags = true)
-        return SharedMediaMetadata(data.tags, data.durationMs)
+        // Matroska's Segment Info title and FFmpeg's ALBUM_ARTIST are outside
+        // TagLib's normalized property map even when it recognizes the container.
+        val needsProbe = !data.tags.supported || metadata.file.extension.lowercase(Locale.ROOT) in matroskaExtensions
+        val tags = if (needsProbe) cacheDirectory?.let { softwareDetails(metadata, it) } ?: data.tags.value
+            else data.tags.value
+        return SharedMediaMetadata(tags, data.durationMs)
     }
+
+    fun duration(metadata: BrowserFileMetadata): Long = if (metadata.isRegularFile) {
+        cache.get(metadata, needDuration = true).durationMs
+    } else 0L
 
     fun preview(metadata: BrowserFileMetadata, targetSize: Int, allowVideoFrame: Boolean = true): SharedMediaPreview {
         if (!metadata.isRegularFile) return SharedMediaPreview(null, 0L)
@@ -51,6 +61,9 @@ internal object SharedMediaCache {
 
     /** Detailed video tags are an additional field, never a prerequisite for indexing. */
     fun videoDetails(metadata: BrowserFileMetadata, cacheDirectory: File): MediaConvertMetadata? =
+        softwareDetails(metadata, cacheDirectory)
+
+    private fun softwareDetails(metadata: BrowserFileMetadata, cacheDirectory: File): MediaConvertMetadata? =
         cache.details(metadata) {
             runCatching {
                 val info = ParcelFileDescriptor.open(metadata.file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
@@ -62,14 +75,14 @@ internal object SharedMediaCache {
                 }
                 val primaryAudio = info.getStreams().firstOrNull { it.getType() == "audio" }
                 val sources = listOfNotNull(info.getTags(), primaryVideo?.getTags(), primaryAudio?.getTags())
-                MediaConvertMetadata.fromTags { key ->
+                SoftwareMediaTags(MediaConvertMetadata.fromTags { key ->
                     sources.firstNotNullOfOrNull { tags ->
                         tags.keys().asSequence().firstOrNull { it.equals(key, ignoreCase = true) }
                             ?.let { tags.optString(it).takeIf { value -> value.isNotBlank() && !value.equals("null", true) } }
                     }
-                }
+                }, supported = true)
             }.getOrNull()
-        }
+        }?.value
 
     fun invalidate(path: String) = cache.invalidate(path)
     fun clear() = cache.clear()
@@ -79,7 +92,7 @@ internal object SharedMediaCache {
         metadata: BrowserFileMetadata,
         missing: MissingMediaFields,
         knownCover: ByteArray?
-    ): LoadedMediaFields<MediaConvertMetadata, Bitmap> {
+    ): LoadedMediaFields<SoftwareMediaTags, Bitmap> {
         val file = metadata.file
         val isVideo = FileTypePolicy.isVideo(file)
         var retriever: MediaMetadataRetriever? = null
@@ -104,28 +117,13 @@ internal object SharedMediaCache {
             val duration = if (missing.duration) meta(MediaMetadataRetriever.METADATA_KEY_DURATION)
                 .toLongOrNull()?.coerceAtLeast(0L) ?: 0L else 0L
             val tags = if (missing.tags) {
-                val audio = if (!isVideo) runCatching { MediaTagAudioRepository.readMetadata(file) }.getOrNull() else null
-                val native = audio ?: MediaConvertMetadata()
-                native.copy(
-                    title = native.title.ifBlank { meta(MediaMetadataRetriever.METADATA_KEY_TITLE) },
-                    artist = native.artist.ifBlank { meta(MediaMetadataRetriever.METADATA_KEY_ARTIST) },
-                    album = native.album.ifBlank { meta(MediaMetadataRetriever.METADATA_KEY_ALBUM) },
-                    albumArtist = native.albumArtist.ifBlank { meta(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST) },
-                    composer = native.composer.ifBlank { meta(MediaMetadataRetriever.METADATA_KEY_COMPOSER) },
-                    genre = native.genre.ifBlank { meta(MediaMetadataRetriever.METADATA_KEY_GENRE) },
-                    trackNumber = native.trackNumber.ifBlank { meta(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER) },
-                    discNumber = native.discNumber.ifBlank { meta(MediaMetadataRetriever.METADATA_KEY_DISC_NUMBER) },
-                    year = native.year.ifBlank { meta(MediaMetadataRetriever.METADATA_KEY_YEAR) }
-                )
+                // TagLib also handles MP4/MOV/ASF video tags. Supported empty fields are
+                // authoritative; never refill cleared values through the platform extractor.
+                val native = runCatching { MediaTagAudioRepository.readMetadata(file) }.getOrNull()
+                SoftwareMediaTags(native ?: MediaConvertMetadata(), supported = native != null)
             } else null
             val cover = if (missing.cover) {
-                runCatching { source()?.embeddedPicture }.getOrNull()
-                    // Android's retriever can ignore Matroska picture attachments. Read only
-                    // attachment headers/data, leaving movie packets and the source untouched.
-                    ?: file.takeIf { it.extension.lowercase(Locale.ROOT) in matroskaExtensions }
-                        ?.let(MatroskaCoverReader::read) ?: if (!isVideo) {
-                    runCatching { MediaTagAudioRepository.pictures(file).firstOrNull()?.data }.getOrNull()
-                } else null
+                SoftwareMediaCoverReader.read(file)
             } else knownCover
             val artwork = missing.artwork?.let { request ->
                 if (cover != null) runCatching { decodeSampled(cover, request.size) }.getOrNull()
