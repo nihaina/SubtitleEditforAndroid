@@ -18,6 +18,7 @@ import androidx.compose.ui.res.stringResource
 import com.subtitleedit.MediaConvertMetadataField
 import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppDialog
+import com.subtitleedit.ui.settings.settingsOutlinedTextFieldColors
 import com.subtitleedit.ui.theme.AppSpacing
 
 @Composable
@@ -49,6 +50,7 @@ internal fun MediaConvertMetadataDialog(
                     singleLine = !multiline,
                     minLines = if (multiline) 2 else 1,
                     maxLines = if (multiline) 4 else 1,
+                    colors = settingsOutlinedTextFieldColors(),
                     modifier = Modifier.fillMaxWidth().testTag("convert-metadata-${field.tag}")
                 )
             }

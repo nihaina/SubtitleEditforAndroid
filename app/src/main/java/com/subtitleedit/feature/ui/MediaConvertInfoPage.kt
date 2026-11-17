@@ -1,15 +1,18 @@
 package com.subtitleedit.feature.ui
 
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -17,23 +20,30 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.MediaConvertCoverMode
 import com.subtitleedit.MediaConvertMetadata
-import com.subtitleedit.MediaConvertMetadataField
 import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppDialog
+import com.subtitleedit.ui.settings.SettingsTileGroup
+import com.subtitleedit.ui.settings.settingsChipColor
+import com.subtitleedit.ui.settings.settingsPrimaryTextColor
+import com.subtitleedit.ui.settings.settingsSecondaryTextColor
+import com.subtitleedit.ui.settings.settingsTileColor
+import com.subtitleedit.ui.settings.settingsTileShape
 import com.subtitleedit.ui.theme.AppSpacing
 
 @Composable
@@ -60,58 +70,58 @@ internal fun MediaConvertInfoPage(
         if (batchIsAudioSource) R.string.media_convert_info_batch_audio_warning else R.string.media_convert_info_batch_video_warning
     ) else null
     Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner), modifier = Modifier.testTag("convert-info-page")) {
-        Text(stringResource(R.string.media_convert_info_settings), style = MaterialTheme.typography.titleLarge)
+        Text(
+            stringResource(R.string.media_convert_info_settings),
+            style = MaterialTheme.typography.titleMedium,
+            color = settingsPrimaryTextColor(),
+            modifier = Modifier.padding(start = 4.dp)
+        )
         if (warning != null && enabled) Text(
             warning,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.testTag("convert-info-batch-warning")
+            color = settingsSecondaryTextColor(),
+            modifier = Modifier.padding(horizontal = 4.dp).testTag("convert-info-batch-warning")
         )
         val coverLabel = when (metadata.cover) {
             MediaConvertCoverMode.DEFAULT -> stringResource(R.string.media_convert_info_cover_default)
             MediaConvertCoverMode.NONE -> stringResource(R.string.media_convert_info_cover_none)
             MediaConvertCoverMode.CUSTOM -> coverFileName ?: stringResource(R.string.media_convert_info_cover_selected)
         }
-        MediaConvertInfoRow(stringResource(R.string.media_convert_info_cover), coverLabel, enabled && coverEnabled,
-            { if (batch) showCoverWarning = true else onPickCover() }, "convert-info-cover",
-            onLongClick = { showCoverDeleteConfirmation = true },
-            onLongClickLabel = stringResource(R.string.media_tag_editor_delete_cover),
-            actions = {
-                Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner),
-                    modifier = Modifier.padding(end = AppSpacing.Inner)) {
-                    Text(stringResource(R.string.media_tag_editor_export_cover),
-                        modifier = Modifier.testTag("convert-cover-export")
-                            .clickable(enabled = enabled && coverExportEnabled, role = Role.Button, onClick = onExportCover),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colorResource(R.color.primary).copy(alpha = if (enabled && coverExportEnabled) 1f else 0.38f))
-                    Text(stringResource(R.string.delete),
-                        modifier = Modifier.testTag("convert-cover-delete")
-                            .clickable(enabled = enabled && coverEnabled, role = Role.Button) { showCoverDeleteConfirmation = true },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error.copy(alpha = if (enabled && coverEnabled) 1f else 0.38f))
-                }
-            })
+        SettingsTileGroup {
+            MediaConvertInfoRow(stringResource(R.string.media_convert_info_cover), coverLabel, enabled && coverEnabled,
+                { if (batch) showCoverWarning = true else onPickCover() }, "convert-info-cover",
+                onLongClick = { showCoverDeleteConfirmation = true },
+                onLongClickLabel = stringResource(R.string.media_tag_editor_delete_cover),
+                actions = {
+                    MediaConvertInfoAction(stringResource(R.string.media_tag_editor_export_cover),
+                        MaterialTheme.colorScheme.primary, enabled && coverExportEnabled, "convert-cover-export",
+                        onExportCover)
+                    MediaConvertInfoAction(stringResource(R.string.delete),
+                        MaterialTheme.colorScheme.error, enabled && coverEnabled, "convert-cover-delete") {
+                        showCoverDeleteConfirmation = true
+                    }
+                })
+            fields.forEach { field ->
+                MediaConvertInfoRow(
+                    label = stringResource(field.labelResource),
+                    value = metadata.value(field).ifBlank { stringResource(R.string.media_convert_info_empty) },
+                    enabled = enabled,
+                    onClick = { editingFieldName = field.name },
+                    tag = "convert-info-${field.tag}"
+                )
+            }
+        }
         if (coverUnsupportedHint != null) Text(
             text = coverUnsupportedHint,
-            modifier = Modifier.testTag("convert-info-cover-unsupported-hint"),
+            modifier = Modifier.padding(horizontal = 4.dp).testTag("convert-info-cover-unsupported-hint"),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = settingsSecondaryTextColor()
         )
-        fields.forEach { field ->
-            HorizontalDivider()
-            MediaConvertInfoRow(
-                label = stringResource(field.labelResource),
-                value = metadata.value(field).ifBlank { stringResource(R.string.media_convert_info_empty) },
-                enabled = enabled,
-                onClick = { editingFieldName = field.name },
-                tag = "convert-info-${field.tag}"
-            )
-        }
         if (!enabled) Text(
             text = disabledHint ?: stringResource(R.string.media_convert_info_unavailable_hint),
-            modifier = Modifier.testTag("convert-info-unavailable-hint"),
+            modifier = Modifier.padding(horizontal = 4.dp).testTag("convert-info-unavailable-hint"),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = settingsSecondaryTextColor()
         )
     }
     if (showCoverDeleteConfirmation && enabled && coverEnabled) {
@@ -162,28 +172,54 @@ internal fun MediaConvertInfoPage(
     }
 }
 
+/** One metadata tile in the settings style: title with its value underneath, optional trailing actions and an arrow. */
 @Composable
 private fun MediaConvertInfoRow(label: String, value: String, enabled: Boolean, onClick: () -> Unit, tag: String,
                                 onLongClick: (() -> Unit)? = null, onLongClickLabel: String? = null,
                                 actions: @Composable () -> Unit = {}) {
+    val source = remember { MutableInteractionSource() }
     val interaction = if (onLongClick != null) Modifier.combinedClickable(
-        enabled = enabled, onClick = onClick, onLongClick = onLongClick, onLongClickLabel = onLongClickLabel
-    ) else Modifier.clickable(enabled = enabled, onClick = onClick)
+        enabled = enabled, interactionSource = source, indication = LocalIndication.current,
+        onClick = onClick, onLongClick = onLongClick, onLongClickLabel = onLongClickLabel
+    ) else Modifier.clickable(enabled = enabled, interactionSource = source, indication = LocalIndication.current,
+        onClick = onClick)
+    val contentAlpha = if (enabled) 1f else 0.5f
     Row(
-        modifier = Modifier.fillMaxWidth().then(interaction).testTag(tag).padding(vertical = 14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp)
+            .clip(settingsTileShape(source))
+            .background(settingsTileColor())
+            .then(interaction)
+            .testTag(tag)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f)
-        Row(Modifier.width(AppSpacing.FormLabelWidth), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(label, style = MaterialTheme.typography.bodyLarge, color = contentColor)
-            actions()
+        Column(Modifier.weight(1f).alpha(contentAlpha)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge, color = settingsPrimaryTextColor())
+            Text(value, modifier = Modifier.padding(top = 2.dp), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium, color = settingsSecondaryTextColor())
         }
-        Column(Modifier.weight(1f)) {
-            Text(value, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = contentColor)
-        }
-        Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(20.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.38f))
+        actions()
+        Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null,
+            modifier = Modifier.padding(start = 4.dp).size(24.dp).alpha(contentAlpha),
+            tint = settingsSecondaryTextColor())
     }
+}
+
+/** Capsule text action placed on a tile (export / delete cover). */
+@Composable
+private fun MediaConvertInfoAction(text: String, color: Color, enabled: Boolean, tag: String, onClick: () -> Unit) {
+    Text(
+        text,
+        modifier = Modifier
+            .padding(start = 8.dp)
+            .testTag(tag)
+            .clip(CircleShape)
+            .background(settingsChipColor())
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        style = MaterialTheme.typography.labelLarge,
+        color = color.copy(alpha = if (enabled) 1f else 0.38f)
+    )
 }
