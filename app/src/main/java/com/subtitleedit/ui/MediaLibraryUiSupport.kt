@@ -25,9 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -56,10 +54,9 @@ internal object MediaLibraryScanCoordinator {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val inFlight = AtomicBoolean(false)
     private val _scanning = MutableStateFlow(false)
-    // Root recovery and file-observer indexing run without the manual scan entry.
-    val scanning = combine(_scanning, MediaLibraryFileObserver.indexing) { queued, indexing ->
-        queued || indexing
-    }.stateIn(scope, SharingStarted.Eagerly, MediaLibraryFileObserver.indexing.value)
+    // The add entry represents a user-requested scan. Startup reconciliation and file events
+    // keep running in the observer's serial queue without occupying this entry.
+    val scanning = _scanning.asStateFlow()
 
     fun scan(context: Context, directories: List<File>) {
         if (!inFlight.compareAndSet(false, true)) return
