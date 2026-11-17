@@ -8,6 +8,7 @@ internal object PlayerEqualizer {
     const val BAND_COUNT = 10
     const val MIN_GAIN = -12f
     const val MAX_GAIN = 12f
+    const val GAIN_STEP = 0.5f
 
     val FREQUENCIES: List<Double> = listOf(
         31.5, 62.5, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0
@@ -25,7 +26,8 @@ internal object PlayerEqualizer {
         Preset("night", listOf(-4f, -3f, -2f, -1f, 0f, 0f, -1f, -2f, -3f, -4f))
     )
 
-    fun clamp(gain: Float): Float = if (gain.isFinite()) gain.coerceIn(MIN_GAIN, MAX_GAIN) else 0f
+    fun clamp(gain: Float): Float =
+        if (gain.isFinite()) (Math.round(gain / GAIN_STEP) * GAIN_STEP).coerceIn(MIN_GAIN, MAX_GAIN) else 0f
 
     fun normalize(gains: List<Float>): List<Float> =
         List(BAND_COUNT) { index -> clamp(gains.getOrNull(index) ?: 0f) }
@@ -63,6 +65,11 @@ internal object PlayerEqualizer {
             hertz.toLong().toString()
         }
 
-    fun formatGain(gain: Float): String =
-        "${if (gain > 0f) "+" else ""}${if (gain == gain.toLong().toFloat()) gain.toLong() else gain}dB"
+    /** Gains are quantised to [GAIN_STEP]; a continuous slider otherwise yields values like 0.0028800964. */
+    fun formatGain(gain: Float): String {
+        val value = clamp(gain)
+        val text = if (value == value.toInt().toFloat()) value.toInt().toString()
+        else String.format(java.util.Locale.US, "%.1f", value)
+        return "${if (value > 0f) "+" else ""}${text}dB"
+    }
 }

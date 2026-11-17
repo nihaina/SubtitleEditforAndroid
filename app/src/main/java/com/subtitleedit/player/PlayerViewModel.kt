@@ -1160,7 +1160,9 @@ internal class PlayerViewModel @JvmOverloads constructor(
     fun setBandGain(index: Int, gain: Float) {
         if (index !in 0 until PlayerEqualizer.BAND_COUNT) return
         val gains = PlayerEqualizer.normalize(_state.value.equalizer.gains).toMutableList()
-        gains[index] = PlayerEqualizer.clamp(gain)
+        val snapped = PlayerEqualizer.clamp(gain)
+        if (gains[index] == snapped) return // dragging within one step must not restart the audio filter
+        gains[index] = snapped
         setEqualizer(_state.value.equalizer.copy(gains = gains))
     }
 

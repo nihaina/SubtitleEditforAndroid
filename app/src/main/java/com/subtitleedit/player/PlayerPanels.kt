@@ -43,6 +43,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -54,6 +57,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -211,30 +215,71 @@ private fun PlayerEqualizerPanel(state: PlayerUiState, viewModel: PlayerViewMode
                 PlayerEqualizer.formatFrequency(frequency),
                 color = PlayerColors.OnDarkVariant,
                 fontSize = 12.sp,
-                modifier = Modifier.width(38.dp)
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.width(36.dp)
             )
-            Slider(
-                value = gain,
-                onValueChange = { viewModel.setBandGain(index, it) },
-                valueRange = PlayerEqualizer.MIN_GAIN..PlayerEqualizer.MAX_GAIN,
+            PlayerEqualizerBandSlider(
+                gain = gain,
                 enabled = state.equalizer.enabled,
-                colors = SliderDefaults.colors(
-                    thumbColor = PlayerColors.Accent,
-                    activeTrackColor = PlayerColors.Accent,
-                    inactiveTrackColor = PlayerColors.SurfaceHigh,
-                    disabledThumbColor = PlayerColors.OnDarkVariant,
-                    disabledActiveTrackColor = PlayerColors.SurfaceHigh
-                ),
+                onGainChange = { viewModel.setBandGain(index, it) },
                 modifier = Modifier.weight(1f)
             )
+            // Fixed width and a single line, so every band keeps the same track length however the value reads.
             Text(
                 PlayerEqualizer.formatGain(gain),
                 color = if (gain == 0f) PlayerColors.OnDarkVariant else PlayerColors.Accent,
                 fontSize = 12.sp,
-                modifier = Modifier.width(44.dp)
+                maxLines = 1,
+                softWrap = false,
+                textAlign = TextAlign.End,
+                modifier = Modifier.width(56.dp)
             )
         }
     }
+}
+
+/** Zero-centred band slider: the fill runs from the 0 dB mark to the thumb, so cut and boost read differently. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PlayerEqualizerBandSlider(
+    gain: Float,
+    enabled: Boolean,
+    onGainChange: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val activeColor = if (enabled) PlayerColors.Accent else PlayerColors.OnDarkVariant
+    val trackColor = PlayerColors.SurfaceHigh
+    Slider(
+        value = gain,
+        onValueChange = onGainChange,
+        valueRange = PlayerEqualizer.MIN_GAIN..PlayerEqualizer.MAX_GAIN,
+        enabled = enabled,
+        colors = SliderDefaults.colors(
+            thumbColor = PlayerColors.Accent,
+            disabledThumbColor = PlayerColors.OnDarkVariant
+        ),
+        thumb = {
+            Box(
+                Modifier.size(20.dp).clip(CircleShape).background(if (enabled) PlayerColors.Accent else PlayerColors.OnDarkVariant)
+            )
+        },
+        track = { sliderState ->
+            Box(
+                Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(trackColor)
+                    .drawBehind {
+                        val center = size.width / 2f
+                        val x = size.width * sliderState.coercedValueAsFraction
+                        drawRect(
+                            color = activeColor,
+                            topLeft = Offset(minOf(x, center), 0f),
+                            size = Size(kotlin.math.abs(x - center), size.height)
+                        )
+                    }
+            )
+        },
+        modifier = modifier
+    )
 }
 
 private fun presetLabel(id: String): Int = when (id) {

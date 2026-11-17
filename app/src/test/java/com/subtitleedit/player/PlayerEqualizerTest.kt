@@ -50,6 +50,15 @@ class PlayerEqualizerTest {
         assertEquals("0dB", PlayerEqualizer.formatGain(0f))
     }
 
+    @Test fun continuousSliderValuesSnapToHalfDecibels() {
+        assertEquals(0f, PlayerEqualizer.clamp(0.0028800964f))
+        assertEquals(0.5f, PlayerEqualizer.clamp(0.3f))
+        assertEquals(-2.5f, PlayerEqualizer.clamp(-2.4f))
+        assertEquals("0dB", PlayerEqualizer.formatGain(0.0028800964f))
+        assertEquals("+4dB", PlayerEqualizer.formatGain(3.9999f))
+        assertEquals("+0.5dB", PlayerEqualizer.formatGain(0.4812f))
+    }
+
     @Test fun presetsStayInsideTheSliderRange() {
         PlayerEqualizer.PRESETS.forEach { preset ->
             assertEquals(PlayerEqualizer.BAND_COUNT, preset.gains.size)
