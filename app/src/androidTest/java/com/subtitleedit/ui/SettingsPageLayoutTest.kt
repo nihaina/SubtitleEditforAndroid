@@ -1,0 +1,74 @@
+package com.subtitleedit.ui
+
+import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.junit4.StateRestorationTester
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.unit.dp
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.subtitleedit.R
+import com.subtitleedit.ui.settings.SettingsPageState
+import com.subtitleedit.ui.settings.SettingsScreen
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
+import com.subtitleedit.util.FileUtils
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+
+/** Both existing presentations keep bottom actions and their viewport through a page reload. */
+@RunWith(AndroidJUnit4::class)
+class SettingsPageLayoutTest {
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun materialSettingsKeepBottomActionsAndScrollAfterStateRestoration() = checkLayout(true)
+
+    @Test fun legacySettingsKeepBottomActionsAndScrollAfterStateRestoration() = checkLayout(false)
+
+    private fun checkLayout(material: Boolean) {
+        val state = mutableStateOf(SettingsPageState())
+        val actions = mutableListOf<String>()
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            SubtitleEditComposeTheme {
+                Surface(Modifier.requiredSize(360.dp, 500.dp)) {
+                    SettingsScreen(
+                        state = state.value, encodings = FileUtils.SUPPORTED_ENCODINGS,
+                        showTopBar = false, useMaterial3Visuals = material,
+                        onBack = {}, onEncodingSelected = {}, onThemeSelected = {},
+                        onCheckUpdatesChanged = {}, onPreserveDirectoriesChanged = {},
+                        onLoopSelectedChanged = {}, onSelectPlayingChanged = {},
+                        onOpenAiSettings = {}, onOpenModelManagement = {}, onOpenTtsSettings = {},
+                        onOpenLogs = {}, onOpenAbout = {}, onSelectSoftwareDirectory = {},
+                        onConfirmSoftwareDirectory = {}, onCancelSoftwareDirectory = {},
+                        onCacheClear = {}, onEmptyCacheClear = {},
+                        onBackup = { actions += "backup" }, onRestore = { actions += "restore" },
+                    )
+                }
+            }
+        }
+        val backup = compose.activity.getString(R.string.settings_backup)
+        val restore = compose.activity.getString(R.string.settings_restore)
+        compose.onNodeWithText(backup).assertDoesNotExist()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText(backup))
+        val row = compose.onNodeWithText(backup)
+        val before = row.fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle { state.value = state.value.copy(cacheSize = "1 MB") }
+        restoration.emulateSavedInstanceStateRestore()
+        row.assertIsDisplayed()
+        assertEquals(before, row.fetchSemanticsNode().boundsInRoot)
+        row.performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.settings_backup_continue)).performClick()
+        compose.onNodeWithText(restore).assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(listOf("backup", "restore"), actions) }
+    }
+}

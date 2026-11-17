@@ -77,11 +77,13 @@ internal class MediaLibraryObservation(
     private val eventThread = HandlerThread("MediaLibraryFileEvents").apply { start() }
     private val eventHandler = Handler(eventThread.looper)
     private val watches = linkedMapOf<String, Watch>()
+    private val canonicalWatches = hashMapOf<String, String>()
     private val pending = linkedMapOf<Pair<String, Long>, Pending>()
     private var flushScheduled = false
     private var roots = emptySet<String>()
     private var retainedCatalogRoots: Set<String>? = null
     private var publishedCoverage = emptySet<String>()
+    private var coverageDirty = false
     private val readyRoots = linkedSetOf<String>()
     private var appContext: Context? = null
 
@@ -107,6 +109,7 @@ internal class MediaLibraryObservation(
                             }
                             val added = directories.map { it.absolutePath }.filter { it !in roots }
                             roots = roots + added
+                            if (added.isNotEmpty()) coverageDirty = true
                             added.mapNotNull { File(it).parentFile }.forEach(::observe)
                             // Selecting a just-added directory also updates preferences.
                             // Root registration and that explicit request share one reconciliation.
@@ -116,12 +119,14 @@ internal class MediaLibraryObservation(
                                 }
                             } else reconcileNow(request.context, directories, request.version)
                             checkScanVersion(request.version)
+                            publishCoverage()
                             request.result.complete(count)
                         }
                         is Request.Changes -> if (request.version == scanVersion.get()) applyChanges(request)
                             else invalidateReadyRoots(request.paths)
                         is Request.Stop -> {
                             removeWatches { true }
+                            publishCoverage()
                             eventHandler.removeCallbacksAndMessages(null)
                             eventThread.quitSafely()
                             request.finished.complete(Unit)
@@ -132,6 +137,10 @@ internal class MediaLibraryObservation(
                 } catch (error: Exception) {
                     if (request is Request.Reconcile) request.result.completeExceptionally(error)
                     else if (error !is CancellationException) Log.w("MediaLibrary", "Incremental library refresh failed", error)
+                } finally {
+                    // Native watches are installed before each listing. Publish their ownership
+                    // at request boundaries, including cancelled scans, instead of copying N growing sets.
+                    publishCoverage()
                 }
             }
         }
@@ -178,6 +187,7 @@ internal class MediaLibraryObservation(
         if (roots == requestedPaths && request.removedPaths.isEmpty()) return
         val added = requestedPaths - roots
         roots = requestedPaths
+        coverageDirty = true
         readyRoots.retainAll(roots)
         removeWatches { path -> roots.none { within(path, it) || File(it).parentFile?.absolutePath == path } }
         val retainedDirectories = (configured ?: retainedPaths).map(::File)
@@ -274,7 +284,7 @@ internal class MediaLibraryObservation(
             val file = SharedFileCache.attributes.get(File(path))
             // A symlink back into an already subscribed tree is not a second library.
             val canonical = if (file?.isDirectory == true) runCatching { File(path).canonicalPath }.getOrNull() else null
-            canonical == null || watches.none { (watchedPath, watch) -> watchedPath != path && watch.canonicalPath == canonical }
+            canonical == null || canonicalWatches[canonical].let { it == null || it == path }
         }
         if (paths.isEmpty()) {
             onDirectoriesUpdated(setOf(request.directory).withParents())
@@ -303,7 +313,7 @@ internal class MediaLibraryObservation(
         val path = directory.absolutePath
         if (path in watches) return
         val canonicalPath = runCatching { directory.canonicalPath }.getOrDefault(path)
-        if (watches.values.any { it.canonicalPath == canonicalPath }) return
+        if (canonicalPath in canonicalWatches) return
         val token = tokenSource.incrementAndGet()
         val receive: (Int, String?) -> Unit = { event, name ->
             eventHandler.post {
@@ -337,17 +347,27 @@ internal class MediaLibraryObservation(
             }
         }
         watches[path] = Watch(token, observer, canonicalPath)
+        canonicalWatches[canonicalPath] = path
         observer.startWatching()
-        publishCoverage()
+        coverageDirty = true
     }
 
     private fun removeWatches(predicate: (String) -> Boolean) {
-        watches.keys.filter(predicate).forEach { watches.remove(it)?.observer?.stopWatching() }
+        watches.keys.filter(predicate).forEach { path ->
+            val watch = watches.remove(path) ?: return@forEach
+            canonicalWatches.remove(watch.canonicalPath)
+            watch.observer.stopWatching()
+            coverageDirty = true
+        }
+        // Hand removed paths back to browser watchers before a replacement scan can block.
         publishCoverage()
     }
 
     private fun publishCoverage() {
+        if (!coverageDirty) return
+        coverageDirty = false
         val current = watches.keys.filterTo(linkedSetOf()) { path -> roots.any { within(path, it) } }
+        if (current == publishedCoverage) return
         (publishedCoverage - current).forEach(SharedFileCache.directories::invalidate)
         publishedCoverage = current
         onCoverageChanged(current)

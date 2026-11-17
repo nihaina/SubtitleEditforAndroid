@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -62,6 +63,7 @@ import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.ui.components.SectionHeader
 import com.subtitleedit.ui.components.AppToolScaffold
+import com.subtitleedit.ui.theme.AppSpacing
 import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.components.SettingsGroup
 import com.subtitleedit.ui.components.SettingsRow as SharedSettingsRow
@@ -140,160 +142,188 @@ fun SettingsScreen(
         onBack = onBack,
         showTopBar = showTopBar,
         imePadding = true,
+        scrollable = false,
+        contentPadding = PaddingValues(0.dp),
         contentBackground = if (useMaterial3Visuals) settingsPageBackground() else Color.Transparent
     ) {
-            SettingsPageGroup(useMaterial3Visuals) {
-                SettingsPageRow(
-                    useMaterial3Visuals = useMaterial3Visuals,
-                    title = stringResource(R.string.activity_settings_text_01),
-                    iconRes = if (useMaterial3Visuals) R.drawable.ic_encoding else null,
-                    value = encodings.firstOrNull { it.id == state.encoding }?.displayName
-                        ?: state.encoding,
-                    showArrow = true,
-                    onClick = { showEncodingDialog = true }
-                )
-                SettingsPageRow(
-                    useMaterial3Visuals = useMaterial3Visuals,
-                    title = stringResource(R.string.activity_settings_text_02),
-                    value = state.themeLabel.ifBlank { stringResource(R.string.settings_theme_system) },
-                    iconRes = if (useMaterial3Visuals) R.drawable.ic_settings_moon else R.drawable.ic_theme_moon,
-                    onClick = { showThemeDialog = true }
-                )
-            }
-            Spacer(Modifier.height(if (useMaterial3Visuals) 8.dp else 20.dp))
-            SettingsPageGroup(useMaterial3Visuals) {
-                SettingsPageRow(
-                    useMaterial3Visuals = useMaterial3Visuals,
-                    title = stringResource(R.string.activity_settings_text_04),
-                    iconRes = R.drawable.ic_model,
-                    onClick = onOpenModelManagement
-                )
-                SettingsPageRow(
-                    useMaterial3Visuals = useMaterial3Visuals,
-                    title = stringResource(R.string.activity_settings_ai_entry),
-                    iconRes = R.drawable.ic_ai_translate,
-                    onClick = onOpenAiSettings
-                )
-                SettingsPageRow(
-                    useMaterial3Visuals = useMaterial3Visuals,
-                    title = stringResource(R.string.tts_settings),
-                    iconRes = R.drawable.ic_tts,
-                    onClick = onOpenTtsSettings
-                )
-                SettingsPageRow(
-                    useMaterial3Visuals = useMaterial3Visuals,
-                    title = stringResource(R.string.activity_settings_text_05),
-                    value = state.cacheSize,
-                    iconRes = R.drawable.ic_delete_normal,
-                    onClick = { showCacheDialog = true }
-                )
-                SettingsPageRow(
-                    useMaterial3Visuals = useMaterial3Visuals,
-                    title = stringResource(R.string.activity_settings_text_06),
-                    iconRes = R.drawable.ic_document,
-                    onClick = onOpenLogs
-                )
-                SettingsPageRow(
-                    useMaterial3Visuals = useMaterial3Visuals,
-                    title = stringResource(R.string.about),
-                    iconRes = R.drawable.ic_info,
-                    showArrow = true,
-                    onClick = onOpenAbout
-                )
-                SettingsPageRow(
-                    useMaterial3Visuals = useMaterial3Visuals,
-                    title = stringResource(R.string.activity_settings_software_directory),
-                    value = state.softwareDirectory.ifBlank {
-                        stringResource(R.string.activity_settings_software_directory_default)
-                    },
-                    valueBelow = true,
-                    iconRes = R.drawable.ic_folder,
-                    showArrow = true,
-                    onClick = onSelectSoftwareDirectory
-                )
-                SettingsPageSwitchRow(
-                    useMaterial3Visuals = useMaterial3Visuals,
-                    title = stringResource(R.string.activity_settings_text_07),
-                    description = stringResource(R.string.activity_settings_text_08),
-                    checked = state.checkUpdatesOnStartup,
-                    onCheckedChange = onCheckUpdatesChanged
-                )
-            }
-            Spacer(Modifier.height(if (useMaterial3Visuals) 8.dp else 20.dp))
-            SettingsPageGroup(useMaterial3Visuals) {
-                SettingsPageSwitchRow(
-                    useMaterial3Visuals = useMaterial3Visuals,
-                    title = stringResource(R.string.activity_settings_text_17),
-                    description = stringResource(R.string.activity_settings_text_18),
-                    checked = state.preserveOutputDirectories,
-                    onCheckedChange = onPreserveDirectoriesChanged
-                )
-            }
-            Spacer(Modifier.height(if (useMaterial3Visuals) 8.dp else 20.dp))
-            SectionHeader(stringResource(R.string.activity_settings_text_09))
-            SettingsPageGroup(useMaterial3Visuals) {
-                SettingsPageSwitchRow(
-                    useMaterial3Visuals = useMaterial3Visuals,
-                    title = stringResource(R.string.activity_settings_text_10),
-                    description = stringResource(R.string.activity_settings_text_11),
-                    checked = state.loopSelectedSubtitle,
-                    onCheckedChange = onLoopSelectedChanged
-                )
-                SettingsPageSwitchRow(
-                    useMaterial3Visuals = useMaterial3Visuals,
-                    title = stringResource(R.string.activity_settings_text_19),
-                    description = stringResource(R.string.activity_settings_text_20),
-                    checked = state.selectPlayingSubtitle,
-                    onCheckedChange = onSelectPlayingChanged
-                )
-            }
-            Spacer(Modifier.height(if (useMaterial3Visuals) 8.dp else 20.dp))
-            if (useMaterial3Visuals) SettingsBackupActions(
-                onBackup = { showBackupWarning = true },
-                onRestore = onRestore
-            ) else Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = { showBackupWarning = true },
-                    modifier = Modifier.weight(1f).height(56.dp),
-                    shape = MaterialTheme.shapes.large,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.White,
-                        contentColor = MaterialTheme.colorScheme.primary
-                    ),
-                    contentPadding = PaddingValues(horizontal = 12.dp)
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_download),
-                        contentDescription = null,
-                        modifier = Modifier.size(22.dp)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(AppSpacing.Page),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.CardGap)
+        ) {
+            item(key = "appearance") {
+                SettingsPageGroup(useMaterial3Visuals) {
+                    SettingsPageRow(
+                        useMaterial3Visuals = useMaterial3Visuals,
+                        title = stringResource(R.string.activity_settings_text_01),
+                        iconRes = if (useMaterial3Visuals) R.drawable.ic_encoding else null,
+                        value = encodings.firstOrNull { it.id == state.encoding }?.displayName
+                            ?: state.encoding,
+                        showArrow = true,
+                        onClick = { showEncodingDialog = true }
                     )
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.settings_backup))
-                }
-                Button(
-                    onClick = onRestore,
-                    modifier = Modifier.weight(1f).height(56.dp),
-                    shape = MaterialTheme.shapes.large,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.White,
-                        contentColor = MaterialTheme.colorScheme.primary
-                    ),
-                    contentPadding = PaddingValues(horizontal = 12.dp)
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_restore),
-                        contentDescription = null,
-                        modifier = Modifier.size(22.dp)
+                    SettingsPageRow(
+                        useMaterial3Visuals = useMaterial3Visuals,
+                        title = stringResource(R.string.activity_settings_text_02),
+                        value = state.themeLabel.ifBlank { stringResource(R.string.settings_theme_system) },
+                        iconRes = if (useMaterial3Visuals) R.drawable.ic_settings_moon else R.drawable.ic_theme_moon,
+                        onClick = { showThemeDialog = true }
                     )
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.settings_restore))
                 }
             }
+            item(key = "appearance-gap") {
+                Spacer(Modifier.height(if (useMaterial3Visuals) 8.dp else 20.dp))
+            }
+            item(key = "general") {
+                SettingsPageGroup(useMaterial3Visuals) {
+                    SettingsPageRow(
+                        useMaterial3Visuals = useMaterial3Visuals,
+                        title = stringResource(R.string.activity_settings_text_04),
+                        iconRes = R.drawable.ic_model,
+                        onClick = onOpenModelManagement
+                    )
+                    SettingsPageRow(
+                        useMaterial3Visuals = useMaterial3Visuals,
+                        title = stringResource(R.string.activity_settings_ai_entry),
+                        iconRes = R.drawable.ic_ai_translate,
+                        onClick = onOpenAiSettings
+                    )
+                    SettingsPageRow(
+                        useMaterial3Visuals = useMaterial3Visuals,
+                        title = stringResource(R.string.tts_settings),
+                        iconRes = R.drawable.ic_tts,
+                        onClick = onOpenTtsSettings
+                    )
+                    SettingsPageRow(
+                        useMaterial3Visuals = useMaterial3Visuals,
+                        title = stringResource(R.string.activity_settings_text_05),
+                        value = state.cacheSize,
+                        iconRes = R.drawable.ic_delete_normal,
+                        onClick = { showCacheDialog = true }
+                    )
+                    SettingsPageRow(
+                        useMaterial3Visuals = useMaterial3Visuals,
+                        title = stringResource(R.string.activity_settings_text_06),
+                        iconRes = R.drawable.ic_document,
+                        onClick = onOpenLogs
+                    )
+                    SettingsPageRow(
+                        useMaterial3Visuals = useMaterial3Visuals,
+                        title = stringResource(R.string.about),
+                        iconRes = R.drawable.ic_info,
+                        showArrow = true,
+                        onClick = onOpenAbout
+                    )
+                    SettingsPageRow(
+                        useMaterial3Visuals = useMaterial3Visuals,
+                        title = stringResource(R.string.activity_settings_software_directory),
+                        value = state.softwareDirectory.ifBlank {
+                            stringResource(R.string.activity_settings_software_directory_default)
+                        },
+                        valueBelow = true,
+                        iconRes = R.drawable.ic_folder,
+                        showArrow = true,
+                        onClick = onSelectSoftwareDirectory
+                    )
+                    SettingsPageSwitchRow(
+                        useMaterial3Visuals = useMaterial3Visuals,
+                        title = stringResource(R.string.activity_settings_text_07),
+                        description = stringResource(R.string.activity_settings_text_08),
+                        checked = state.checkUpdatesOnStartup,
+                        onCheckedChange = onCheckUpdatesChanged
+                    )
+                }
+            }
+            item(key = "general-gap") {
+                Spacer(Modifier.height(if (useMaterial3Visuals) 8.dp else 20.dp))
+            }
+            item(key = "directories") {
+                SettingsPageGroup(useMaterial3Visuals) {
+                    SettingsPageSwitchRow(
+                        useMaterial3Visuals = useMaterial3Visuals,
+                        title = stringResource(R.string.activity_settings_text_17),
+                        description = stringResource(R.string.activity_settings_text_18),
+                        checked = state.preserveOutputDirectories,
+                        onCheckedChange = onPreserveDirectoriesChanged
+                    )
+                }
+            }
+            item(key = "directories-gap") {
+                Spacer(Modifier.height(if (useMaterial3Visuals) 8.dp else 20.dp))
+            }
+            item(key = "editor-heading") {
+                SectionHeader(stringResource(R.string.activity_settings_text_09))
+            }
+            item(key = "editor") {
+                SettingsPageGroup(useMaterial3Visuals) {
+                    SettingsPageSwitchRow(
+                        useMaterial3Visuals = useMaterial3Visuals,
+                        title = stringResource(R.string.activity_settings_text_10),
+                        description = stringResource(R.string.activity_settings_text_11),
+                        checked = state.loopSelectedSubtitle,
+                        onCheckedChange = onLoopSelectedChanged
+                    )
+                    SettingsPageSwitchRow(
+                        useMaterial3Visuals = useMaterial3Visuals,
+                        title = stringResource(R.string.activity_settings_text_19),
+                        description = stringResource(R.string.activity_settings_text_20),
+                        checked = state.selectPlayingSubtitle,
+                        onCheckedChange = onSelectPlayingChanged
+                    )
+                }
+            }
+            item(key = "editor-gap") {
+                Spacer(Modifier.height(if (useMaterial3Visuals) 8.dp else 20.dp))
+            }
+            item(key = "backup") {
+                if (useMaterial3Visuals) SettingsBackupActions(
+                    onBackup = { showBackupWarning = true },
+                    onRestore = onRestore
+                ) else Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { showBackupWarning = true },
+                        modifier = Modifier.weight(1f).height(56.dp),
+                        shape = MaterialTheme.shapes.large,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White,
+                            contentColor = MaterialTheme.colorScheme.primary
+                        ),
+                        contentPadding = PaddingValues(horizontal = 12.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_download),
+                            contentDescription = null,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.settings_backup))
+                    }
+                    Button(
+                        onClick = onRestore,
+                        modifier = Modifier.weight(1f).height(56.dp),
+                        shape = MaterialTheme.shapes.large,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White,
+                            contentColor = MaterialTheme.colorScheme.primary
+                        ),
+                        contentPadding = PaddingValues(horizontal = 12.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_restore),
+                            contentDescription = null,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.settings_restore))
+                    }
+                }
+            }
+        }
     }
 
     if (showBackupWarning) {

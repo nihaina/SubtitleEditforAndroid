@@ -1050,12 +1050,19 @@ class MainActivity : AppComposeActivity() {
                 val oldCoverage = previousCoverage
                 previousCoverage = observed
                 val directory = stateModel.documentState.currentDirectory ?: return@collect
-                if (directory.absolutePath in observed) directoryWatcher.stop()
+                val wasCovered = directory.absolutePath in oldCoverage
+                val isCovered = directory.absolutePath in observed
+                val entries = directorySnapshot?.takeIf { it.directory == directory }?.entries.orEmpty()
+                val coverageChanged = wasCovered != isCovered || (!isCovered && entries.any {
+                    it.isDirectory && !it.restricted && (it.path in oldCoverage) != (it.path in observed)
+                })
+                if (!coverageChanged) return@collect
+                if (isCovered) directoryWatcher.stop()
                 else if (stateModel.documentState.selectedTopLevelItem == R.id.nav_directory &&
                     lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                    watchDirectory(directory, directorySnapshot?.entries.orEmpty()
+                    watchDirectory(directory, entries
                         .filter { it.isDirectory && !it.restricted }.map { it.file })
-                    if (directory.absolutePath in oldCoverage) directorySnapshotLoader.load(directory)
+                    if (wasCovered) directorySnapshotLoader.load(directory)
                 }
             }
         }

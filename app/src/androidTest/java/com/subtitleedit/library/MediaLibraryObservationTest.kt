@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.subtitleedit.util.SharedFileCache
 import java.io.File
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -21,6 +22,40 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class MediaLibraryObservationTest {
     private val context get() = ApplicationProvider.getApplicationContext<Context>()
+
+    @Test fun registeringALargeTreePublishesOneCoverageSnapshotAndStillObservesNestedChanges() = runBlocking {
+        val directory = File(context.cacheDir, "library-coverage-${System.nanoTime()}").apply { check(mkdir()) }
+        val children = (0 until 256).map { File(directory, "folder-$it").apply { check(mkdir()) } }
+        val database = "library-coverage-${System.nanoTime()}.db"
+        val repository = MediaLibraryRepository.open(context, database,
+            albumMetadataReader = { MediaAlbumMetadata() }) { metadata, _ ->
+            MediaLibraryTrack(metadata.path, metadata.file.name)
+        }
+        val snapshots = CopyOnWriteArrayList<Set<String>>()
+        val observation = MediaLibraryObservation(repository, onCoverageChanged = { snapshots += it })
+        try {
+            assertEquals(0, observation.reconcile(context, listOf(directory)))
+            assertEquals("One scan must not publish every growing prefix of the tree", 1, snapshots.size)
+            val expected = (children + directory).mapTo(hashSetOf()) { it.path }
+            assertEquals(expected, snapshots.single())
+
+            val song = File(children.last(), "new.wav").apply { writeText("song") }
+            await { repository.getIndexedTracks().any { it.path == song.path } }
+            assertEquals("File updates do not rebuild unchanged coverage", 1, snapshots.size)
+
+            observation.removeDirectory(context, directory, emptyList())
+            observation.reconcile(context, emptyList())
+            assertEquals(2, snapshots.size)
+            assertTrue(snapshots.last().isEmpty())
+            assertEquals("Published snapshots cannot be mutated during removal", expected, snapshots.first())
+        } finally {
+            observation.stop()
+            repository.close()
+            context.deleteDatabase(database)
+            SharedFileCache.directories.invalidate(directory.path)
+            directory.deleteRecursively()
+        }
+    }
 
     @Test fun recursiveFileEventsUpdateOnlyChangedMediaAndDiscoverNewFolders() = runBlocking {
         val directory = File(context.cacheDir, "library-observe-${System.nanoTime()}").apply { mkdirs() }
@@ -52,6 +87,36 @@ class MediaLibraryObservationTest {
             await { repository.getIndexedTracks().any { it.path == added.path } }
             added.delete()
             await { repository.getIndexedTracks().none { it.path == added.path } }
+        } finally {
+            observation.stop()
+            repository.close()
+            context.deleteDatabase(database)
+            SharedFileCache.directories.invalidate(directory.path)
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test fun deletingAndRecreatingADirectoryRestoresItsWatchAndCanonicalIndex() = runBlocking {
+        val directory = File(context.cacheDir, "library-recreated-${System.nanoTime()}").apply { check(mkdir()) }
+        val child = File(directory, "child").apply { check(mkdir()) }
+        val database = "library-recreated-${System.nanoTime()}.db"
+        val coverage = AtomicReference<Set<String>>(emptySet())
+        val repository = MediaLibraryRepository.open(context, database,
+            albumMetadataReader = { MediaAlbumMetadata() }) { metadata, _ ->
+            MediaLibraryTrack(metadata.path, metadata.size.toString())
+        }
+        val observation = MediaLibraryObservation(repository, onCoverageChanged = coverage::set)
+        try {
+            observation.reconcile(context, listOf(directory))
+            assertTrue(child.path in coverage.get())
+            check(child.delete())
+            await { child.path !in coverage.get() }
+
+            check(child.mkdir())
+            val song = File(child, "recreated.wav").apply { writeText("song") }
+            await { child.path in coverage.get() && repository.getIndexedTracks().any { it.path == song.path } }
+            song.appendText("updated")
+            await { repository.getIndexedTracks().single().title == song.length().toString() }
         } finally {
             observation.stop()
             repository.close()
