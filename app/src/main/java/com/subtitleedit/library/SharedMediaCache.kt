@@ -12,12 +12,14 @@ import com.subtitleedit.model.BrowserFileMetadata
 import com.subtitleedit.util.FfprobeMediaInformation
 import com.subtitleedit.util.FileTypePolicy
 import java.io.File
+import java.util.Locale
 
 internal data class SharedMediaMetadata(val tags: MediaConvertMetadata, val durationMs: Long)
 internal data class SharedMediaPreview(val bitmap: Bitmap?, val durationMs: Long)
 
 /** Application-wide media data; directory previews and library scans enrich the same version. */
 internal object SharedMediaCache {
+    private val matroskaExtensions = setOf("mkv", "mka", "mks", "webm")
     private val cache = IncrementalMediaCache(
         emptyTags = MediaConvertMetadata(),
         load = ::loadMissingFields,
@@ -117,7 +119,11 @@ internal object SharedMediaCache {
                 )
             } else null
             val cover = if (missing.cover) {
-                runCatching { source()?.embeddedPicture }.getOrNull() ?: if (!isVideo) {
+                runCatching { source()?.embeddedPicture }.getOrNull()
+                    // Android's retriever can ignore Matroska picture attachments. Read only
+                    // attachment headers/data, leaving movie packets and the source untouched.
+                    ?: file.takeIf { it.extension.lowercase(Locale.ROOT) in matroskaExtensions }
+                        ?.let(MatroskaCoverReader::read) ?: if (!isVideo) {
                     runCatching { MediaTagAudioRepository.pictures(file).firstOrNull()?.data }.getOrNull()
                 } else null
             } else knownCover
