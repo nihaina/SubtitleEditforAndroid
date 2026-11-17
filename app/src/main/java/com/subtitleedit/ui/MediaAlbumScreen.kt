@@ -7,9 +7,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -352,6 +354,8 @@ internal fun MediaAlbumPageContent(
 ) {
     val globalSelection = LocalMediaSelection.current
     var category by rememberSaveable { mutableStateOf(MediaCategory.ALBUMS) }
+    val browseStateHolder = rememberSaveableStateHolder()
+    val categoryTabsState = rememberLazyListState()
     var query by rememberSaveable { mutableStateOf("") }
     var singerQuery by rememberSaveable { mutableStateOf("") }
     var artistQuery by rememberSaveable { mutableStateOf("") }
@@ -511,6 +515,7 @@ internal fun MediaAlbumPageContent(
             )
             else -> {
                 LazyRow(
+                    state = categoryTabsState,
                     modifier = Modifier.fillMaxWidth().testTag("media-category-tabs"),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -528,50 +533,53 @@ internal fun MediaAlbumPageContent(
                         )
                     }
                 }
-                if (category == MediaCategory.ALBUMS) {
-                    if (loading && albums.isEmpty()) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(32.dp),
-                                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                // Browse content leaves composition while a detail or settings page is open.
+                browseStateHolder.SaveableStateProvider(category.name) {
+                    if (category == MediaCategory.ALBUMS) {
+                        if (loading && albums.isEmpty()) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(32.dp),
+                                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                                )
+                            }
+                        } else {
+                            MediaAlbumBrowseContent(
+                                albums = visibleAlbums,
+                                options = options,
+                                query = query,
+                                onQueryChanged = { query = it },
+                                onSort = { sortOpen = true },
+                                onSettings = { settingsOpen = true },
+                                onOpenAlbum = { cancelReveal(); openedAlbumKey = it.key },
+                                modifier = Modifier.weight(1f)
                             )
                         }
-                    } else {
-                        MediaAlbumBrowseContent(
-                            albums = visibleAlbums,
-                            options = options,
-                            query = query,
-                            onQueryChanged = { query = it },
-                            onSort = { sortOpen = true },
-                            onSettings = { settingsOpen = true },
-                            onOpenAlbum = { cancelReveal(); openedAlbumKey = it.key },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                } else if (creditRole != null) {
-                    if (loading && credits.isEmpty()) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                    } else if (creditRole != null) {
+                        if (loading && credits.isEmpty()) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                            }
+                        } else {
+                            MediaSingerBrowseContent(
+                                singers = visibleCredits,
+                                options = activeCreditOptions,
+                                query = creditQuery,
+                                onQueryChanged = {
+                                    when (creditRole) {
+                                        MediaCreditRole.SINGER -> singerQuery = it
+                                        MediaCreditRole.ARTIST -> artistQuery = it
+                                        MediaCreditRole.COMPOSER -> composerQuery = it
+                                        MediaCreditRole.GENRE -> genreQuery = it
+                                    }
+                                },
+                                onSort = { sortOpen = true },
+                                onSettings = { settingsOpen = true },
+                                onOpenSinger = { cancelReveal(); openedCreditKey = it.key },
+                                modifier = Modifier.weight(1f),
+                                role = creditRole
+                            )
                         }
-                    } else {
-                        MediaSingerBrowseContent(
-                            singers = visibleCredits,
-                            options = activeCreditOptions,
-                            query = creditQuery,
-                            onQueryChanged = {
-                                when (creditRole) {
-                                    MediaCreditRole.SINGER -> singerQuery = it
-                                    MediaCreditRole.ARTIST -> artistQuery = it
-                                    MediaCreditRole.COMPOSER -> composerQuery = it
-                                    MediaCreditRole.GENRE -> genreQuery = it
-                                }
-                            },
-                            onSort = { sortOpen = true },
-                            onSettings = { settingsOpen = true },
-                            onOpenSinger = { cancelReveal(); openedCreditKey = it.key },
-                            modifier = Modifier.weight(1f),
-                            role = creditRole
-                        )
                     }
                 }
             }

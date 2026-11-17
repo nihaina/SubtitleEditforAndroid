@@ -24,7 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -60,6 +60,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -199,6 +200,7 @@ internal fun MediaLibraryScreen(
 
     var selectedTab by rememberSaveable { mutableStateOf(MediaLibraryTab.FILES) }
     var openedPlaylistId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val tabStateHolder = rememberSaveableStateHolder()
 
     val content = pageState.content
     val favorites = content.favorites
@@ -449,107 +451,109 @@ internal fun MediaLibraryScreen(
                     }
                 }
 
-                when (selectedTab) {
-                    MediaLibraryTab.PLAYLIST -> MediaLibraryQueueContent(
-                        savedQueue = currentQueue,
-                        onPlaySavedQueue = { tracks, index, all -> playTracks(tracks, index, playAll = all) },
-                        isActive = isActive
-                    )
+                tabStateHolder.SaveableStateProvider(selectedTab.name) {
+                    when (selectedTab) {
+                        MediaLibraryTab.PLAYLIST -> MediaLibraryQueueContent(
+                            savedQueue = currentQueue,
+                            onPlaySavedQueue = { tracks, index, all -> playTracks(tracks, index, playAll = all) },
+                            isActive = isActive
+                        )
 
-                    MediaLibraryTab.CUSTOM_PLAYLISTS -> CustomPlaylistsTabContent(
-                        playlists = playlists,
-                        onOpen = { openedPlaylistId = it.id },
-                        onRename = { renamingPlaylist = it },
-                        onDelete = { deletingPlaylist = it }
-                    )
+                        MediaLibraryTab.CUSTOM_PLAYLISTS -> CustomPlaylistsTabContent(
+                            playlists = playlists,
+                            onOpen = { openedPlaylistId = it.id },
+                            onRename = { renamingPlaylist = it },
+                            onDelete = { deletingPlaylist = it }
+                        )
 
-                    MediaLibraryTab.HISTORY -> HistoryTabContent(
-                        entries = history,
-                        onPlay = { idx ->
-                            val tracks = history.map {
-                                MediaLibraryTrack(it.path, it.title, it.artist, it.album, it.isVideo, it.durationMs, it.playedAtMs)
-                            }
-                            playTracks(tracks, idx)
-                        },
-                        onRemove = { entry ->
-                            mutate({ repository.removePlaybackHistory(entry.path) })
-                        },
-                        onClearAll = { showClearHistoryConfirm = true },
-                        isActive = isActive
-                    )
-
-                    MediaLibraryTab.FILES -> FilesTabContent(
-                        roots = mediaLibraryDirectories,
-                        isActive = isActive,
-                        metadataRefreshKey = refreshVersion,
-                        rootPath = browseRootPath,
-                        currentPath = browsePath,
-                        entries = folderEntries,
-                        entriesReady = folderSnapshot != null,
-                        rootMediaCounts = rootMediaCounts,
-                        selectedPaths = selectedFilePaths,
-                        selectedDurationMs = selectedDurationMs,
-                        onOpenRoot = ::openRootFolder,
-                        onOpenFolder = ::openChildFolder,
-                        onPlayFile = { entry ->
-                            val queue = mediaFolderPlaybackQueue(folderEntries)
-                            val index = queue.indexOfFirst { it.path == entry.path }
-                            if (index >= 0) playTracks(queue, index, queueSource =
-                                File(entry.path).absoluteFile.parent?.let {
-                                    PlayerQueueSource(PlayerQueueSourceKind.DIRECTORY, it)
-                                })
-                        },
-                        onLongPressFolder = { pendingFolderRemoval = it },
-                        onLongPressFile = { selectedFilePaths = selectedFilePaths + it },
-                        onToggleSelection = { path ->
-                            selectedFilePaths = if (path in selectedFilePaths) {
-                                selectedFilePaths - path
-                            } else {
-                                selectedFilePaths + path
-                            }
-                        },
-                        onClearSelection = { selectedFilePaths = emptySet() },
-                        onAdvancedSelection = { action ->
-                            selectedFilePaths = updateMediaLibrarySelection(
-                                visiblePaths = folderEntries.filterNot { it.isDirectory }.map { it.path },
-                                selectedPaths = selectedFilePaths,
-                                action = action
-                            )
-                        },
-                        onFavoriteSelection = {
-                            val paths = selectedFilePaths
-                            mutate({
-                                paths.forEach { path ->
-                                    if (!repository.isFavorite(path)) repository.toggleFavorite(path)
+                        MediaLibraryTab.HISTORY -> HistoryTabContent(
+                            entries = history,
+                            onPlay = { idx ->
+                                val tracks = history.map {
+                                    MediaLibraryTrack(it.path, it.title, it.artist, it.album, it.isVideo, it.durationMs, it.playedAtMs)
                                 }
-                            }) {
-                                Toast.makeText(
-                                    context,
-                                    context.getString(R.string.media_lib_files_favorited, paths.size),
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                playTracks(tracks, idx)
+                            },
+                            onRemove = { entry ->
+                                mutate({ repository.removePlaybackHistory(entry.path) })
+                            },
+                            onClearAll = { showClearHistoryConfirm = true },
+                            isActive = isActive
+                        )
+
+                        MediaLibraryTab.FILES -> FilesTabContent(
+                            roots = mediaLibraryDirectories,
+                            isActive = isActive,
+                            metadataRefreshKey = refreshVersion,
+                            rootPath = browseRootPath,
+                            currentPath = browsePath,
+                            entries = folderEntries,
+                            entriesReady = folderSnapshot != null,
+                            rootMediaCounts = rootMediaCounts,
+                            selectedPaths = selectedFilePaths,
+                            selectedDurationMs = selectedDurationMs,
+                            onOpenRoot = ::openRootFolder,
+                            onOpenFolder = ::openChildFolder,
+                            onPlayFile = { entry ->
+                                val queue = mediaFolderPlaybackQueue(folderEntries)
+                                val index = queue.indexOfFirst { it.path == entry.path }
+                                if (index >= 0) playTracks(queue, index, queueSource =
+                                    File(entry.path).absoluteFile.parent?.let {
+                                        PlayerQueueSource(PlayerQueueSourceKind.DIRECTORY, it)
+                                    })
+                            },
+                            onLongPressFolder = { pendingFolderRemoval = it },
+                            onLongPressFile = { selectedFilePaths = selectedFilePaths + it },
+                            onToggleSelection = { path ->
+                                selectedFilePaths = if (path in selectedFilePaths) {
+                                    selectedFilePaths - path
+                                } else {
+                                    selectedFilePaths + path
+                                }
+                            },
+                            onClearSelection = { selectedFilePaths = emptySet() },
+                            onAdvancedSelection = { action ->
+                                selectedFilePaths = updateMediaLibrarySelection(
+                                    visiblePaths = folderEntries.filterNot { it.isDirectory }.map { it.path },
+                                    selectedPaths = selectedFilePaths,
+                                    action = action
+                                )
+                            },
+                            onFavoriteSelection = {
+                                val paths = selectedFilePaths
+                                mutate({
+                                    paths.forEach { path ->
+                                        if (!repository.isFavorite(path)) repository.toggleFavorite(path)
+                                    }
+                                }) {
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.media_lib_files_favorited, paths.size),
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    selectedFilePaths = emptySet()
+                                }
+                            },
+                            onAddSelectionToPlaylist = {
+                                pickingPlaylistForTracks = selectedFilePaths.map { path ->
+                                    MediaLibraryTrack(path = path, title = File(path).nameWithoutExtension)
+                                }
                                 selectedFilePaths = emptySet()
+                            },
+                            onShowInfo = {
+                                val path = selectedFilePaths.singleOrNull()
+                                if (path == null) {
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.media_lib_files_info_single),
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    infoFilePath = path
+                                }
                             }
-                        },
-                        onAddSelectionToPlaylist = {
-                            pickingPlaylistForTracks = selectedFilePaths.map { path ->
-                                MediaLibraryTrack(path = path, title = File(path).nameWithoutExtension)
-                            }
-                            selectedFilePaths = emptySet()
-                        },
-                        onShowInfo = {
-                            val path = selectedFilePaths.singleOrNull()
-                            if (path == null) {
-                                Toast.makeText(
-                                    context,
-                                    context.getString(R.string.media_lib_files_info_single),
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            } else {
-                                infoFilePath = path
-                            }
-                        }
-                    )
+                        )
+                    }
                 }
             }
 
@@ -947,104 +951,109 @@ internal fun FilesTabContent(
     }
     val density = LocalDensity.current
     var selectionPanelHeight by remember(currentPath) { mutableStateOf(112.dp) }
-    val folderListState = rememberSaveable(currentPath, saver = LazyListState.Saver) { LazyListState() }
+    val folderStateHolder = rememberSaveableStateHolder()
     val selectedFiles = remember(entries, selectedPaths) {
         entries.filter { !it.isDirectory && it.path in selectedPaths }.map { File(it.path) }
     }
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val bottomInset = if (localSelectionMode) selectionPanelHeight else 4.dp
-        if (currentPath == null) {
-            if (roots.isEmpty()) {
-                LibraryEmptyState(
-                    iconRes = R.drawable.ic_folder,
-                    title = stringResource(R.string.media_lib_files_empty),
-                    subtitle = stringResource(R.string.media_lib_files_empty_hint)
-                )
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    itemsIndexed(roots, key = { _, directory -> directory.absolutePath }) { _, directory ->
-                        RootFolderRow(
-                            directory = directory,
-                            mediaCount = rootMediaCounts[directory.absolutePath] ?: 0,
-                            onClick = { onOpenRoot(directory) },
-                            onLongClick = { onLongPressFolder(directory) }
-                        )
-                    }
-                }
-            }
-        } else {
-            Column(modifier = Modifier.fillMaxSize()) {
-                FolderBreadcrumb(rootPath = rootPath, currentPath = currentPath)
-                if (!entriesReady) {
-                    // The folder is still being indexed; showing the empty state here would flash.
-                    Spacer(modifier = Modifier.fillMaxSize())
-                } else if (entries.isEmpty()) {
+    // Each path owns its viewport; changing rememberSaveable inputs only resets one viewport.
+    folderStateHolder.SaveableStateProvider(currentPath ?: "roots") {
+        val folderListState = rememberLazyListState()
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val bottomInset = if (localSelectionMode) selectionPanelHeight else 4.dp
+            if (currentPath == null) {
+                if (roots.isEmpty()) {
                     LibraryEmptyState(
                         iconRes = R.drawable.ic_folder,
-                        title = stringResource(R.string.media_lib_files_folder_empty),
-                        subtitle = ""
+                        title = stringResource(R.string.media_lib_files_empty),
+                        subtitle = stringResource(R.string.media_lib_files_empty_hint)
                     )
                 } else {
-                    BrowserFileLayout(
-                        items = entries,
-                        key = { it.path },
-                        viewMode = FileBrowserViewMode.DETAILED,
-                        listState = folderListState,
-                        modifier = Modifier.fillMaxSize().testTag("library-files-list"),
-                        contentPadding = browserFileContentPadding(FileBrowserViewMode.DETAILED, bottom = bottomInset)
-                    ) { entry ->
-                        BrowserFileRow(
-                            modifier = Modifier.testTag("library-file:${entry.path}"),
-                            file = File(entry.path),
-                            isDirectoryHint = entry.isDirectory,
-                            metadataRefreshKey = metadataRefreshKey ?: entry,
-                            relativePathRoot = null,
-                            isSelected = globalSelection?.contains(entry.path) ?: (entry.path in selectedPaths),
-                            isSelectionMode = selectionMode && (globalSelection == null ||
-                                (!entry.isDirectory && (com.subtitleedit.util.FileUtils.isAudioFile(File(entry.path)) ||
-                                    com.subtitleedit.util.FileTypePolicy.isVideo(File(entry.path))))),
-                            onClick = {
-                                if (entry.isDirectory) onOpenFolder(File(entry.path))
-                                else if (selectionMode) {
-                                    if (globalSelection != null) globalSelection.toggle(entry.path)
-                                    else onToggleSelection(entry.path)
-                                }
-                                else onPlayFile(entry)
-                            },
-                            onLongClick = {
-                                if (!entry.isDirectory) {
-                                    if (globalSelection != null) globalSelection.select(entry.path)
-                                    else onLongPressFile(entry.path)
-                                }
-                            },
-                            viewMode = FileBrowserViewMode.DETAILED,
-                            directoryPageStyle = true
+                    LazyColumn(
+                        state = folderListState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        itemsIndexed(roots, key = { _, directory -> directory.absolutePath }) { _, directory ->
+                            RootFolderRow(
+                                directory = directory,
+                                mediaCount = rootMediaCounts[directory.absolutePath] ?: 0,
+                                onClick = { onOpenRoot(directory) },
+                                onLongClick = { onLongPressFolder(directory) }
+                            )
+                        }
+                    }
+                }
+            } else {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    FolderBreadcrumb(rootPath = rootPath, currentPath = currentPath)
+                    if (!entriesReady) {
+                        // The folder is still being indexed; showing the empty state here would flash.
+                        Spacer(modifier = Modifier.fillMaxSize())
+                    } else if (entries.isEmpty()) {
+                        LibraryEmptyState(
+                            iconRes = R.drawable.ic_folder,
+                            title = stringResource(R.string.media_lib_files_folder_empty),
+                            subtitle = ""
                         )
+                    } else {
+                        BrowserFileLayout(
+                            items = entries,
+                            key = { it.path },
+                            viewMode = FileBrowserViewMode.DETAILED,
+                            listState = folderListState,
+                            modifier = Modifier.fillMaxSize().testTag("library-files-list"),
+                            contentPadding = browserFileContentPadding(FileBrowserViewMode.DETAILED, bottom = bottomInset)
+                        ) { entry ->
+                            BrowserFileRow(
+                                modifier = Modifier.testTag("library-file:${entry.path}"),
+                                file = File(entry.path),
+                                isDirectoryHint = entry.isDirectory,
+                                metadataRefreshKey = metadataRefreshKey ?: entry,
+                                relativePathRoot = null,
+                                isSelected = globalSelection?.contains(entry.path) ?: (entry.path in selectedPaths),
+                                isSelectionMode = selectionMode && (globalSelection == null ||
+                                    (!entry.isDirectory && (com.subtitleedit.util.FileUtils.isAudioFile(File(entry.path)) ||
+                                        com.subtitleedit.util.FileTypePolicy.isVideo(File(entry.path))))),
+                                onClick = {
+                                    if (entry.isDirectory) onOpenFolder(File(entry.path))
+                                    else if (selectionMode) {
+                                        if (globalSelection != null) globalSelection.toggle(entry.path)
+                                        else onToggleSelection(entry.path)
+                                    }
+                                    else onPlayFile(entry)
+                                },
+                                onLongClick = {
+                                    if (!entry.isDirectory) {
+                                        if (globalSelection != null) globalSelection.select(entry.path)
+                                        else onLongPressFile(entry.path)
+                                    }
+                                },
+                                viewMode = FileBrowserViewMode.DETAILED,
+                                directoryPageStyle = true
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        if (localSelectionMode) {
-            MediaLibrarySelectionPanel(
-                selectedFiles = selectedFiles,
-                totalDurationMs = selectedDurationMs,
-                onRemove = onToggleSelection,
-                onFavorite = onFavoriteSelection,
-                onAddToPlaylist = onAddSelectionToPlaylist,
-                onShowInfo = onShowInfo,
-                onCancel = onClearSelection,
-                onSelectAll = { onAdvancedSelection(MediaLibrarySelectionAction.SELECT_ALL) },
-                onSelectRange = { onAdvancedSelection(MediaLibrarySelectionAction.SELECT_RANGE) },
-                onInvertSelection = { onAdvancedSelection(MediaLibrarySelectionAction.INVERT) },
-                modifier = Modifier.align(Alignment.BottomCenter)
-                    .heightIn(max = maxHeight * 0.7f)
-                    .onSizeChanged { selectionPanelHeight = with(density) { it.height.toDp() } }
-            )
+            if (localSelectionMode) {
+                MediaLibrarySelectionPanel(
+                    selectedFiles = selectedFiles,
+                    totalDurationMs = selectedDurationMs,
+                    onRemove = onToggleSelection,
+                    onFavorite = onFavoriteSelection,
+                    onAddToPlaylist = onAddSelectionToPlaylist,
+                    onShowInfo = onShowInfo,
+                    onCancel = onClearSelection,
+                    onSelectAll = { onAdvancedSelection(MediaLibrarySelectionAction.SELECT_ALL) },
+                    onSelectRange = { onAdvancedSelection(MediaLibrarySelectionAction.SELECT_RANGE) },
+                    onInvertSelection = { onAdvancedSelection(MediaLibrarySelectionAction.INVERT) },
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                        .heightIn(max = maxHeight * 0.7f)
+                        .onSizeChanged { selectionPanelHeight = with(density) { it.height.toDp() } }
+                )
+            }
         }
     }
 }
