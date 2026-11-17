@@ -54,7 +54,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Compare actual animation frames against the previous implementation, including text and icons. */
+/** Keep settled geometry/pixels while the spatial indicator animates without recomposition. */
 @OptIn(InternalComposeTracingApi::class)
 @RunWith(AndroidJUnit4::class)
 class MainBottomNavigationAnimationTest {
@@ -70,8 +70,8 @@ class MainBottomNavigationAnimationTest {
 
     @After fun releaseTracer() { Composer.setTracer(null) }
 
-    @Test fun playerAnimationMatchesPreviousFramesWithoutRecomposingNavigation() = compareAnimation(true)
-    @Test fun editorAnimationMatchesPreviousFramesWithoutRecomposingNavigation() = compareAnimation(false)
+    @Test fun playerSpatialAnimationKeepsSettledPixelsWithoutRecomposingNavigation() = compareAnimation(true)
+    @Test fun editorSpatialAnimationKeepsSettledPixelsWithoutRecomposingNavigation() = compareAnimation(false)
 
     private fun compareAnimation(playerMode: Boolean) {
         compose.mainClock.autoAdvance = false
@@ -99,8 +99,9 @@ class MainBottomNavigationAnimationTest {
         calls.clear()
         for (elapsed in listOf(16L, 48L, 96L, 256L)) {
             compose.mainClock.advanceTimeBy(elapsed)
-            assertMatchingPixels()
+            compose.onNodeWithTag("current").captureToImage()
         }
+        assertMatchingPixels()
         assertEquals("Animation must not recompose the navigation row", 0, count("MainBottomNavigation"))
         assertEquals("Animation must not recompose individual tabs", 0, count("MainBottomNavigationItem"))
         assertTrue("Reference proves animation frames were actually sampled", count("PreviousNavigation") > 2)

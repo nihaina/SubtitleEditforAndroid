@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -196,13 +197,21 @@ internal fun MainActivityScreen(
         categoryRevealRequest?.let { topLevelPagesState.mediaAlbumPage.revealRequest = it }
     }
     val topLevelOrder = remember(state.playerModeEnabled) { bottomNavigationItems(state.playerModeEnabled).map { it.first } }
+    val topLevelPager = androidx.compose.runtime.key(state.playerModeEnabled) {
+        rememberPagerState(initialPage = topLevelOrder.indexOf(state.selectedTopLevelItem).coerceAtLeast(0)) {
+            topLevelOrder.size
+        }
+    }
+    // Read the continuous position in the navigation's drawing nodes, not this composition.
+    val pagePosition = remember(topLevelPager) {
+        { topLevelPager.currentPage + topLevelPager.currentPageOffsetFraction }
+    }
     var createDialogKind by remember { mutableStateOf<MainCreateItemKind?>(null) }
     var createName by remember { mutableStateOf("") }
     var createExtension by remember { mutableStateOf("txt") }
     var createNameError by remember { mutableStateOf<String?>(null) }
     var createExtensionError by remember { mutableStateOf<String?>(null) }
     val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
-    val activeTopLevelItem = state.selectedTopLevelItem
     // Selection actions belong to directoryContent in the legacy layout. The
     // selection state can survive a top-level tab switch, but its toolbar and
     // bottom action row stay hidden until the directory tab is visible again.
@@ -241,73 +250,78 @@ internal fun MainActivityScreen(
             .windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.systemBarsIgnoringVisibility))
             .background(MaterialTheme.colorScheme.background)
     ) {
-        MainTopLevelPageTransition(
-            state = state,
-            pageOrder = topLevelOrder,
-            modifier = Modifier.weight(1f).fillMaxWidth().background(settingsPageBackground())
-        ) { pageState ->
-            val state = pageState
-            val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
-            val isMediaCategoriesPage = state.playerModeEnabled && state.selectedTopLevelItem == R.id.nav_tools
-            val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
-            Column(Modifier.fillMaxSize()) {
-                if (!isMediaCategoriesPage) MainPageToolbar(
-                    state = state.toolbarState(),
-                    scrollBehavior = scrollBehavior,
-                    searchFocusRequester = searchFocusRequester,
-                    onSearchChanged = onSearchChanged,
-                    onToolbarBack = onToolbarBack,
-                    onTopLevelPageSelected = onTopLevelPageSelected,
-                    onSelectAll = onSelectAll,
-                    onSelectRange = onSelectRange,
-                    onOnlineClicked = onOnlineClicked,
-                    onTogglePlayerMode = onTogglePlayerMode,
-                    onViewModeChanged = onViewModeChanged,
-                    onSortFieldChanged = onSortFieldChanged,
-                    onSortDirectionChanged = onSortDirectionChanged,
-                    onCreateRequested = { kind ->
-                        createDialogKind = kind
-                        createName = ""
-                        createExtension = "txt"
-                        createNameError = null
-                        createExtensionError = null
-                    },
-                    onSearchRequested = onSearchRequested,
-                    onOpenFileManagementSettings = onOpenFileManagementSettings,
-                )
+        androidx.compose.runtime.key(state.playerModeEnabled) {
+            MainTopLevelPager(
+                state = state,
+                pageOrder = topLevelOrder,
+                onSelected = onTopLevelPageSelected,
+                pager = topLevelPager,
+                userScrollEnabled = createDialogKind == null && mainDialog == null && batchRename == null,
+                modifier = Modifier.weight(1f).fillMaxWidth().background(settingsPageBackground())
+            ) { pageState, pageActive ->
+                val state = pageState
+                val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
+                val isMediaCategoriesPage = state.playerModeEnabled && state.selectedTopLevelItem == R.id.nav_tools
+                val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+                Column(Modifier.fillMaxSize()) {
+                    if (!isMediaCategoriesPage) MainPageToolbar(
+                        state = state.toolbarState(),
+                        scrollBehavior = scrollBehavior,
+                        searchFocusRequester = searchFocusRequester,
+                        onSearchChanged = onSearchChanged,
+                        onToolbarBack = onToolbarBack,
+                        onTopLevelPageSelected = onTopLevelPageSelected,
+                        onSelectAll = onSelectAll,
+                        onSelectRange = onSelectRange,
+                        onOnlineClicked = onOnlineClicked,
+                        onTogglePlayerMode = onTogglePlayerMode,
+                        onViewModeChanged = onViewModeChanged,
+                        onSortFieldChanged = onSortFieldChanged,
+                        onSortDirectionChanged = onSortDirectionChanged,
+                        onCreateRequested = { kind ->
+                            createDialogKind = kind
+                            createName = ""
+                            createExtension = "txt"
+                            createNameError = null
+                            createExtensionError = null
+                        },
+                        onSearchRequested = onSearchRequested,
+                        onOpenFileManagementSettings = onOpenFileManagementSettings,
+                    )
 
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .background(settingsPageBackground())
-                        .nestedScroll(scrollBehavior.nestedScrollConnection)
-                ) {
-                    if (isDirectoryPage) {
-                        DirectoryBrowserContent(
-                            state = state,
-                            onScrollPosition = onDirectoryScrollPosition,
-                            onDirectoryBreadcrumbClick = onDirectoryBreadcrumbClick,
-                            onFileClick = onFileClick,
-                            onFileLongClick = onFileLongClick,
-                            listState = directoryListState,
-                            gridState = directoryGridState,
-                            isActive = state.selectedTopLevelItem == activeTopLevelItem,
-                            onRevealFinished = onDirectoryRevealFinished
-                        )
-                    } else {
-                        MainTopLevelPages(
-                            selectedPage = state.selectedTopLevelItem,
-                            activePage = activeTopLevelItem,
-                            refreshVersion = topLevelPageRefreshVersion,
-                            selectionVersion = topLevelPageSelectionVersion,
-                            state = topLevelPagesState,
-                            playerModeEnabled = state.playerModeEnabled,
-                            viewMode = state.viewMode,
-                            onOpenDirectory = onOpenDirectoryFromFavorites,
-                            onToolbarChanged = onUpdateTopLevelToolbar,
-                            saveableStateHolder = topLevelPageSaveableState
-                        )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .background(settingsPageBackground())
+                            .nestedScroll(scrollBehavior.nestedScrollConnection)
+                    ) {
+                        if (isDirectoryPage) {
+                            DirectoryBrowserContent(
+                                state = state,
+                                onScrollPosition = onDirectoryScrollPosition,
+                                onDirectoryBreadcrumbClick = onDirectoryBreadcrumbClick,
+                                onFileClick = onFileClick,
+                                onFileLongClick = onFileLongClick,
+                                listState = directoryListState,
+                                gridState = directoryGridState,
+                                isActive = pageActive,
+                                onRevealFinished = onDirectoryRevealFinished
+                            )
+                        } else {
+                            MainTopLevelPages(
+                                selectedPage = state.selectedTopLevelItem,
+                                activePage = if (pageActive) state.selectedTopLevelItem else -1,
+                                refreshVersion = topLevelPageRefreshVersion,
+                                selectionVersion = topLevelPageSelectionVersion,
+                                state = topLevelPagesState,
+                                playerModeEnabled = state.playerModeEnabled,
+                                viewMode = state.viewMode,
+                                onOpenDirectory = onOpenDirectoryFromFavorites,
+                                onToolbarChanged = onUpdateTopLevelToolbar,
+                                saveableStateHolder = topLevelPageSaveableState
+                            )
+                        }
                     }
                 }
             }
@@ -319,6 +333,7 @@ internal fun MainActivityScreen(
         miniPlayerSlot()
         MainBottomBar(
             state = state.bottomBarState(),
+            pagePosition = pagePosition,
             onTopLevelPageSelected = onTopLevelPageSelected,
             onCopy = onCopy,
             onMove = onMove,

@@ -11,7 +11,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import com.subtitleedit.filepicker.AppFilePickerContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +30,7 @@ import com.subtitleedit.ui.MediaLibraryPageState
 import com.subtitleedit.ui.MediaAlbumScreen
 import com.subtitleedit.ui.MediaAlbumPageState
 import com.subtitleedit.ui.MediaLibraryScanCoordinator
+import com.subtitleedit.ui.collectRetainedPageState
 import com.subtitleedit.library.MediaLibraryFileObserver
 import com.subtitleedit.ui.showLibraryError
 import com.subtitleedit.model.FileBrowserViewMode
@@ -167,7 +167,7 @@ internal fun MainTopLevelPages(
         if (uri != null) addFavoriteDirectory(context, directoryStore, state, uri)
     }
     var libraryScanPickerPending by remember { mutableStateOf(false) }
-    val libraryScanRunning by MediaLibraryScanCoordinator.scanning.collectAsState()
+    val libraryScanRunning by MediaLibraryScanCoordinator.scanning.collectRetainedPageState(isActive)
     val libraryScanPicker = rememberLauncherForActivityResult(AppFilePickerContracts.OpenDocumentTree()) { uri ->
         libraryScanPickerPending = false
         if (uri != null) {
@@ -209,8 +209,8 @@ internal fun MainTopLevelPages(
     }
 
     val mediaLibraryDirectories = state.mediaLibraryDirectories
-    LaunchedEffect(mediaLibraryDirectories, playerModeEnabled) {
-        if (playerModeEnabled) MediaLibraryFileObserver.syncRoots(context, mediaLibraryDirectories)
+    LaunchedEffect(mediaLibraryDirectories, playerModeEnabled, isActive) {
+        if (playerModeEnabled && isActive) MediaLibraryFileObserver.syncRoots(context, mediaLibraryDirectories)
     }
 
     val backupExporter = rememberLauncherForActivityResult(
@@ -350,8 +350,7 @@ internal fun MainTopLevelPages(
         goToDraftFolder("")
     }
 
-    val pageKey = if (selectedPage == R.id.nav_tools || selectedPage == R.id.nav_library || selectedPage == R.id.nav_stats) 0 else selectionVersion
-    pageStateHolder.SaveableStateProvider("$playerModeEnabled:$selectedPage:$pageKey") {
+    pageStateHolder.SaveableStateProvider("$playerModeEnabled:$selectedPage") {
     when (selectedPage) {
         R.id.nav_library -> MediaLibraryScreen(
             refreshVersion = refreshVersion,
@@ -379,7 +378,8 @@ internal fun MainTopLevelPages(
 
         R.id.nav_stats -> ListeningStatsScreen(
             refreshVersion = refreshVersion,
-            pageState = state.listeningStatsPage
+            pageState = state.listeningStatsPage,
+            isActive = isActive,
         )
 
         R.id.nav_favorites -> FavoritesScreen(

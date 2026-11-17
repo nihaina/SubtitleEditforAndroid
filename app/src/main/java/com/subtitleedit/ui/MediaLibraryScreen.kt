@@ -52,7 +52,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -177,12 +176,12 @@ internal fun MediaLibraryScreen(
     val context = LocalContext.current
     val playerLauncher = LocalPlayerLauncher.current
     val repository = libraryRepository ?: remember(context) { MediaLibraryRepository.getInstance(context) }
-    val revision by repository.revision.collectAsState()
+    val revision by repository.revision.collectRetainedPageState(isActive)
     val scope = rememberCoroutineScope()
     val mutationMutex = remember { Mutex() }
     val toolbarCallback by rememberUpdatedState(onToolbarChanged)
     val requestScan by rememberUpdatedState(onRequestScanDirectory)
-    val scanRunning by MediaLibraryScanCoordinator.scanning.collectAsState()
+    val scanRunning by MediaLibraryScanCoordinator.scanning.collectRetainedPageState(isActive)
     val isScanning = scanRunning || scanPickerPending
 
     fun mutate(action: () -> Unit, onSuccess: () -> Unit = {}) {

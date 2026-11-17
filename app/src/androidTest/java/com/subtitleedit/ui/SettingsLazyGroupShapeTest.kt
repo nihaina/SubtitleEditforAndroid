@@ -12,15 +12,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.subtitleedit.ui.components.SettingsGroup
 import com.subtitleedit.ui.settings.settingsGroupItems
@@ -44,6 +47,9 @@ class SettingsLazyGroupShapeTest {
     private fun compareGroups(material: Boolean) {
         compose.setContent {
             SubtitleEditComposeTheme {
+                // A fixed integral density compares the group rasterization itself, rather
+                // than device-dependent rounding of the reference's individual row heights.
+                CompositionLocalProvider(LocalDensity provides Density(3f, LocalDensity.current.fontScale)) {
                 Column(Modifier.width(240.dp).background(Color.Magenta)) {
                     Box(Modifier.testTag("reference")) {
                         if (material) {
@@ -56,6 +62,7 @@ class SettingsLazyGroupShapeTest {
                     LazyColumn(Modifier.height(if (material) 172.dp else 176.dp).testTag("lazy")) {
                         settingsGroupItems("group", 3, material) { Tile(material) }
                     }
+                }
                 }
             }
         }

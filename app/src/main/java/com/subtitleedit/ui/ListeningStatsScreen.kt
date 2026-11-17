@@ -52,7 +52,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -112,12 +111,13 @@ import kotlin.math.roundToLong
 internal fun ListeningStatsScreen(
     refreshVersion: Int,
     pageState: ListeningStatsPageState = remember { ListeningStatsPageState() },
+    isActive: Boolean = true,
     contentLoader: ListeningStatsLoader? = null
 ) {
     val context = LocalContext.current
     val playerLauncher = LocalPlayerLauncher.current
     val repository = remember(context) { MediaLibraryRepository.getInstance(context) }
-    val revision by repository.revision.collectAsState()
+    val revision by repository.revision.collectRetainedPageState(isActive)
 
     val scope = rememberCoroutineScope()
     val currentDate = rememberListeningDate(refreshVersion, revision)
@@ -153,7 +153,8 @@ internal fun ListeningStatsScreen(
     }
 
     val query = ListeningStatsQuery(revision, refreshVersion, currentDate, selectedYear, granularity, selectedDate)
-    LaunchedEffect(query) {
+    LaunchedEffect(query, isActive) {
+        if (!isActive) return@LaunchedEffect
         if (pageState.content != null && pageState.loadedQuery == query) return@LaunchedEffect
         val year = selectedYear
         val day = selectedDate

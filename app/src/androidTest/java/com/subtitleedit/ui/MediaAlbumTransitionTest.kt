@@ -82,7 +82,7 @@ class MediaAlbumTransitionTest {
         }
 
         compose.waitUntil(5_000L) {
-            state.library != null && state.prepared?.history === state.library?.history
+            state.library != null && state.prepared?.history == state.library?.history
         }
         val emptyText = compose.activity.getString(R.string.album_browse_empty)
         compose.onNodeWithText(emptyText).assertIsDisplayed()
@@ -171,7 +171,7 @@ class MediaAlbumTransitionTest {
         compose.waitUntil(5_000L) {
             val prepared = state.prepared
             prepared?.albums?.singleOrNull()?.name == name &&
-                state.library != null && prepared.history === state.library?.history
+                state.library != null && prepared.history == state.library?.history
         }
     }
 

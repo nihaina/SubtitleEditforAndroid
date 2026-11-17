@@ -135,7 +135,7 @@ class ListeningStatsArtworkTest {
         compose.setContent {
             SubtitleEditComposeTheme {
                 Surface(Modifier.requiredSize(360.dp, 600.dp)) {
-                    ListeningStatsScreen(0, state, loader)
+                    ListeningStatsScreen(0, state, contentLoader = loader)
                 }
             }
         }

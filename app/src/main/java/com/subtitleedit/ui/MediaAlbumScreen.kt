@@ -59,8 +59,8 @@ internal fun MediaAlbumScreen(
     val context = LocalContext.current
     val playerLauncher = LocalPlayerLauncher.current
     val repository = remember(context) { MediaLibraryRepository.getInstance(context) }
-    val revision by repository.revision.collectAsState()
-    val catalogRevision by repository.catalogRevision.collectAsState()
+    val revision by repository.revision.collectRetainedPageState(isActive)
+    val catalogRevision by repository.catalogRevision.collectRetainedPageState(isActive)
     val preferences = remember(context) { MediaAlbumPreferences(context) }
     var options by remember { mutableStateOf(preferences.load()) }
     val creditPreferences = remember(context) {
@@ -69,7 +69,7 @@ internal fun MediaAlbumScreen(
     var creditOptions by remember(creditPreferences) {
         mutableStateOf(creditPreferences.mapValues { it.value.load() })
     }
-    val restoredSettingsRevision by SettingsBackupManager.audioModeSettingsRevision.collectAsState()
+    val restoredSettingsRevision by SettingsBackupManager.audioModeSettingsRevision.collectRetainedPageState(isActive)
     LaunchedEffect(restoredSettingsRevision) {
         options = preferences.load()
         creditOptions = creditPreferences.mapValues { it.value.load() }
@@ -105,7 +105,8 @@ internal fun MediaAlbumScreen(
             pageState.resolvedRevealToken = null
         }
     }
-    LaunchedEffect(revealRequest?.token, catalog, roots) {
+    LaunchedEffect(revealRequest?.token, catalog, roots, isActive) {
+        if (!isActive) return@LaunchedEffect
         val request = revealRequest ?: return@LaunchedEffect
         if (catalog?.key?.directories != roots) return@LaunchedEffect
         if (request.trackPath !in catalogPaths || roots.none { request.trackPath.startsWith(it) }) {
@@ -157,7 +158,8 @@ internal fun MediaAlbumScreen(
         }
     }
 
-    LaunchedEffect(revision, refreshVersion) {
+    LaunchedEffect(revision, refreshVersion, isActive) {
+        if (!isActive) return@LaunchedEffect
         val previous = pageState.library
         if (previous?.revision == revision && previous.refreshVersion == refreshVersion) return@LaunchedEffect
         try {
@@ -173,7 +175,8 @@ internal fun MediaAlbumScreen(
         }
     }
 
-    LaunchedEffect(catalogKey) {
+    LaunchedEffect(catalogKey, isActive) {
+        if (!isActive) return@LaunchedEffect
         if (pageState.catalog?.key == catalogKey) return@LaunchedEffect
         // Classification is a persisted index. File observers reconcile source changes
         // independently, so resuming or remounting this page never reparses media.
@@ -201,7 +204,8 @@ internal fun MediaAlbumScreen(
         }
     }
 
-    LaunchedEffect(catalog, history) {
+    LaunchedEffect(catalog, history, isActive) {
+        if (!isActive) return@LaunchedEffect
         val source = catalog ?: return@LaunchedEffect
         val previous = pageState.prepared
         if (previous?.catalog?.tracks == source.tracks && previous.history == history) {
