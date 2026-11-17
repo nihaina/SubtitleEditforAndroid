@@ -89,6 +89,24 @@ class MediaSelectionControllerTest {
         assertEquals(files.toSet(), selection.selectedPaths.toSet())
     }
 
+    @Test fun selectAllTogglesOnlyTheCurrentPageAndPreservesSelectionMode() {
+        val files = (1..4).map { temporary.newFile("$it.wav").path }
+        val selection = MediaSelectionController()
+        selection.updateVisiblePaths(files.take(2))
+        selection.selectVisible(MediaLibrarySelectionAction.SELECT_ALL)
+        selection.updateVisiblePaths(files.drop(2))
+        selection.select(files[2])
+        selection.selectVisible(MediaLibrarySelectionAction.SELECT_ALL)
+        assertEquals(files, selection.selectedPaths)
+        selection.selectVisible(MediaLibrarySelectionAction.SELECT_ALL)
+        assertEquals(files.take(2), selection.selectedPaths)
+        assertTrue(selection.active)
+        selection.updateVisiblePaths(files.take(2))
+        selection.selectVisible(MediaLibrarySelectionAction.SELECT_ALL)
+        assertTrue(selection.selectedPaths.isEmpty())
+        assertTrue(selection.active)
+    }
+
     @Test fun zeroSelectedStillAllowsCrossPageSelectionUntilCancelled() {
         val path = temporary.newFile("one.wav").path
         val selection = MediaSelectionController()
@@ -108,6 +126,9 @@ class MediaSelectionControllerTest {
         selection.updateVisiblePaths(listOf(files[2]))
         selection.selectVisible(MediaLibrarySelectionAction.SELECT_ALL)
         assertEquals(listOf(files[1]), selection.selectedPaths)
+        selection.selectVisible(MediaLibrarySelectionAction.SELECT_ALL)
+        assertTrue(selection.selectedPaths.isEmpty())
+        selection.selectVisible(MediaLibrarySelectionAction.SELECT_ALL)
         selection.setOverlayPaths(null)
         selection.selectVisible(MediaLibrarySelectionAction.SELECT_ALL)
         assertEquals(listOf(files[1], files[2]), selection.selectedPaths)

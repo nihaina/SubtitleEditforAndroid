@@ -16,6 +16,16 @@ class MediaLibraryFileSelectionTest {
         assertEquals(files.toSet() + "outside.mp3", result)
     }
 
+    @Test fun selectAllAgainClearsOnlyTheCurrentListAndCanSelectItAgain() {
+        val outside = setOf("outside.mp3")
+        val allSelected = outside + files
+
+        val cleared = updateMediaLibrarySelection(files + files.first(), allSelected, MediaLibrarySelectionAction.SELECT_ALL)
+        assertEquals(outside, cleared)
+        assertEquals(allSelected, updateMediaLibrarySelection(files, cleared, MediaLibrarySelectionAction.SELECT_ALL))
+        assertEquals(emptySet<String>(), updateMediaLibrarySelection(files, files.toSet(), MediaLibrarySelectionAction.SELECT_ALL))
+    }
+
     @Test fun rangeUsesDisplayedOrderRatherThanSelectionOrder() {
         val result = updateMediaLibrarySelection(
             files,

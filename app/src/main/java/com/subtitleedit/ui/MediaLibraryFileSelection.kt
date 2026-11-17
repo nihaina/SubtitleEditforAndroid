@@ -14,7 +14,8 @@ internal fun updateMediaLibrarySelection(
 ): Set<String> {
     val visible = visiblePaths.distinct()
     return when (action) {
-        MediaLibrarySelectionAction.SELECT_ALL -> selectedPaths + visible
+        MediaLibrarySelectionAction.SELECT_ALL ->
+            if (visible.all { it in selectedPaths }) selectedPaths - visible.toSet() else selectedPaths + visible
         MediaLibrarySelectionAction.INVERT -> {
             val visibleSet = visible.toSet()
             (selectedPaths - visibleSet) + visible.filterNot { it in selectedPaths }
