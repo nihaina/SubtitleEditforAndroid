@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.only
@@ -37,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -53,6 +55,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
@@ -84,6 +87,9 @@ import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -608,7 +614,15 @@ private fun PlayerControls(state: PlayerUiState, viewModel: PlayerViewModel, lan
                 PlayerLyricsSource(state, viewModel, Modifier.fillMaxWidth(0.55f))
             }
         }
-        PlayerSeekBar(state, viewModel, Modifier.padding(horizontal = 12.dp))
+        PlayerSeekBar(
+            state = state,
+            onSeekPreview = { viewModel.seekTo(it, fromGesture = true) },
+            onSeekFinished = {
+                viewModel.state.value.seekPreviewMs?.let { viewModel.seekTo(it) }
+                viewModel.clearSeekPreview()
+            },
+            modifier = Modifier.padding(horizontal = 12.dp)
+        )
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("player-transport-row"),
             verticalAlignment = Alignment.CenterVertically,
@@ -725,7 +739,12 @@ private fun PlayerLyricsSource(state: PlayerUiState, viewModel: PlayerViewModel,
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PlayerSeekBar(state: PlayerUiState, viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
+internal fun PlayerSeekBar(
+    state: PlayerUiState,
+    onSeekPreview: (Long) -> Unit,
+    onSeekFinished: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val enabled = state.ready && state.durationMs > 0
     val color = PlayerControlColors.Accent
     val colors = SliderDefaults.colors(
@@ -736,49 +755,68 @@ private fun PlayerSeekBar(state: PlayerUiState, viewModel: PlayerViewModel, modi
         disabledActiveTrackColor = color.copy(alpha = 0.38f),
         disabledInactiveTrackColor = color.copy(alpha = 0.12f)
     )
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
+    val durationText = remember(state.durationMs) { formatPlaybackTime(state.durationMs) }
+    val timeStyle = LocalTextStyle.current.copy(
+        fontSize = 12.sp, fontFeatureSettings = "tnum", textDirection = TextDirection.Ltr
+    )
+    val textMeasurer = rememberTextMeasurer()
+    val timeTemplate = durationText.map { if (it.isDigit()) '0' else it }.joinToString("")
+    val timeWidthPx = remember(timeTemplate, timeStyle, textMeasurer) {
+        val widestDigit = ('0'..'9').maxBy {
+            val layout = textMeasurer.measure(it.toString(), timeStyle)
+            layout.getLineRight(0) - layout.getLineLeft(0)
+        }
+        val widestTime = timeTemplate.map { if (it.isDigit()) widestDigit else it }.joinToString("")
+        textMeasurer.measure(widestTime, timeStyle, softWrap = false, maxLines = 1).size.width
+    }
+    val timeWidth = with(LocalDensity.current) { timeWidthPx.toDp() }
+    // The slider is measured independently of either label's changing glyphs.
+    Box(modifier = modifier.fillMaxWidth().heightIn(min = 48.dp)) {
         Text(
             formatPlaybackTime(state.seekPreviewMs ?: state.positionMs),
+            modifier = Modifier.width(timeWidth).align(AbsoluteAlignment.CenterLeft).testTag("player-current-time"),
             color = PlayerControlColors.Secondary,
-            fontSize = 12.sp,
-            maxLines = 1
+            style = timeStyle,
+            textAlign = TextAlign.Left,
+            softWrap = false,
+            maxLines = 1,
+            overflow = TextOverflow.Clip
         )
-        Slider(
-            value = (state.seekPreviewMs ?: state.positionMs).toFloat(),
-            onValueChange = { viewModel.seekTo(it.toLong(), fromGesture = true) },
-            onValueChangeFinished = {
-                viewModel.state.value.seekPreviewMs?.let { viewModel.seekTo(it) }
-                viewModel.clearSeekPreview()
-            },
-            valueRange = 0f..state.durationMs.coerceAtLeast(1L).toFloat(),
-            enabled = enabled,
-            colors = colors,
-            thumb = {
-                Box(Modifier.size(20.dp)
-                    .shadow(1.dp, CircleShape)
-                    .background(if (enabled) color else color.copy(alpha = 0.38f), CircleShape))
-            },
-            track = { sliderState ->
-                SliderDefaults.Track(
-                    sliderState = sliderState,
-                    modifier = Modifier.height(4.dp),
-                    enabled = enabled,
-                    colors = colors,
-                    thumbTrackGapSize = 0.dp,
-                    drawStopIndicator = null
-                )
-            },
-            modifier = Modifier.weight(1f).height(48.dp).testTag("player-seek")
-        )
+        Box(Modifier.fillMaxWidth().padding(horizontal = timeWidth + 8.dp).align(Alignment.Center)) {
+            Slider(
+                value = (state.seekPreviewMs ?: state.positionMs).toFloat(),
+                onValueChange = { onSeekPreview(it.toLong()) },
+                onValueChangeFinished = onSeekFinished,
+                valueRange = 0f..state.durationMs.coerceAtLeast(1L).toFloat(),
+                enabled = enabled,
+                colors = colors,
+                thumb = {
+                    Box(Modifier.size(20.dp)
+                        .shadow(1.dp, CircleShape)
+                        .background(if (enabled) color else color.copy(alpha = 0.38f), CircleShape))
+                },
+                track = { sliderState ->
+                    SliderDefaults.Track(
+                        sliderState = sliderState,
+                        modifier = Modifier.height(4.dp),
+                        enabled = enabled,
+                        colors = colors,
+                        thumbTrackGapSize = 0.dp,
+                        drawStopIndicator = null
+                    )
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp).testTag("player-seek")
+            )
+        }
         Text(
-            formatPlaybackTime(state.durationMs),
+            durationText,
+            modifier = Modifier.width(timeWidth).align(AbsoluteAlignment.CenterRight).testTag("player-duration-time"),
             color = PlayerControlColors.Secondary,
-            fontSize = 12.sp,
-            maxLines = 1
+            style = timeStyle,
+            textAlign = TextAlign.Right,
+            softWrap = false,
+            maxLines = 1,
+            overflow = TextOverflow.Clip
         )
     }
 }
