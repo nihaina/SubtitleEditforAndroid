@@ -252,9 +252,10 @@ internal fun MediaLibraryScreen(
     val browseIndex = pageState.browseIndex?.takeIf {
         it.tracks === content.allTracks && it.rootPaths == rootPaths
     }
-    val folderEntries = pageState.folderSnapshot?.takeIf {
+    val folderSnapshot = pageState.folderSnapshot?.takeIf {
         it.tracks === content.allTracks && it.directoryPath == browsePath
-    }?.entries.orEmpty()
+    }
+    val folderEntries = folderSnapshot?.entries.orEmpty()
     val rootMediaCounts = browseIndex?.rootMediaCounts.orEmpty()
     val selectedDurationMs = remember(selectedFilePaths, browseIndex) {
         selectedFilePaths.sumOf { browseIndex?.durationByPath?.get(it) ?: 0L }
@@ -473,6 +474,7 @@ internal fun MediaLibraryScreen(
                         rootPath = browseRootPath,
                         currentPath = browsePath,
                         entries = folderEntries,
+                        entriesReady = folderSnapshot != null,
                         rootMediaCounts = rootMediaCounts,
                         selectedPaths = selectedFilePaths,
                         selectedDurationMs = selectedDurationMs,
@@ -910,6 +912,7 @@ internal fun FilesTabContent(
     rootMediaCounts: Map<String, Int>,
     selectedPaths: Set<String>,
     selectedDurationMs: Long,
+    entriesReady: Boolean = true,
     onOpenRoot: (File) -> Unit,
     onOpenFolder: (File) -> Unit,
     onPlayFile: (MediaFolderEntry) -> Unit,
@@ -965,7 +968,10 @@ internal fun FilesTabContent(
         } else {
             Column(modifier = Modifier.fillMaxSize()) {
                 FolderBreadcrumb(rootPath = rootPath, currentPath = currentPath)
-                if (entries.isEmpty()) {
+                if (!entriesReady) {
+                    // The folder is still being indexed; showing the empty state here would flash.
+                    Spacer(modifier = Modifier.fillMaxSize())
+                } else if (entries.isEmpty()) {
                     LibraryEmptyState(
                         iconRes = R.drawable.ic_folder,
                         title = stringResource(R.string.media_lib_files_folder_empty),
