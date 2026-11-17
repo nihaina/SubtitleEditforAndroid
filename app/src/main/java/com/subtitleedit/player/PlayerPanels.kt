@@ -1,7 +1,10 @@
 package com.subtitleedit.player
 
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -36,9 +40,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +54,9 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.testTag
@@ -63,6 +73,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
 import com.subtitleedit.library.MediaLibraryTrack
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,11 +86,35 @@ internal fun PlayerPanelSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scrollState = rememberScrollState()
     val maxHeight = LocalConfiguration.current.screenHeightDp.dp * 0.9f
+    val scope = rememberCoroutineScope()
+    // Sheet-level gestures stay off so lists scroll freely, so the handle drives its own drag.
+    var handleDrag by remember { mutableFloatStateOf(0f) }
+    val dismissThreshold = with(LocalDensity.current) { 96.dp.toPx() }
+    LaunchedEffect(state.panel) { handleDrag = 0f }
+    fun settleOrDismiss() {
+        suspend fun unwind(durationMillis: Int) {
+            animate(initialValue = handleDrag, targetValue = 0f, animationSpec = tween(durationMillis)) { value: Float, _: Float ->
+                handleDrag = value
+            }
+        }
+        scope.launch {
+            if (handleDrag > dismissThreshold) {
+                // Unwind the handle offset while the sheet plays its own hide animation, so it leaves
+                // from where the finger released it instead of snapping back first.
+                launch { unwind(220) }
+                sheetState.hide()
+                if (sheetState.currentValue == SheetValue.Hidden) viewModel.closePanel()
+            } else {
+                unwind(180)
+            }
+        }
+    }
     ModalBottomSheet(
         onDismissRequest = viewModel::closePanel,
         sheetState = sheetState,
         modifier = Modifier.testTag("player-panel-surface")
-            .semantics { testTagsAsResourceId = true },
+            .semantics { testTagsAsResourceId = true }
+            .graphicsLayer { translationY = handleDrag },
         // Keep the expanded panel stationary; only its list handles vertical scroll/flings.
         // Back, the scrim and the handle still dismiss the menu.
         sheetGesturesEnabled = false,
@@ -89,12 +124,30 @@ internal fun PlayerPanelSheet(
         dragHandle = {
             Box(
                 modifier = Modifier
-                    .padding(vertical = 10.dp)
-                    .width(42.dp)
-                    .height(4.dp)
-                    .clip(CircleShape)
-                    .background(PlayerColors.SurfaceHigh)
-            )
+                    .fillMaxWidth()
+                    .heightIn(min = 28.dp)
+                    .testTag("player-panel-handle")
+                    .pointerInput(sheetState) {
+                        detectVerticalDragGestures(
+                            onDragStart = { handleDrag = 0f },
+                            onDragEnd = { settleOrDismiss() },
+                            onDragCancel = { settleOrDismiss() },
+                            onVerticalDrag = { change, amount ->
+                                change.consume()
+                                handleDrag = (handleDrag + amount).coerceAtLeast(0f)
+                            }
+                        )
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(42.dp)
+                        .height(4.dp)
+                        .clip(CircleShape)
+                        .background(PlayerColors.SurfaceHigh)
+                )
+            }
         }
     ) {
         PlayerPanelImmersiveWindow()
