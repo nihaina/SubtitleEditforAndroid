@@ -15,4 +15,6 @@
     <string name="directory_create_file_title">新建文件</string>
     <string name="directory_create_folder_name_hint">文件夹名称</string>
     <string name="directory_clear_search">清除搜索</string>
+    <string name="directory_image_preview">图片预览</string>
+    <string name="directory_image_preview_failed">无法加载此图片</string>
 </resources>

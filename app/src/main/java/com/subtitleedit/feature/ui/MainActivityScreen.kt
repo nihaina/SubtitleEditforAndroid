@@ -186,10 +186,13 @@ internal fun MainActivityScreen(
     onProcessMediaSelection: () -> Unit = {},
     miniPlayerSlot: @Composable () -> Unit = {},
     categoryRevealRequest: MediaCategoryRevealRequest? = null,
-    onDirectoryRevealFinished: (Long) -> Unit = {}
+    onDirectoryRevealFinished: (Long) -> Unit = {},
+    imagePreviewFile: File? = null,
+    onCloseImagePreview: () -> Unit = {}
 ) {
     val directoryListState = rememberDirectoryListState(state)
     val directoryGridState = rememberDirectoryGridState(state)
+    val appliedDirectoryScrollGeneration = remember { mutableStateOf<Long?>(null) }
     val topLevelPagesState = remember { MainTopLevelPagesState() }
     val topLevelPageSaveableState = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     LaunchedEffect(categoryRevealRequest?.token) {
@@ -203,6 +206,8 @@ internal fun MainActivityScreen(
     var createNameError by remember { mutableStateOf<String?>(null) }
     var createExtensionError by remember { mutableStateOf<String?>(null) }
     val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
+    val previewFile = imagePreviewFile.takeIf { isDirectoryPage && state.pendingOperation == null }
+    val isPreviewingImage = previewFile != null
     // Selection actions belong to directoryContent in the legacy layout. The
     // selection state can survive a top-level tab switch, but its toolbar and
     // bottom action row stay hidden until the directory tab is visible again.
@@ -225,8 +230,8 @@ internal fun MainActivityScreen(
             keyboardController?.show()
         }
     }
-    LaunchedEffect(state.isSearchExpanded, isSelectionActive, isDirectoryPage) {
-        if (state.isSearchExpanded && !isSelectionActive && isDirectoryPage) {
+    LaunchedEffect(state.isSearchExpanded, isSelectionActive, isDirectoryPage, isPreviewingImage) {
+        if (state.isSearchExpanded && !isSelectionActive && isDirectoryPage && !isPreviewingImage) {
             searchFocusRequester.requestFocus()
             keyboardController?.show()
         } else {
@@ -241,7 +246,17 @@ internal fun MainActivityScreen(
             .windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.systemBarsIgnoringVisibility))
             .background(MaterialTheme.colorScheme.background)
     ) {
-        MainTopLevelPager(
+        if (previewFile != null) {
+            val isSelected = previewFile.absolutePath in state.selectedPaths
+            DirectoryImagePreview(
+                file = previewFile,
+                isSelected = isSelected,
+                selectionTitle = state.toolbarTitle.takeIf { isSelected },
+                onNavigationClick = if (isSelected) onToolbarBack else onCloseImagePreview,
+                onToggleSelection = { onFileLongClick(previewFile) },
+                modifier = Modifier.weight(1f).fillMaxWidth()
+            )
+        } else MainTopLevelPager(
             state = state,
             pageOrder = topLevelOrder,
             onSelected = onTopLevelPageSelected,
@@ -295,6 +310,7 @@ internal fun MainActivityScreen(
                             onFileLongClick = onFileLongClick,
                             listState = directoryListState,
                             gridState = directoryGridState,
+                            appliedScrollGeneration = appliedDirectoryScrollGeneration,
                             isActive = pageActive,
                             onRevealFinished = onDirectoryRevealFinished
                         )
@@ -316,12 +332,15 @@ internal fun MainActivityScreen(
             }
         }
 
-        com.subtitleedit.ui.LocalMediaSelection.current?.let { selection ->
-            com.subtitleedit.ui.MediaSelectionPanel(selection)
+        if (!isPreviewingImage) {
+            com.subtitleedit.ui.LocalMediaSelection.current?.let { selection ->
+                com.subtitleedit.ui.MediaSelectionPanel(selection)
+            }
+            miniPlayerSlot()
         }
-        miniPlayerSlot()
         MainBottomBar(
             state = state.bottomBarState(),
+            showNavigation = !isPreviewingImage,
             indicatorFrame = topLevelMotion.indicatorFrame,
             onTopLevelPageSelected = onTopLevelPageSelected,
             onCopy = onCopy,

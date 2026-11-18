@@ -62,6 +62,7 @@ internal fun DirectoryBrowserContent(
     onFileLongClick: (File) -> Unit,
     listState: LazyListState = rememberDirectoryListState(state),
     gridState: LazyGridState = rememberDirectoryGridState(state),
+    appliedScrollGeneration: MutableState<Long?> = remember { mutableStateOf(null) },
     isActive: Boolean = true,
     onRevealFinished: (Long) -> Unit = {}
 ) {
@@ -73,6 +74,7 @@ internal fun DirectoryBrowserContent(
         onFileLongClick = onFileLongClick,
         listState = listState,
         gridState = gridState,
+        appliedScrollGenerationState = appliedScrollGeneration,
         isActive = isActive,
         onRevealFinished = onRevealFinished,
     )
@@ -87,6 +89,7 @@ private fun DirectoryBrowserPage(
     onFileLongClick: (File) -> Unit,
     listState: LazyListState,
     gridState: LazyGridState,
+    appliedScrollGenerationState: MutableState<Long?>,
     isActive: Boolean,
     onRevealFinished: (Long) -> Unit,
 ) {
@@ -106,7 +109,7 @@ private fun DirectoryBrowserPage(
         }
     }
     val scrollRequest = state.scrollRequest
-    var appliedScrollGeneration by remember { mutableStateOf<Long?>(null) }
+    var appliedScrollGeneration by appliedScrollGenerationState
     LaunchedEffect(scrollRequest, state.files, state.currentDirectory, isGrid) {
         val request = scrollRequest ?: return@LaunchedEffect
         if (appliedScrollGeneration == request.generation || state.files.isEmpty()) return@LaunchedEffect

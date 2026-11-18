@@ -56,7 +56,7 @@ internal object MainFilePreviewLoader {
             return SharedMediaCache.peekPreview(metadata, targetSize)
                 ?.let { MainFilePreview(it.bitmap, formatMediaDuration(it.durationMs)) }
         }
-        if (extension !in imageExtensions && extension != "apk") return MainFilePreview()
+        if (extension !in FileTypePolicy.imageExtensions && extension != "apk") return MainFilePreview()
         return previews.peek(file.absolutePath, "$sessionId:${metadata.cacheKey}:${targetSize.coerceAtLeast(1)}")
     }
 
@@ -69,7 +69,7 @@ internal object MainFilePreviewLoader {
         val file = metadata.file
         val extension = file.extension.lowercase(Locale.ROOT)
         val isMedia = extension in audioExtensions || extension in videoExtensions
-        val isImage = extension in imageExtensions
+        val isImage = extension in FileTypePolicy.imageExtensions
         val isApk = extension == "apk"
         if (isMedia && !metadata.isDirectory) {
             return loadPermits.withPermit {
@@ -259,8 +259,4 @@ internal object MainFilePreviewLoader {
         "mp4", "mkv", "avi", "mov", "webm", "flv", "wmv", "m4v",
         "ts", "3gp", "mpg", "mpeg", "mts", "m2ts"
     )
-    private val imageExtensions = setOf(
-        "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif", "tif", "tiff", "avif"
-    )
-
 }

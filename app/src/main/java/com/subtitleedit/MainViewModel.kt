@@ -25,6 +25,7 @@ internal class MainViewModel : ViewModel() {
     val mediaSelection = com.subtitleedit.ui.MediaSelectionController()
     val directoryCache = SharedFileCache.directories
     var batchRenameDialog by mutableStateOf<BatchRenameDialogUi?>(null)
+    var imagePreviewFile by mutableStateOf<File?>(null)
 
     /** Compatibility accessors for existing tests and integrations; new code uses documentState. */
     var currentDirectory: File?

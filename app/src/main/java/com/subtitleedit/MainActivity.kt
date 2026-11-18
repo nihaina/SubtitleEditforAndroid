@@ -417,6 +417,8 @@ class MainActivity : AppComposeActivity() {
                         onDirectoryBreadcrumbClick = ::navigateToDirectoryBreadcrumb,
                         onFileClick = ::onFileClicked,
                         onFileLongClick = ::enterSelectionMode,
+                        imagePreviewFile = stateModel.imagePreviewFile,
+                        onCloseImagePreview = ::closeImagePreview,
                         onCopy = { startDestinationSelection(FileOperation.COPY) },
                         onMove = { startDestinationSelection(FileOperation.MOVE) },
                         onRename = ::renameSelectedFile,
@@ -609,6 +611,7 @@ class MainActivity : AppComposeActivity() {
             itemId, com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled
         )
         if (target == stateModel.documentState.selectedTopLevelItem) return
+        closeImagePreview()
         topLevelPageSelectionVersion++
         topLevelNavigationCoordinator.showPage(target)
     }
@@ -620,6 +623,7 @@ class MainActivity : AppComposeActivity() {
             showShortToast(getString(R.string.media_lib_file_missing))
             return
         }
+        closeImagePreview()
         playerModel.collapse()
         showTopLevelPage(R.id.nav_directory)
         clearFileSearch(refreshDirectory = false)
@@ -1142,9 +1146,15 @@ class MainActivity : AppComposeActivity() {
             openMediaFileForEdit(file, EditorMediaType.AUDIO)
         } else if (FileTypePolicy.isVideo(file)) {
             openMediaFileForEdit(file, EditorMediaType.VIDEO)
+        } else if (FileTypePolicy.isImage(file)) {
+            stateModel.imagePreviewFile = file
         } else {
             com.subtitleedit.util.OverwritingToast.makeText(this, "不支持的文件格式", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun closeImagePreview() {
+        stateModel.imagePreviewFile = null
     }
 
     private fun navigateToDirectoryBreadcrumb(directory: File): Boolean {
@@ -1283,6 +1293,7 @@ class MainActivity : AppComposeActivity() {
             exitSelectionMode()
             return
         }
+        closeImagePreview()
         stateModel.documentState.pendingFileOperation = operation
         updateSelectionUi()
     }
@@ -1506,6 +1517,7 @@ class MainActivity : AppComposeActivity() {
                     result.fold(
                         onSuccess = { count ->
                             if (count > 0) {
+                                if (current.stateModel.imagePreviewFile == file) current.closeImagePreview()
                                 current.exitSelectionMode()
                                 current.stateModel.documentState.currentDirectory?.let { current.loadDirectory(it) }
                                 current.showShortToast("已重命名")
@@ -1602,6 +1614,9 @@ class MainActivity : AppComposeActivity() {
                 val current = activeInstance?.get()?.takeIf { it.stateModel === stateModel }
                 current?.let { activity ->
                     val removed = files.filterNot { it.exists() }.mapTo(hashSetOf()) { it.absolutePath }
+                    activity.stateModel.imagePreviewFile?.let { preview ->
+                        if (preview.absolutePath in removed) activity.closeImagePreview()
+                    }
                     activity.stateModel.mediaSelection.removePaths(removed)
                     activity.playerModel.removeQueueTracks(removed)
                     if (suspendedPlayer) activity.playerModel.resumeOutput()
@@ -2387,6 +2402,10 @@ class MainActivity : AppComposeActivity() {
     }
     
     private fun handleBackNavigation() {
+        if (stateModel.imagePreviewFile != null) {
+            closeImagePreview()
+            return
+        }
         if (stateModel.mediaSelection.active) {
             stateModel.mediaSelection.cancel()
             return

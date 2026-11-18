@@ -10,6 +10,12 @@ internal object FileTypePolicy {
         "ts", "3gp", "mpg", "mpeg", "mts", "m2ts"
     )
 
+    val imageExtensions = setOf(
+        "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif", "tif", "tiff", "avif"
+    )
+
+    fun isImage(file: File): Boolean = file.extension.lowercase() in imageExtensions
+
     fun isVideo(file: File): Boolean = file.extension.lowercase() in videoExtensions
 
     fun isText(file: File): Boolean = file.extension.lowercase() in textExtensions
