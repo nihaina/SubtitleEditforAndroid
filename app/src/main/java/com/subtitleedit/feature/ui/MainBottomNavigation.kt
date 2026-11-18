@@ -37,23 +37,38 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.ui.theme.AppMotion
-import kotlin.math.abs
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.floor
+import kotlin.math.sin
+
+internal data class MainTabIndicatorFrame(val from: Int, val to: Int, val progress: Float) {
+    fun emphasis(index: Int): Float = when (index) {
+        from -> if (from == to) 1f else 1f - progress
+        to -> progress
+        else -> 0f
+    }
+
+    companion object {
+        fun adjacent(position: Float): MainTabIndicatorFrame {
+            val from = floor(position).toInt()
+            return MainTabIndicatorFrame(from, from + 1, position - from)
+        }
+    }
+}
 
 @Composable
 internal fun MainBottomNavigation(
     selectedItemId: Int,
     playerModeEnabled: Boolean,
-    pagePosition: (() -> Float)? = null,
+    indicatorFrame: (() -> MainTabIndicatorFrame)? = null,
     onSelected: (Int) -> Unit,
 ) {
     val items = bottomNavigationItems(playerModeEnabled)
     val selectedIndex = items.indexOfFirst { it.first == selectedItemId }.coerceAtLeast(0)
-    // The home pager supplies its actual position during dragging, flinging and click navigation.
-    // Standalone hosts use the same spatial motion without adding a second animation to the pager.
-    val position = pagePosition ?: run {
+    val frame = indicatorFrame ?: run {
         val animated = animateFloatAsState(selectedIndex.toFloat(), AppMotion.enter(), label = "bottom-nav-position")
-        remember(animated) { { animated.value } }
+        remember(animated) { { MainTabIndicatorFrame.adjacent(animated.value) } }
     }
     val indicatorColor = MaterialTheme.colorScheme.secondaryContainer
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
@@ -64,16 +79,20 @@ internal fun MainBottomNavigation(
             .background(MaterialTheme.colorScheme.surfaceContainer)
             .testTag("main-bottom-navigation")
             .drawBehind {
-                val page = position().coerceIn(0f, items.lastIndex.toFloat())
-                val source = floor(page)
-                val fraction = page - source
+                val (from, to, progress) = frame()
+                val start = minOf(from, to).coerceIn(items.indices)
+                val span = maxOf(from, to).coerceIn(items.indices) - start
+                val fraction = if (from <= to) progress else 1f - progress
                 val pitch = size.width / items.size
                 val width = 56.dp.toPx()
                 val height = 28.dp.toPx()
-                // The leading edge moves first; the trailing edge catches up. Reversing a
-                // gesture retraces the same shape without a timer or an extra spring lag.
-                val left = (source + fraction * fraction + .5f) * pitch - width / 2f
-                val right = (source + 1f - (1f - fraction) * (1f - fraction) + .5f) * pitch + width / 2f
+                // A drag keeps its original response. A long jump stretches once across
+                // the whole interval, like the elastic indicator in Kazumi's weekday bar.
+                val angle = fraction * PI / 2
+                val trailing = if (span > 1) 1f - cos(angle).toFloat() else fraction * fraction
+                val leading = if (span > 1) sin(angle).toFloat() else 1f - (1f - fraction) * (1f - fraction)
+                val left = (start + span * trailing + .5f) * pitch - width / 2f
+                val right = (start + span * leading + .5f) * pitch + width / 2f
                 val textHeight = labelHeight.intValue.takeIf { it > 0 }?.toFloat() ?: initialLabelHeight
                 val top = (size.height - height - textHeight) / 2f
                 drawRoundRect(indicatorColor,
@@ -84,7 +103,7 @@ internal fun MainBottomNavigation(
     ) {
         items.forEachIndexed { index, (id, icon, title) ->
             MainBottomNavigationItem(id, icon, stringResource(title), selectedItemId == id,
-                index, position, onSelected, Modifier.weight(1f),
+                index, frame, onSelected, Modifier.weight(1f),
                 onLabelHeight = if (index == 0) ({ labelHeight.intValue = it }) else null)
         }
     }
@@ -98,15 +117,15 @@ private fun MainBottomNavigationItem(
     label: String,
     selected: Boolean,
     index: Int,
-    position: () -> Float,
+    frame: () -> MainTabIndicatorFrame,
     onSelected: (Int) -> Unit,
     modifier: Modifier,
     onLabelHeight: ((Int) -> Unit)?,
 ) {
     val activeTint = MaterialTheme.colorScheme.onSecondaryContainer
     val inactiveTint = MaterialTheme.colorScheme.onSurfaceVariant
-    val tint = remember(position, index, activeTint, inactiveTint) {
-        { lerp(inactiveTint, activeTint, (1f - abs(position() - index)).coerceIn(0f, 1f)) }
+    val tint = remember(frame, index, activeTint, inactiveTint) {
+        { lerp(inactiveTint, activeTint, frame().emphasis(index)) }
     }
     val interactionSource = remember { MutableInteractionSource() }
     Column(
@@ -119,7 +138,7 @@ private fun MainBottomNavigationItem(
         verticalArrangement = Arrangement.Center,
     ) {
         Box(Modifier.size(width = 56.dp, height = 28.dp).graphicsLayer {
-            val scale = .6f + .4f * (1f - abs(position() - index)).coerceIn(0f, 1f)
+            val scale = .6f + .4f * frame().emphasis(index)
             scaleX = scale
             scaleY = scale
         }, contentAlignment = Alignment.Center) {

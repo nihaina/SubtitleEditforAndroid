@@ -41,7 +41,7 @@ internal fun MainBottomBar(
     onConfirmDestination: () -> Unit,
     onCancelDestination: () -> Unit,
     onProcessMediaSelection: () -> Unit,
-    pagePosition: (() -> Float)? = null,
+    indicatorFrame: (() -> MainTabIndicatorFrame)? = null,
 ) {
     val isSelectionActive = state.selectedTopLevelItem == R.id.nav_directory &&
         (state.selectionCount > 0 || state.pendingOperation != null)
@@ -59,7 +59,7 @@ internal fun MainBottomBar(
             MainBottomNavigation(
                 selectedItemId = state.selectedTopLevelItem,
                 playerModeEnabled = state.playerModeEnabled,
-                pagePosition = pagePosition,
+                indicatorFrame = indicatorFrame,
                 onSelected = onTopLevelPageSelected
             )
         } else if (isSelectionActive) {

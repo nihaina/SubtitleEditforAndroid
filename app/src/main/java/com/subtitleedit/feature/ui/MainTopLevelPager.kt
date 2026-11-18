@@ -1,5 +1,8 @@
 package com.subtitleedit.feature.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.pager.HorizontalPager
@@ -22,14 +25,73 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.subtitleedit.ui.theme.AppMotion
+import kotlin.math.abs
+
+@Composable
+internal fun rememberMainTopLevelMotion(pageOrder: List<Int>, selectedItemId: Int): MainTopLevelMotion {
+    val pager = rememberPagerState(
+        initialPage = pageOrder.indexOf(selectedItemId).coerceAtLeast(0),
+        pageCount = { pageOrder.size },
+    )
+    return remember(pager) { MainTopLevelMotion(pager) }
+}
+
+private val TabSlideSpec = tween<Float>(300, easing = CubicBezierEasing(.25f, .1f, .25f, 1f))
+
+internal class MainTopLevelMotion(val pager: PagerState) {
+    private class Jump(val from: Int, val to: Int) {
+        val progress = Animatable(0f)
+        val direction = if (to > from) 1 else -1
+    }
+
+    private var jump by mutableStateOf<Jump?>(null)
+    private val pagePosition get() = pager.currentPage + pager.currentPageOffsetFraction
+
+    // Both readers are used in drawing/layer blocks so progress does not recompose pages.
+    val indicatorFrame: () -> MainTabIndicatorFrame = {
+        val current = jump
+        if (current == null) MainTabIndicatorFrame.adjacent(pagePosition)
+        else MainTabIndicatorFrame(current.from, current.to, current.progress.value)
+    }
+
+    fun pageTranslation(page: Int): Float {
+        val current = jump ?: return 0f
+        // The pager stays in its canonical order. Only the old and requested pages
+        // are repositioned into the one-page slide; nothing in between is shown.
+        val offset = when (page) {
+            current.from -> -current.direction * current.progress.value
+            current.to -> current.direction * (1f - current.progress.value)
+            else -> return 0f
+        }
+        return pagePosition - page + offset
+    }
+
+    suspend fun animateTo(page: Int) {
+        if (abs(page - pager.currentPage) <= 1) {
+            pager.animateScrollToPage(page, animationSpec = TabSlideSpec)
+            return
+        }
+        pager.scroll {
+            val transition = Jump(pager.currentPage, page)
+            jump = transition
+            try {
+                pager.run { updateCurrentPage(page) }
+                transition.progress.animateTo(1f, TabSlideSpec)
+            } finally {
+                jump = null
+            }
+        }
+    }
+}
 
 /** Visited destinations keep their compositions; only the settled page runs lifecycle work. */
 @Composable
@@ -39,12 +101,11 @@ internal fun MainTopLevelPager(
     onSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
     userScrollEnabled: Boolean = true,
-    pager: PagerState = rememberPagerState(
-        initialPage = pageOrder.indexOf(state.selectedTopLevelItem).coerceAtLeast(0),
-        pageCount = { pageOrder.size },
-    ),
+    motion: MainTopLevelMotion = rememberMainTopLevelMotion(pageOrder, state.selectedTopLevelItem),
     content: @Composable (MainActivityScreenState, Boolean) -> Unit,
 ) {
+    val pager = motion.pager
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val latestState by rememberUpdatedState(state)
     val latestOnSelected by rememberUpdatedState(onSelected)
     val visited = remember { mutableStateListOf(state.selectedTopLevelItem) }
@@ -54,16 +115,17 @@ internal fun MainTopLevelPager(
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
 
-    LaunchedEffect(state.selectedTopLevelItem, pageOrder) {
+    LaunchedEffect(motion, state.selectedTopLevelItem, pageOrder) {
         val page = pageOrder.indexOf(state.selectedTopLevelItem)
-        if (page < 0 || (pager.settledPage == page && !pager.isScrollInProgress)) return@LaunchedEffect
+        val atDestination = pager.settledPage == page && !pager.isScrollInProgress &&
+            pager.currentPageOffsetFraction == 0f
+        if (page < 0 || atDestination) return@LaunchedEffect
         requestedPage = page
         if (state.selectedTopLevelItem !in visited) visited.add(state.selectedTopLevelItem)
         focusManager.clearFocus()
         keyboard?.hide()
         try {
-            // Spatial movement only: the same opaque pages serve touch and navigation-bar input.
-            pager.animateScrollToPage(page, animationSpec = AppMotion.enter())
+            motion.animateTo(page)
         } finally {
             if (requestedPage == page) requestedPage = null
         }
@@ -108,7 +170,9 @@ internal fun MainTopLevelPager(
                 isSearchExpanded = false)
         }
         val active = selected && pager.settledPage == page && !pager.isScrollInProgress
-        Box(Modifier.fillMaxSize().graphicsLayer().testTag("main-page:$id")) {
+        Box(Modifier.fillMaxSize().graphicsLayer {
+            translationX = motion.pageTranslation(page) * size.width * if (rtl) -1 else 1
+        }.testTag("main-page:$id")) {
             if (mounted) RetainedPageLifecycle(active) { content(snapshot, active) }
         }
     }

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -197,14 +196,8 @@ internal fun MainActivityScreen(
         categoryRevealRequest?.let { topLevelPagesState.mediaAlbumPage.revealRequest = it }
     }
     val topLevelOrder = remember(state.playerModeEnabled) { bottomNavigationItems(state.playerModeEnabled).map { it.first } }
-    val topLevelPager = androidx.compose.runtime.key(state.playerModeEnabled) {
-        rememberPagerState(initialPage = topLevelOrder.indexOf(state.selectedTopLevelItem).coerceAtLeast(0)) {
-            topLevelOrder.size
-        }
-    }
-    // Read the continuous position in the navigation's drawing nodes, not this composition.
-    val pagePosition = remember(topLevelPager) {
-        { topLevelPager.currentPage + topLevelPager.currentPageOffsetFraction }
+    val topLevelMotion = androidx.compose.runtime.key(state.playerModeEnabled) {
+        rememberMainTopLevelMotion(topLevelOrder, state.selectedTopLevelItem)
     }
     var createDialogKind by remember { mutableStateOf<MainCreateItemKind?>(null) }
     var createName by remember { mutableStateOf("") }
@@ -255,7 +248,7 @@ internal fun MainActivityScreen(
                 state = state,
                 pageOrder = topLevelOrder,
                 onSelected = onTopLevelPageSelected,
-                pager = topLevelPager,
+                motion = topLevelMotion,
                 userScrollEnabled = createDialogKind == null && mainDialog == null && batchRename == null,
                 modifier = Modifier.weight(1f).fillMaxWidth().background(settingsPageBackground())
             ) { pageState, pageActive ->
@@ -333,7 +326,7 @@ internal fun MainActivityScreen(
         miniPlayerSlot()
         MainBottomBar(
             state = state.bottomBarState(),
-            pagePosition = pagePosition,
+            indicatorFrame = topLevelMotion.indicatorFrame,
             onTopLevelPageSelected = onTopLevelPageSelected,
             onCopy = onCopy,
             onMove = onMove,

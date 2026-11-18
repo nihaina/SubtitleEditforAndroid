@@ -81,6 +81,27 @@ class MainTopLevelPagerTest {
         assertEquals(null, disposals[2])
     }
 
+    @Test fun aNonAdjacentTapSlidesOnlyTheOldAndNewPage() {
+        val state = showPager()
+        compose.mainClock.autoAdvance = false
+        compose.runOnIdle { state.value = state.value.copy(selectedTopLevelItem = 5, toolbarTitle = "Page five") }
+        compose.mainClock.advanceTimeBy(128L)
+        val viewport = compose.onNodeWithTag("main-page-pager").fetchSemanticsNode().boundsInRoot
+        val old = compose.onNodeWithTag("body:1").fetchSemanticsNode().boundsInRoot
+        val target = compose.onNodeWithTag("body:5").fetchSemanticsNode().boundsInRoot
+        assertTrue(old.width > 0f && old.width < viewport.width)
+        assertTrue(target.left > viewport.left && target.left < viewport.right)
+        val pixels = compose.onNodeWithTag("main-page-pager").captureToImage().toPixelMap()
+        for (x in listOf(3, pixels.width / 2, pixels.width - 3)) {
+            assertEquals("The two opaque pages should fill the viewport", Color.White, pixels[x, pixels.height - 3])
+        }
+        assertEquals(mapOf(1 to 1, 5 to 1), mounts)
+        compose.mainClock.advanceTimeBy(800L)
+        compose.onNodeWithTag("body:5").assertIsDisplayed()
+        compose.onNodeWithTag("body:1").assertIsNotDisplayed()
+        assertEquals(mapOf(1 to 1, 5 to 1), mounts)
+    }
+
     @Test fun swipesSelectTheMatchingDestinationInBothDirections() {
         val state = showPager()
         compose.onNodeWithTag("main-page-pager").performTouchInput { swipeLeft() }
