@@ -70,10 +70,10 @@ class MainDirectorySourcesTest {
             compose.runOnIdle { page.intValue = R.id.nav_library }
             compose.onNodeWithText(library.name).assertIsDisplayed()
             compose.onNodeWithText(common.name).assertDoesNotExist()
-            compose.waitUntil(5_000L) { state.mediaLibraryPage.loadedQuery != null }
+            compose.waitUntil(5_000L) { state.mediaLibraryPage.catalog != null }
             compose.runOnIdle {
                 assertEquals(listOf(library), state.mediaLibraryDirectories)
-                assertEquals(listOf(libraryTrack.path), state.mediaLibraryPage.content.allTracks.map { it.path })
+                assertEquals(listOf(libraryTrack.path), state.mediaLibraryPage.catalog?.tracks.orEmpty().map { it.path })
             }
 
             // The same path may be added again from the library entry, upgrading its source.

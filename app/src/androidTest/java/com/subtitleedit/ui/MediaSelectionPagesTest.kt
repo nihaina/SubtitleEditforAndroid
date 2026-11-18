@@ -164,7 +164,7 @@ class MediaSelectionPagesTest {
         compose.onNodeWithTag("library-file:${files.first().path}").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(folder.name, title)
-            assertTrue(pageState.content.allTracks.size >= files.size)
+            assertTrue(pageState.catalog?.tracks.orEmpty().size >= files.size)
         }
     }
 

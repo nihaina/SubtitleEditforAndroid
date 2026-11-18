@@ -126,7 +126,6 @@ internal data class MediaLibraryContent(
     val currentQueue: Pair<List<MediaLibraryTrack>, Int> = emptyList<MediaLibraryTrack>() to 0,
     val playlists: List<MediaPlaylist> = emptyList(),
     val history: List<PlaybackHistoryEntry> = emptyList(),
-    val allTracks: List<MediaLibraryTrack> = emptyList(),
     val playlistId: Long? = null,
     val playlistTracks: List<MediaLibraryTrack> = emptyList()
 )
@@ -135,6 +134,7 @@ internal data class MediaLibraryContent(
 internal class MediaLibraryPageState {
     var content by mutableStateOf(MediaLibraryContent())
     internal var loadedQuery: MediaLibraryQueryKey? = null
+    internal var catalog by mutableStateOf<MediaLibraryCatalogSnapshot?>(null)
     internal var browseIndex by mutableStateOf<PreparedMediaLibraryIndex?>(null)
     internal var folderSnapshot by mutableStateOf<PreparedMediaLibraryFolder?>(null)
 }
@@ -143,8 +143,18 @@ internal data class MediaLibraryQueryKey(
     val repository: MediaLibraryRepository,
     val revision: Long,
     val refreshVersion: Int,
-    val playlistId: Long?,
+    val playlistId: Long?
+)
+
+internal data class MediaLibraryCatalogKey(
+    val repository: MediaLibraryRepository,
+    val revision: Long,
     val directories: List<String>
+)
+
+internal class MediaLibraryCatalogSnapshot(
+    val key: MediaLibraryCatalogKey,
+    val tracks: List<MediaLibraryTrack>
 )
 
 private class MediaLibraryTracksKey(private val tracks: List<MediaLibraryTrack>) {
@@ -171,12 +181,14 @@ internal fun MediaLibraryScreen(
     isActive: Boolean = true,
     scanPickerPending: Boolean = false,
     pageState: MediaLibraryPageState = remember { MediaLibraryPageState() },
-    libraryRepository: MediaLibraryRepository? = null
+    libraryRepository: MediaLibraryRepository? = null,
+    readIndexedTracks: (MediaLibraryRepository) -> List<MediaLibraryTrack> = MediaLibraryRepository::getIndexedTracks
 ) {
     val context = LocalContext.current
     val playerLauncher = LocalPlayerLauncher.current
     val repository = libraryRepository ?: remember(context) { MediaLibraryRepository.getInstance(context) }
     val revision by repository.revision.collectRetainedPageState(isActive)
+    val catalogRevision by repository.catalogRevision.collectRetainedPageState(isActive)
     val scope = rememberCoroutineScope()
     val mutationMutex = remember { Mutex() }
     val toolbarCallback by rememberUpdatedState(onToolbarChanged)
@@ -258,12 +270,13 @@ internal fun MediaLibraryScreen(
             selectedFilePaths = emptySet()
         }
     }
-    val tracksKey = MediaLibraryTracksKey(content.allTracks)
+    val allTracks = pageState.catalog?.tracks.orEmpty()
+    val tracksKey = MediaLibraryTracksKey(allTracks)
     val browseIndex = pageState.browseIndex?.takeIf {
-        it.tracks === content.allTracks && it.rootPaths == rootPaths
+        it.tracks === allTracks && it.rootPaths == rootPaths
     }
     val folderSnapshot = pageState.folderSnapshot?.takeIf {
-        it.tracks === content.allTracks && it.directoryPath == browsePath
+        it.tracks === allTracks && it.directoryPath == browsePath
     }
     val folderEntries = folderSnapshot?.entries.orEmpty()
     val rootMediaCounts = browseIndex?.rootMediaCounts.orEmpty()
@@ -273,7 +286,7 @@ internal fun MediaLibraryScreen(
 
     LaunchedEffect(isActive, tracksKey, rootPaths) {
         if (!isActive || browseIndex != null) return@LaunchedEffect
-        val tracks = content.allTracks
+        val tracks = allTracks
         val index = withContext(Dispatchers.Default) {
             val job = currentCoroutineContext()
             prepareMediaLibraryIndex(tracks, rootPaths) { job.ensureActive() }
@@ -283,9 +296,9 @@ internal fun MediaLibraryScreen(
     LaunchedEffect(isActive, tracksKey, browsePath) {
         val directory = browsePath ?: return@LaunchedEffect
         if (!isActive || pageState.folderSnapshot?.let {
-                it.tracks === content.allTracks && it.directoryPath == directory
+                it.tracks === allTracks && it.directoryPath == directory
             } == true) return@LaunchedEffect
-        val tracks = content.allTracks
+        val tracks = allTracks
         val prepared = withContext(Dispatchers.Default) {
             val job = currentCoroutineContext()
             prepareMediaLibraryFolder(tracks, directory) { job.ensureActive() }
@@ -327,12 +340,32 @@ internal fun MediaLibraryScreen(
         if (selectedFilePaths.isNotEmpty()) selectedFilePaths = emptySet() else leaveFolder()
     }
 
-    LaunchedEffect(repository, isActive, revision, refreshVersion, openedPlaylistId, rootPaths) {
+    val catalogKey = MediaLibraryCatalogKey(repository, catalogRevision, rootPaths)
+    LaunchedEffect(isActive, catalogKey) {
+        if (!isActive || pageState.catalog?.key == catalogKey) return@LaunchedEffect
+        val previous = pageState.catalog?.takeIf { it.key.repository === repository }?.tracks
+        try {
+            val tracks = withContext(Dispatchers.IO) {
+                val prefixes = catalogKey.directories.map { it.trimEnd('/') + "/" }
+                val loaded = if (prefixes.isEmpty()) emptyList() else readIndexedTracks(repository).filter { track ->
+                    prefixes.any { track.path.startsWith(it) }
+                }
+                // Keep the prepared directory results when a genuine index refresh leaves these roots unchanged.
+                if (previous != null && loaded == previous) previous else loaded
+            }
+            pageState.catalog = MediaLibraryCatalogSnapshot(catalogKey, tracks)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            showLibraryError(context, error)
+        }
+    }
+
+    LaunchedEffect(repository, isActive, revision, refreshVersion, openedPlaylistId) {
         if (!isActive) return@LaunchedEffect
         val playlistId = openedPlaylistId
-        val query = MediaLibraryQueryKey(repository, revision, refreshVersion, playlistId, rootPaths)
+        val query = MediaLibraryQueryKey(repository, revision, refreshVersion, playlistId)
         if (pageState.loadedQuery == query) return@LaunchedEffect
-        val previousTracks = pageState.content.allTracks
         try {
             val loaded = withContext(Dispatchers.IO) {
                 MediaLibraryContent(
@@ -340,13 +373,6 @@ internal fun MediaLibraryScreen(
                     currentQueue = com.subtitleedit.player.PlayerLibraryWriter.execute { repository.getCurrentQueue() },
                     playlists = repository.getPlaylists(),
                     history = repository.getPlaybackHistory(),
-                    // Queue/history changes also bump the repository revision. Keep the
-                    // unchanged track source so its prepared folder/index remains usable.
-                    allTracks = repository.getIndexedTracks().filter { track ->
-                        rootPaths.any { track.path.startsWith(it.trimEnd('/') + "/") }
-                    }.let { tracks ->
-                        if (tracks == previousTracks) previousTracks else tracks
-                    },
                     playlistId = playlistId,
                     playlistTracks = playlistId?.let(repository::getPlaylistTracks).orEmpty()
                 )

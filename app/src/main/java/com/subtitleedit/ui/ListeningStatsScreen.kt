@@ -2,6 +2,7 @@ package com.subtitleedit.ui
 
 import android.content.Intent
 import android.graphics.Bitmap
+import android.os.Trace
 import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
@@ -68,6 +69,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutModifier
+import androidx.compose.ui.layout.Measurable
+import androidx.compose.ui.layout.MeasureResult
+import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -78,6 +83,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
@@ -234,47 +240,54 @@ internal fun ListeningStatsScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(settingsPageBackground())
-            .testTag("listening-stats-page"),
+            .testTag("listening-stats-page")
+            .traceStatsMeasure("Stats:list:measure"),
         state = pageState.listState,
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
     ) {
         item(key = "summary") {
-            Box(Modifier.padding(bottom = 16.dp)) {
-                SummarySection(
-                    summary = summary,
-                    granularity = granularity,
-                    topArtworkPath = topArtworkPath,
-                    artworkRefreshVersion = refreshVersion,
-                    animateChanges = pageState.content != null,
-                    onGranularitySelected = { pageState.granularity = it }
-                )
+            traceStats("Stats:summary:compose") {
+                Box(Modifier.traceStatsMeasure("Stats:summary:measure").padding(bottom = 16.dp)) {
+                    SummarySection(
+                        summary = summary,
+                        granularity = granularity,
+                        topArtworkPath = topArtworkPath,
+                        artworkRefreshVersion = refreshVersion,
+                        animateChanges = pageState.content != null,
+                        onGranularitySelected = { pageState.granularity = it }
+                    )
+                }
             }
         }
 
         item(key = "heatmap") {
-            Box(Modifier.padding(bottom = 16.dp)) {
-                HeatmapSection(
-                    days = heatmapDays,
-                    selectedDate = selectedDate,
-                    availableYears = availableYears,
-                    selectedYear = selectedYear,
-                    scrollState = pageState.heatmapScrollState(selectedYear),
-                    onYearSelected = { year ->
-                        pageState.selectedYear = year
-                        pageState.selectedDate = if (year == currentYear) currentDate else "%04d-12-31".format(Locale.US, year)
-                    },
-                    onDayClick = { pageState.selectedDate = it }
-                )
+            traceStats("Stats:heatmap:compose") {
+                Box(Modifier.traceStatsMeasure("Stats:heatmap:measure").padding(bottom = 16.dp)) {
+                    HeatmapSection(
+                        days = heatmapDays,
+                        selectedDate = selectedDate,
+                        availableYears = availableYears,
+                        selectedYear = selectedYear,
+                        scrollState = pageState.heatmapScrollState(selectedYear),
+                        onYearSelected = { year ->
+                            pageState.selectedYear = year
+                            pageState.selectedDate = if (year == currentYear) currentDate else "%04d-12-31".format(Locale.US, year)
+                        },
+                        onDayClick = { pageState.selectedDate = it }
+                    )
+                }
             }
         }
 
         if (topItems.isNotEmpty()) {
             item(key = "top-works") {
-                Box(Modifier.padding(bottom = 16.dp)) {
-                    TopWorksSection(
-                        items = topItems,
-                        onItemClick = { playFile(it.mediaPath) }
-                    )
+                traceStats("Stats:top-works:compose") {
+                    Box(Modifier.traceStatsMeasure("Stats:top-works:measure").padding(bottom = 16.dp)) {
+                        TopWorksSection(
+                            items = topItems,
+                            onItemClick = { playFile(it.mediaPath) }
+                        )
+                    }
                 }
             }
         }
@@ -292,26 +305,51 @@ internal fun ListeningStatsScreen(
         )
 
         item(key = "timeline") {
-            DayTimelineHeader(selectedDate)
+            traceStats("Stats:timeline-header:compose") { DayTimelineHeader(selectedDate) }
         }
         if (sessions.isEmpty()) {
-            item(key = "timeline-empty") { EmptyDayTimeline() }
+            item(key = "timeline-empty") {
+                traceStats("Stats:timeline-empty:compose") { EmptyDayTimeline() }
+            }
         } else {
             itemsIndexed(
                 sessions,
                 key = { _, session -> "session:${session.id}" },
                 contentType = { _, _ -> "session" }
             ) { index, session ->
-                Box(Modifier.padding(bottom = if (index == sessions.lastIndex) 16.dp else 8.dp)) {
-                    TimelineRow(
-                        session = session,
-                        isLast = index == sessions.lastIndex,
-                        timeFormat = sessionTimeFormat,
-                        onClick = { playFile(session.mediaPath) }
-                    )
+                traceStats("Stats:timeline-row:compose") {
+                    Box(Modifier.traceStatsMeasure("Stats:timeline-row:measure")
+                        .padding(bottom = if (index == sessions.lastIndex) 16.dp else 8.dp)) {
+                        TimelineRow(
+                            session = session,
+                            isLast = index == sessions.lastIndex,
+                            timeFormat = sessionTimeFormat,
+                            onClick = { playFile(session.mediaPath) }
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+// Synchronous sections only: never keep a trace span open across a coroutine suspension.
+private inline fun <T> traceStats(name: String, block: () -> T): T {
+    Trace.beginSection(name)
+    try {
+        return block()
+    } finally {
+        Trace.endSection()
+    }
+}
+
+private fun Modifier.traceStatsMeasure(name: String): Modifier = then(StatsMeasureTrace(name))
+
+// Equality by name avoids invalidating measurement just because a traced item recomposed.
+private data class StatsMeasureTrace(val name: String) : LayoutModifier {
+    override fun MeasureScope.measure(measurable: Measurable, constraints: Constraints): MeasureResult {
+        val child = traceStats(name) { measurable.measure(constraints) }
+        return layout(child.width, child.height) { child.placeRelative(0, 0) }
     }
 }
 
@@ -457,16 +495,20 @@ private fun LazyListScope.playbackInsightsItems(
 
 @Composable
 private fun InsightCardPart(first: Boolean = false, last: Boolean = false, content: @Composable () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(bottom = if (last) 32.dp else 0.dp),
-        shape = RoundedCornerShape(
-            topStart = if (first) 18.dp else 0.dp, topEnd = if (first) 18.dp else 0.dp,
-            bottomStart = if (last) 18.dp else 0.dp, bottomEnd = if (last) 18.dp else 0.dp
-        ),
-        color = MaterialTheme.colorScheme.cardContainer
-    ) {
-        Column(Modifier.padding(horizontal = 14.dp).padding(top = if (first) 14.dp else 0.dp, bottom = if (last) 14.dp else 10.dp)) {
-            content()
+    val composition = if (first) "Stats:insights-header:compose" else "Stats:insights-row:compose"
+    val measurement = if (first) "Stats:insights-header:measure" else "Stats:insights-row:measure"
+    traceStats(composition) {
+        Surface(
+            modifier = Modifier.traceStatsMeasure(measurement).fillMaxWidth().padding(bottom = if (last) 32.dp else 0.dp),
+            shape = RoundedCornerShape(
+                topStart = if (first) 18.dp else 0.dp, topEnd = if (first) 18.dp else 0.dp,
+                bottomStart = if (last) 18.dp else 0.dp, bottomEnd = if (last) 18.dp else 0.dp
+            ),
+            color = MaterialTheme.colorScheme.cardContainer
+        ) {
+            Column(Modifier.padding(horizontal = 14.dp).padding(top = if (first) 14.dp else 0.dp, bottom = if (last) 14.dp else 10.dp)) {
+                content()
+            }
         }
     }
 }
