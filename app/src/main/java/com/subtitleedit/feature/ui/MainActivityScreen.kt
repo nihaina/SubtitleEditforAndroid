@@ -3,7 +3,6 @@ package com.subtitleedit.feature.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,7 +43,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.safeDrawing
@@ -231,9 +230,6 @@ internal fun MainActivityScreen(
     // bottom action row stay hidden until the directory tab is visible again.
     val isSelectionActive = isDirectoryPage &&
         (state.selectedPaths.isNotEmpty() || state.pendingOperation != null)
-    val restorePreviewControls = if (isPreviewingImage && !previewControlsVisible && !isSelectionActive) {
-        Modifier.pointerInput(Unit) { detectTapGestures { previewControlsVisible = true } }
-    } else Modifier
     val searchFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -261,12 +257,41 @@ internal fun MainActivityScreen(
         }
     }
 
+    val bottomBar: @Composable () -> Unit = {
+        MainBottomBar(
+            state = state.bottomBarState(),
+            previewControlsVisible = previewControlsVisible,
+            previewActions = if (previewFile == null) null else {
+                {
+                    DirectoryImagePreviewActions(
+                        onShare = { onShareImagePreview(previewFile) },
+                        onRotate = { previewQuarterTurns = (previewQuarterTurns + 1) % 4 },
+                        onDelete = { onDeleteImagePreview(previewFile) },
+                        onShowInfo = { onShowImagePreviewInfo(previewFile) }
+                    )
+                }
+            },
+            indicatorFrame = topLevelMotion.indicatorFrame,
+            onTopLevelPageSelected = onTopLevelPageSelected,
+            onCopy = onCopy,
+            onMove = onMove,
+            onRename = onRename,
+            onDelete = onDelete,
+            onConvertSelection = onConvertSelection,
+            onCompressSelection = onCompressSelection,
+            onEditTagsSelection = onEditTagsSelection,
+            onClearCacheSelection = onClearCacheSelection,
+            onShowSelectionProperties = onShowSelectionProperties,
+            onConfirmDestination = onConfirmDestination,
+            onCancelDestination = onCancelDestination,
+            onProcessMediaSelection = onProcessMediaSelection,
+        )
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.systemBarsIgnoringVisibility))
             .background(MaterialTheme.colorScheme.background)
-            .then(restorePreviewControls)
     ) {
         if (previewFile != null) {
             DirectoryImagePreview(
@@ -280,7 +305,8 @@ internal fun MainActivityScreen(
                 onNavigationClick = if (isSelectionActive) onToolbarBack else onCloseImagePreview,
                 onToggleSelection = { onFileLongClick(previewFile) },
                 onToggleControls = { previewControlsVisible = !previewControlsVisible },
-                modifier = Modifier.weight(1f).fillMaxWidth()
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                bottomBar = bottomBar
             )
         } else MainTopLevelPager(
             state = state,
@@ -363,36 +389,8 @@ internal fun MainActivityScreen(
                 com.subtitleedit.ui.MediaSelectionPanel(selection)
             }
             miniPlayerSlot()
+            bottomBar()
         }
-        MainBottomBar(
-            state = state.bottomBarState(),
-            previewActions = if (previewFile == null) null else {
-                {
-                    if (previewControlsVisible) {
-                        DirectoryImagePreviewActions(
-                            onShare = { onShareImagePreview(previewFile) },
-                            onRotate = { previewQuarterTurns = (previewQuarterTurns + 1) % 4 },
-                            onDelete = { onDeleteImagePreview(previewFile) },
-                            onShowInfo = { onShowImagePreviewInfo(previewFile) }
-                        )
-                    }
-                }
-            },
-            indicatorFrame = topLevelMotion.indicatorFrame,
-            onTopLevelPageSelected = onTopLevelPageSelected,
-            onCopy = onCopy,
-            onMove = onMove,
-            onRename = onRename,
-            onDelete = onDelete,
-            onConvertSelection = onConvertSelection,
-            onCompressSelection = onCompressSelection,
-            onEditTagsSelection = onEditTagsSelection,
-            onClearCacheSelection = onClearCacheSelection,
-            onShowSelectionProperties = onShowSelectionProperties,
-            onConfirmDestination = onConfirmDestination,
-            onCancelDestination = onCancelDestination,
-            onProcessMediaSelection = onProcessMediaSelection,
-        )
     }
 
     createDialogKind?.let { kind ->
@@ -487,13 +485,14 @@ internal fun SelectionActions(
     onConfirmDestination: () -> Unit,
     onCancelDestination: () -> Unit,
     canProcessMedia: Boolean = false,
-    onProcessMedia: () -> Unit = {}
+    onProcessMedia: () -> Unit = {},
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainer
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    Spacer(Modifier.fillMaxWidth().height(4.dp).background(MaterialTheme.colorScheme.surfaceContainer))
+    Spacer(Modifier.fillMaxWidth().height(4.dp).background(containerColor))
     if (operation == null) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(64.dp).background(MaterialTheme.colorScheme.surfaceContainer),
+            modifier = Modifier.fillMaxWidth().height(64.dp).background(containerColor),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -547,7 +546,7 @@ internal fun SelectionActions(
         }
     } else {
         Row(
-            modifier = Modifier.fillMaxWidth().height(64.dp).background(MaterialTheme.colorScheme.surfaceContainer).padding(start = 16.dp, end = 8.dp),
+            modifier = Modifier.fillMaxWidth().height(64.dp).background(containerColor).padding(start = 16.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(

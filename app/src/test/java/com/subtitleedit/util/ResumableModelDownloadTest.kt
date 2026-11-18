@@ -3,6 +3,8 @@ package com.subtitleedit.util
 import com.subtitleedit.work.ModelDownloadRetryPolicy
 import java.io.File
 import java.io.IOException
+import java.net.InetAddress
+import java.net.Proxy
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
@@ -11,20 +13,26 @@ import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.SocketPolicy
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
+private const val LOOPBACK_HOST = "127.0.0.1"
+
 class ResumableModelDownloadTest {
     @get:Rule val temporaryFolder = TemporaryFolder()
-    @get:Rule val server = MockWebServer()
+    private val server = MockWebServer()
     private val client = OkHttpClient.Builder()
+        .proxy(Proxy.NO_PROXY)
         .retryOnConnectionFailure(false)
         .readTimeout(2, TimeUnit.SECONDS)
         .build()
@@ -35,7 +43,17 @@ class ResumableModelDownloadTest {
     private val destination get() = File(temporaryFolder.root, "model.onnx")
     private val part get() = File(temporaryFolder.root, "model.onnx.part")
     private val metadata get() = File(temporaryFolder.root, "model.onnx.part.properties")
-    private val url get() = server.url("/model").toString()
+    private val url get() = modelUrl("/model")
+
+    @Before
+    fun startServer() {
+        server.start(InetAddress.getByName(LOOPBACK_HOST), 0)
+    }
+
+    @After
+    fun stopServer() {
+        server.close()
+    }
 
     @Test
     fun interruptedDownloadResumesWithNewDownloaderAndReportsOverallProgress() = runBlocking {
@@ -46,7 +64,7 @@ class ResumableModelDownloadTest {
 
         downloader().download(url, destination, "下载模型", progress::add)
 
-        val request = server.takeRequest()
+        val request = awaitRequest()
         assertEquals("bytes=$offset-", request.getHeader("Range"))
         assertEquals(etag, request.getHeader("If-Range"))
         assertEquals("identity", request.getHeader("Accept-Encoding"))
@@ -65,7 +83,7 @@ class ResumableModelDownloadTest {
 
         download()
 
-        assertTrue(server.takeRequest().getHeader("Range") != null)
+        assertTrue(awaitRequest().getHeader("Range") != null)
         assertEquals("new model content", destination.readText())
     }
 
@@ -80,7 +98,7 @@ class ResumableModelDownloadTest {
         } catch (error: IOException) {
             assertTrue(ModelDownloadRetryPolicy.shouldRetry(error, 1))
         }
-        assertEquals("bytes=$firstOffset-", server.takeRequest().getHeader("Range"))
+        assertEquals("bytes=$firstOffset-", awaitRequest().getHeader("Range"))
         val nextOffset = part.length()
         assertTrue(nextOffset > firstOffset)
         assertTrue(nextOffset < content.length)
@@ -88,7 +106,7 @@ class ResumableModelDownloadTest {
 
         download()
 
-        assertEquals("bytes=$nextOffset-", server.takeRequest().getHeader("Range"))
+        assertEquals("bytes=$nextOffset-", awaitRequest().getHeader("Range"))
         assertEquals(content, destination.readText())
     }
 
@@ -101,8 +119,8 @@ class ResumableModelDownloadTest {
 
         download()
 
-        assertEquals("bytes=$offset-", server.takeRequest().getHeader("Range"))
-        assertNull(server.takeRequest().getHeader("Range"))
+        assertEquals("bytes=$offset-", awaitRequest().getHeader("Range"))
+        assertNull(awaitRequest().getHeader("Range"))
         assertEquals("replacement", destination.readText())
     }
 
@@ -114,8 +132,8 @@ class ResumableModelDownloadTest {
 
         download()
 
-        assertTrue(server.takeRequest().getHeader("Range") != null)
-        assertNull(server.takeRequest().getHeader("Range"))
+        assertTrue(awaitRequest().getHeader("Range") != null)
+        assertNull(awaitRequest().getHeader("Range"))
         assertEquals(content, destination.readText())
     }
 
@@ -127,8 +145,8 @@ class ResumableModelDownloadTest {
 
         download()
 
-        assertTrue(server.takeRequest().getHeader("Range") != null)
-        assertNull(server.takeRequest().getHeader("Range"))
+        assertTrue(awaitRequest().getHeader("Range") != null)
+        assertNull(awaitRequest().getHeader("Range"))
         assertEquals("new", destination.readText())
     }
 
@@ -145,13 +163,13 @@ class ResumableModelDownloadTest {
         assertTrue(job.isCancelled)
         assertFalse(destination.exists())
         assertEquals(content.length.toLong(), part.length())
-        server.takeRequest()
+        awaitRequest()
         server.enqueue(MockResponse().setResponseCode(416)
             .setHeader("Content-Range", "bytes */${content.length}").setHeader("ETag", etag))
 
         download()
 
-        assertEquals("bytes=${content.length}-", server.takeRequest().getHeader("Range"))
+        assertEquals("bytes=${content.length}-", awaitRequest().getHeader("Range"))
         assertEquals(content, destination.readText())
     }
 
@@ -169,13 +187,13 @@ class ResumableModelDownloadTest {
         assertTrue(job.isCancelled)
         assertTrue(part.length() in 1 until content.length.toLong())
         assertFalse(destination.exists())
-        server.takeRequest()
+        awaitRequest()
         val offset = part.length()
         enqueueRemainder(offset)
 
         download()
 
-        assertEquals("bytes=$offset-", server.takeRequest().getHeader("Range"))
+        assertEquals("bytes=$offset-", awaitRequest().getHeader("Range"))
         assertEquals(content, destination.readText())
     }
 
@@ -193,7 +211,7 @@ class ResumableModelDownloadTest {
             assertTrue(ModelDownloadRetryPolicy.shouldRetry(error, 0))
             assertEquals(503, error.statusCode)
         }
-        server.takeRequest()
+        awaitRequest()
         assertTrue(savedBytes.contentEquals(part.readBytes()))
         assertEquals(savedMetadata, metadata.readText())
         assertEquals("previous model", destination.readText())
@@ -215,7 +233,7 @@ class ResumableModelDownloadTest {
 
         download()
 
-        val request = server.takeRequest()
+        val request = awaitRequest()
         assertEquals("bytes=$offset-", request.getHeader("Range"))
         assertEquals(modified, request.getHeader("If-Range"))
         assertEquals(content, destination.readText())
@@ -226,14 +244,14 @@ class ResumableModelDownloadTest {
         interruptDownload(response = MockResponse().setBody(content).setHeader("ETag", "W/\"weak\""))
         server.enqueue(MockResponse().setBody(content))
         download()
-        assertNull(server.takeRequest().getHeader("Range"))
+        assertNull(awaitRequest().getHeader("Range"))
         assertEquals(content, destination.readText())
 
         interruptDownload()
         metadata.writeText("broken metadata")
         server.enqueue(MockResponse().setBody("replacement"))
         download()
-        assertNull(server.takeRequest().getHeader("Range"))
+        assertNull(awaitRequest().getHeader("Range"))
         assertEquals("replacement", destination.readText())
     }
 
@@ -242,9 +260,9 @@ class ResumableModelDownloadTest {
         interruptDownload()
         server.enqueue(MockResponse().setBody("another model"))
 
-        downloader().download(server.url("/other-model").toString(), destination, "下载模型", {})
+        downloader().download(modelUrl("/other-model"), destination, "下载模型", {})
 
-        assertNull(server.takeRequest().getHeader("Range"))
+        assertNull(awaitRequest().getHeader("Range"))
         assertEquals("another model", destination.readText())
     }
 
@@ -260,8 +278,8 @@ class ResumableModelDownloadTest {
 
         download()
 
-        assertEquals("bytes=$offset-", server.takeRequest().getHeader("Range"))
-        assertEquals("bytes=${end + 1}-", server.takeRequest().getHeader("Range"))
+        assertEquals("bytes=$offset-", awaitRequest().getHeader("Range"))
+        assertEquals("bytes=${end + 1}-", awaitRequest().getHeader("Range"))
         assertEquals(content, destination.readText())
     }
 
@@ -289,7 +307,7 @@ class ResumableModelDownloadTest {
         } catch (error: IOException) {
             assertTrue(error.toString(), ModelDownloadRetryPolicy.shouldRetry(error, 0))
         }
-        server.takeRequest()
+        awaitRequest()
         assertTrue(part.length() in 1 until content.length.toLong())
         assertTrue(metadata.isFile)
     }
@@ -300,6 +318,10 @@ class ResumableModelDownloadTest {
         .setBody(content.substring(offset.toInt()))
 
     private fun enqueueRemainder(offset: Long) = server.enqueue(partialResponse(offset))
+    private fun modelUrl(path: String) = "http://$LOOPBACK_HOST:${server.port}$path"
+    private fun awaitRequest(): RecordedRequest = server.takeRequest(5, TimeUnit.SECONDS)
+        ?: throw AssertionError("MockWebServer did not receive a request within 5 seconds")
+
     private fun downloader() = ResumableModelDownload(client)
     private suspend fun download() = downloader().download(url, destination, "下载模型", {})
 }

@@ -15,8 +15,8 @@ import kotlin.math.abs
 internal suspend fun PointerInputScope.detectImageTransforms(
     canPan: (Offset) -> Boolean,
     onStart: () -> Unit,
-    onTransform: (centroid: Offset, zoom: Float, pan: Offset) -> Unit,
-    onEnd: (Velocity) -> Unit
+    onTransform: (centroid: Offset, zoom: Float, pan: Offset, horizontalDrag: Boolean) -> Unit,
+    onEnd: (Velocity, released: Boolean) -> Unit
 ) {
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false)
@@ -26,6 +26,8 @@ internal suspend fun PointerInputScope.detectImageTransforms(
         var lastMoveAt = down.uptimeMillis
         var multiTouch = false
         var accepted = false
+        var horizontalDrag = false
+        var released = false
         var totalPan = Offset.Zero
         var totalZoom = 1f
         var velocity = Velocity.Zero
@@ -45,7 +47,10 @@ internal suspend fun PointerInputScope.detectImageTransforms(
                     lastMoveAt = change.uptimeMillis
                 }
             }
-            if (event.changes.none { it.pressed }) break
+            if (event.changes.none { it.pressed }) {
+                released = true
+                break
+            }
 
             val pan = event.calculatePan()
             val zoom = event.calculateZoom()
@@ -54,13 +59,14 @@ internal suspend fun PointerInputScope.detectImageTransforms(
                 totalZoom *= zoom
                 val zoomMotion = abs(1f - totalZoom) * event.calculateCentroidSize(useCurrent = false)
                 val slop = viewConfiguration.touchSlop
-                accepted = zoomMotion > slop || totalPan.getDistance() > slop && canPan(totalPan)
+                accepted = zoomMotion > slop || totalPan.getDistance() > slop && (multiTouch || canPan(totalPan))
+                horizontalDrag = accepted && abs(totalPan.x) >= abs(totalPan.y)
             }
             if (accepted && (pan != Offset.Zero || zoom != 1f)) {
-                onTransform(event.calculateCentroid(useCurrent = false), zoom, pan)
+                onTransform(event.calculateCentroid(useCurrent = false), zoom, pan, horizontalDrag && !multiTouch)
                 event.changes.forEach { if (it.position != it.previousPosition) it.consume() }
             }
         }
-        onEnd(velocity)
+        onEnd(velocity, released && !multiTouch)
     }
 }

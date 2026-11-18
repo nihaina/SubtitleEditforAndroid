@@ -1,6 +1,7 @@
 package com.subtitleedit.feature.ui
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,10 +10,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.FileOperation
 import com.subtitleedit.R
@@ -53,9 +54,11 @@ internal fun MainBottomBar(
     onProcessMediaSelection: () -> Unit,
     indicatorFrame: (() -> MainTabIndicatorFrame)? = null,
     previewActions: (@Composable () -> Unit)? = null,
+    previewControlsVisible: Boolean = true,
 ) {
     val isSelectionActive = state.selectedTopLevelItem == R.id.nav_directory &&
         (state.selectionCount > 0 || state.pendingOperation != null)
+    val containerColor = if (previewActions != null) directoryImageOverlayColor() else MaterialTheme.colorScheme.surfaceContainer
     val selectionActions: @Composable () -> Unit = {
         SelectionActions(
             operation = state.pendingOperation,
@@ -75,17 +78,24 @@ internal fun MainBottomBar(
             onConfirmDestination = onConfirmDestination,
             onCancelDestination = onCancelDestination,
             canProcessMedia = state.canProcessMediaSelected,
-            onProcessMedia = onProcessMediaSelection
+            onProcessMedia = onProcessMediaSelection,
+            containerColor = containerColor
         )
     }
     if (previewActions != null) {
+        val selectionVisibility = remember { MutableTransitionState(isSelectionActive) }
+        selectionVisibility.targetState = isSelectionActive
         Box(
-            modifier = Modifier.fillMaxWidth().height(68.dp).background(Color.Black).clipToBounds(),
+            modifier = Modifier.fillMaxWidth().clipToBounds(),
             contentAlignment = Alignment.BottomCenter
         ) {
-            if (!isSelectionActive) previewActions()
+            if (previewControlsVisible && selectionVisibility.isIdle && !selectionVisibility.currentState) {
+                Box(Modifier.fillMaxWidth().height(68.dp).background(containerColor), contentAlignment = Alignment.BottomCenter) {
+                    previewActions()
+                }
+            }
             AnimatedVisibility(
-                visible = isSelectionActive,
+                visibleState = selectionVisibility,
                 enter = slideInVertically(AppMotion.enter()) { it } + fadeIn(AppMotion.enter()),
                 exit = slideOutVertically(AppMotion.exit()) { it } + fadeOut(AppMotion.exit()),
                 label = "preview-selection-actions"

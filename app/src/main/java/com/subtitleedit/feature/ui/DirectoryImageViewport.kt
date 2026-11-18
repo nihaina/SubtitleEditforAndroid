@@ -14,19 +14,24 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.lerp
 import androidx.compose.ui.geometry.takeOrElse
+import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -39,12 +44,15 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
+import com.subtitleedit.nativebridge.DirectoryImageSource
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
-private const val MaxPreviewZoom = 10f
+private const val BasePreviewMaxZoom = 10f
 private const val DoubleTapPreviewZoom = 3f
 
 @Composable
@@ -52,27 +60,53 @@ internal fun DirectoryImageViewport(
     image: ImageBitmap,
     quarterTurns: Int,
     canPage: (Float) -> Boolean = { false },
-    onTap: (() -> Unit)? = null
+    onTap: (() -> Unit)? = null,
+    source: DirectoryImageSource? = null,
+    overviewSample: Int = 1,
+    onPageSwipe: (Float) -> Unit = {}
 ) {
     val previewDescription = stringResource(R.string.directory_image_preview)
     val latestCanPage by rememberUpdatedState(canPage)
+    val latestPageSwipe by rememberUpdatedState(onPageSwipe)
     val latestOnTap by rememberUpdatedState(onTap)
     BoxWithConstraints(Modifier.fillMaxSize().clipToBounds()) {
         val width = constraints.maxWidth
         val height = constraints.maxHeight
         if (width <= 0 || height <= 0) return@BoxWithConstraints
+        val viewportSize = IntSize(width, height)
+        val imageSize = source?.size ?: IntSize(image.width, image.height)
+        val mirrored = source?.mirrorHorizontally == true
         val viewportCenter = Offset(width / 2f, height / 2f)
-        val rotatedWidth = if (quarterTurns % 2 == 0) image.width else image.height
-        val rotatedHeight = if (quarterTurns % 2 == 0) image.height else image.width
+        val rotatedWidth = if (quarterTurns % 2 == 0) imageSize.width else imageSize.height
+        val rotatedHeight = if (quarterTurns % 2 == 0) imageSize.height else imageSize.width
         val fit = minOf(width.toFloat() / rotatedWidth, height.toFloat() / rotatedHeight)
         val fittedHalfSize = Offset(rotatedWidth * fit / 2, rotatedHeight * fit / 2)
         val maxOverdrag = with(LocalDensity.current) { minOf(48.dp.toPx(), minOf(width, height) * 0.12f) }
+        val pageSwipeDistance = with(LocalDensity.current) { minOf(64.dp.toPx(), width * 0.18f) }
         val scope = rememberCoroutineScope()
         val decay = rememberSplineBasedDecay<Offset>()
-        val motion = remember(image, quarterTurns, viewportCenter, maxOverdrag, decay) {
-            ImagePreviewMotion(viewportCenter, fittedHalfSize, maxOverdrag, scope, decay)
+        val motion = remember(image, imageSize, quarterTurns, viewportCenter, maxOverdrag, decay) {
+            ImagePreviewMotion(viewportCenter, fittedHalfSize, maxOverdrag, directoryImageMaxZoom(fit), scope, decay)
         }
         DisposableEffect(motion) { onDispose(motion::stop) }
+        var detail by remember(source, motion) { mutableStateOf<DirectoryImageTile?>(null) }
+        if (source != null && overviewSample > 1) {
+            LaunchedEffect(source, motion, overviewSample) {
+                snapshotFlow {
+                    val (zoom, offset) = motion.transform
+                    directoryImageDetail(imageSize, viewportSize, fit * zoom, offset, quarterTurns, mirrored, overviewSample)
+                }.collect { region ->
+                    if (region == null) {
+                        detail = null
+                    } else {
+                        val pixels = withContext(Dispatchers.IO) {
+                            runCatching { source.decode(region.bounds, region.sample) }.getOrNull()
+                        }
+                        if (pixels != null) detail = DirectoryImageTile(region, pixels.asImageBitmap())
+                    }
+                }
+            }
+        }
 
         Canvas(
             Modifier.fillMaxSize()
@@ -86,12 +120,20 @@ internal fun DirectoryImageViewport(
                         onDoubleTap = { tap -> if (!motion.doubleTap(tap)) latestOnTap?.invoke() }
                     )
                 }
-                .pointerInput(motion) {
+                .pointerInput(motion, pageSwipeDistance) {
                     detectImageTransforms(
-                        canPan = { pan -> motion.transform.zoom > 1f || abs(pan.y) > abs(pan.x) || !latestCanPage(pan.x) },
-                        onStart = motion::stop,
+                        canPan = { pan -> abs(pan.y) > abs(pan.x) || !latestCanPage(pan.x) || motion.canPanHorizontally(pan.x) },
+                        onStart = motion::startDrag,
                         onTransform = motion::transformBy,
-                        onEnd = motion::settle
+                        onEnd = { velocity, released ->
+                            val swipe = motion.edgeDrag
+                            if (released && abs(swipe) >= pageSwipeDistance && latestCanPage(swipe)) {
+                                latestPageSwipe(swipe)
+                                motion.settle(Velocity.Zero)
+                            } else {
+                                motion.settle(velocity)
+                            }
+                        }
                     )
                 }
         ) {
@@ -101,10 +143,19 @@ internal fun DirectoryImageViewport(
             withTransform({
                 translate(origin.x, origin.y)
                 rotate(quarterTurns * 90f, Offset.Zero)
-                scale(scale, scale, Offset.Zero)
-                translate(-image.width / 2f, -image.height / 2f)
+                scale(if (mirrored) -scale else scale, scale, Offset.Zero)
+                translate(-imageSize.width / 2f, -imageSize.height / 2f)
             }) {
-                drawImage(image, dstSize = IntSize(image.width, image.height), filterQuality = FilterQuality.Medium)
+                val tile = detail
+                if (tile == null) {
+                    drawImage(image, dstSize = imageSize, filterQuality = FilterQuality.Medium)
+                } else {
+                    val area = tile.region.bounds
+                    clipRect(area.left.toFloat(), area.top.toFloat(), area.right.toFloat(), area.bottom.toFloat(), ClipOp.Difference) {
+                        drawImage(image, dstSize = imageSize, filterQuality = FilterQuality.Medium)
+                    }
+                    drawImage(tile.image, dstOffset = area.topLeft, dstSize = area.size, filterQuality = FilterQuality.Medium)
+                }
             }
         }
     }
@@ -114,10 +165,13 @@ private class ImagePreviewMotion(
     private val center: Offset,
     private val fittedHalfSize: Offset,
     private val maxOverdrag: Float,
+    private val maxZoom: Float,
     private val scope: CoroutineScope,
     private val decay: DecayAnimationSpec<Offset>
 ) {
     var transform by mutableStateOf(ImagePreviewTransform())
+        private set
+    var edgeDrag = 0f
         private set
     private var animation: Job? = null
 
@@ -125,11 +179,22 @@ private class ImagePreviewMotion(
         animation?.cancel()
     }
 
-    fun transformBy(centroid: Offset, zoom: Float, pan: Offset) {
+    fun startDrag() {
+        stop()
+        edgeDrag = 0f
+    }
+
+    fun canPanHorizontally(delta: Float): Boolean =
+        canPanPreviewHorizontally(transform.offset.x, panLimits(fittedHalfSize, center, transform.zoom).x, delta)
+
+    fun transformBy(centroid: Offset, zoom: Float, pan: Offset, horizontalDrag: Boolean) {
         val current = transform
-        val targetZoom = (current.zoom * zoom).coerceIn(1f, MaxPreviewZoom)
+        val targetZoom = (current.zoom * zoom).coerceIn(1f, maxZoom)
         val ratio = targetZoom / current.zoom
         val limits = panLimits(fittedHalfSize, center, targetZoom)
+        edgeDrag = if (horizontalDrag && current.zoom > 1f) {
+            previewEdgeDrag(edgeDrag, current.offset.x, pan.x, limits.x)
+        } else 0f
         val offset = if (zoom == 1f) {
             Offset(
                 elasticImagePan(current.offset.x, pan.x, limits.x, maxOverdrag),
@@ -181,6 +246,21 @@ private class ImagePreviewMotion(
         }
         return true
     }
+}
+
+internal fun directoryImageMaxZoom(originalPixelsToViewportScale: Float): Float =
+    maxOf(BasePreviewMaxZoom, 1f / originalPixelsToViewportScale)
+
+internal fun canPanPreviewHorizontally(offset: Float, limit: Float, delta: Float): Boolean {
+    if (limit <= 0.5f) return false
+    return if (delta > 0f) offset < limit - 0.5f else offset > -limit + 0.5f
+}
+
+internal fun previewEdgeDrag(previous: Float, offset: Float, delta: Float, limit: Float): Float {
+    val requested = offset.coerceIn(-limit, limit) + delta
+    val overflow = requested - requested.coerceIn(-limit, limit)
+    if (overflow == 0f) return if (delta == 0f) previous else 0f
+    return if (previous * overflow > 0f) previous + overflow else overflow
 }
 
 internal fun doubleTapImageTransform(

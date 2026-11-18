@@ -14,7 +14,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -44,7 +43,8 @@ private fun PreviewAction(modifier: Modifier, icon: Int, label: Int, onClick: ()
         Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
         Alignment.CenterHorizontally
     ) {
-        Icon(painterResource(icon), contentDescription = null, Modifier.size(24.dp), tint = Color.White)
-        Text(stringResource(label), color = Color.White, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        val color = MaterialTheme.colorScheme.onSurface
+        Icon(painterResource(icon), contentDescription = null, Modifier.size(24.dp), tint = color)
+        Text(stringResource(label), color = color, style = MaterialTheme.typography.labelMedium, maxLines = 1)
     }
 }

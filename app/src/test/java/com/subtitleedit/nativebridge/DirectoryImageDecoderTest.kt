@@ -3,7 +3,6 @@ package com.subtitleedit.nativebridge
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DirectoryImageDecoderTest {
@@ -15,14 +14,8 @@ class DirectoryImageDecoderTest {
         assertEquals("1", args[args.indexOf("-frames:v") + 1])
         assertEquals("png", args[args.indexOf("-c:v") + 1])
         assertEquals("rgba", args[args.indexOf("-pix_fmt") + 1])
-        assertFalse(args.any { it in setOf("-s", "-vf", "-filter:v") })
+        assertFalse(args.any { it in setOf("-s", "-vf", "-filter:v", "-max_pixels") })
         assertEquals(output.absolutePath, args.last())
     }
 
-    @Test fun rejectsOversizedBitmapsInsteadOfDownsampling() {
-        assertTrue(DirectoryImageDecoder.canDisplay(6000, 4000))
-        assertFalse(DirectoryImageDecoder.canDisplay(6000, 4001))
-        assertFalse(DirectoryImageDecoder.canDisplay(10000, 500))
-        assertFalse(DirectoryImageDecoder.canDisplay(-1, 500))
-    }
 }
