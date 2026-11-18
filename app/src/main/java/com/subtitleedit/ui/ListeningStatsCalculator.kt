@@ -9,6 +9,7 @@ import com.subtitleedit.library.TopListeningItem
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
+import java.util.TreeMap
 
 internal enum class StatsGranularity(val labelRes: Int, val titleRes: Int) {
     DAY(R.string.stats_granularity_day, R.string.stats_summary_today),
@@ -37,7 +38,7 @@ internal data class StatsSummaryData(
 )
 
 internal data class ListeningStatsContent(
-    val allStats: List<ListeningDayStat> = emptyList(),
+    val stats: ListeningStatsIndex = ListeningStatsIndex.Empty,
     val availableYears: List<Int> = emptyList(),
     val heatmapDays: List<StatsHeatmapDay> = emptyList(),
     val sessions: List<ListeningSessionRecord> = emptyList(),
@@ -47,6 +48,25 @@ internal data class ListeningStatsContent(
     val neverPlayed: List<MediaLibraryTrack> = emptyList(),
     val topItemsRange: Pair<String, String>? = null
 )
+
+/** Prepared with each stats snapshot; day/period taps never re-index the whole history. */
+internal class ListeningStatsIndex(rows: List<ListeningDayStat>) {
+    private val byDate = TreeMap<String, ListeningDayStat>().apply {
+        rows.forEach { put(it.date, it) }
+    }
+
+    fun durationOn(date: String): Long = byDate[date]?.durationMs ?: 0L
+
+    fun availableYears(currentYear: Int): List<Int> = StatsCalculator.availableYears(byDate.keys, currentYear)
+
+    fun forEachInRange(start: String, end: String, consume: (ListeningDayStat) -> Unit) {
+        if (start <= end) byDate.subMap(start, true, end, true).values.forEach(consume)
+    }
+
+    companion object {
+        val Empty = ListeningStatsIndex(emptyList())
+    }
+}
 
 /** Date ranges and arithmetic are independent of Android UI and local wall-clock offsets. */
 internal object StatsCalculator {
@@ -61,8 +81,8 @@ internal object StatsCalculator {
         }
     }
 
-    fun availableYears(dates: List<String>, currentYear: Int): List<Int> {
-        val earliest = dates.mapNotNull { parse(it)?.year }.filter { it <= currentYear }.minOrNull() ?: currentYear
+    fun availableYears(dates: Iterable<String>, currentYear: Int): List<Int> {
+        val earliest = dates.asSequence().mapNotNull { parse(it)?.year }.filter { it <= currentYear }.minOrNull() ?: currentYear
         return (currentYear downTo earliest).toList()
     }
 
@@ -139,16 +159,15 @@ internal object StatsCalculator {
     }
 
     fun buildSummary(
-        stats: List<ListeningDayStat>,
+        stats: ListeningStatsIndex,
         currentDate: String,
         selectedDate: String?,
         granularity: StatsGranularity
     ): StatsSummaryData {
         val currentRange = currentRange(currentDate, granularity) ?: return StatsSummaryData()
-        val byDate = stats.associateBy { it.date }
-        val current = totals(byDate, currentRange.first, currentRange.second)
+        val current = totals(stats, currentRange.first, currentRange.second)
         val reference = referenceRange(currentDate, selectedDate, granularity)
-        val previous = reference?.let { totals(byDate, it.start, it.end) } ?: Totals()
+        val previous = reference?.let { totals(stats, it.start, it.end) } ?: Totals()
         return StatsSummaryData(
             totalDurationMs = current.duration,
             totalTrackCount = current.tracks,
@@ -165,14 +184,18 @@ internal object StatsCalculator {
 
     private data class Totals(val duration: Long = 0L, val tracks: Int = 0, val days: Int = 0, val plays: Int = 0)
 
-    private fun totals(byDate: Map<String, ListeningDayStat>, start: String, end: String): Totals {
-        val range = byDate.values.filter { it.date in start..end }
-        return Totals(
-            duration = range.sumOf { it.durationMs.coerceAtLeast(0L) },
-            tracks = range.sumOf { it.trackCount.coerceAtLeast(0) },
-            days = range.count { it.durationMs > 0L || it.trackCount > 0 || it.playCount > 0 },
-            plays = range.sumOf { it.playCount.coerceAtLeast(0) }
-        )
+    private fun totals(stats: ListeningStatsIndex, start: String, end: String): Totals {
+        var duration = 0L
+        var tracks = 0
+        var days = 0
+        var plays = 0
+        stats.forEachInRange(start, end) { row ->
+            duration += row.durationMs.coerceAtLeast(0L)
+            tracks += row.trackCount.coerceAtLeast(0)
+            plays += row.playCount.coerceAtLeast(0)
+            if (row.durationMs > 0L || row.trackCount > 0 || row.playCount > 0) days++
+        }
+        return Totals(duration, tracks, days, plays)
     }
 
     private fun parse(date: String): LocalDate? = runCatching { LocalDate.parse(date) }.getOrNull()

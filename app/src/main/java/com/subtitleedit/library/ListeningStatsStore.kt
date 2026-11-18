@@ -172,20 +172,18 @@ internal object ListeningStatsStore {
     ): List<TopListeningItem> {
         val result = ArrayList<TopListeningItem>()
         db.rawQuery(
-                """SELECT s.media_path,MAX(s.title),MAX(s.artist),MAX(s.album),SUM(s.duration_ms) AS total_dur,
-            (SELECT COUNT(DISTINCT playback_id) FROM listening_day_plays p WHERE p.path=s.media_path AND p.date>=? AND p.date<=?)+
-            COALESCE((SELECT SUM(play_count) FROM legacy_listening_plays p WHERE p.path=s.media_path AND p.date>=? AND p.date<=?),0)
-            FROM listening_sessions s WHERE s.listening_date>=? AND s.listening_date<=?
-            GROUP BY s.media_path HAVING total_dur>0 ORDER BY total_dur DESC,s.media_path LIMIT ?""",
-                arrayOf(
-                    startDate,
-                    endDate,
-                    startDate,
-                    endDate,
-                    startDate,
-                    endDate,
-                    limit.coerceAtLeast(0).toString(),
-                ),
+                // Count play ids only for the groups that survive the duration ranking.
+                """WITH ranked AS (
+                    SELECT s.media_path,MAX(s.title) AS title,MAX(s.artist) AS artist,
+                    MAX(s.album) AS album,SUM(s.duration_ms) AS total_dur
+                    FROM listening_sessions s WHERE s.listening_date>=? AND s.listening_date<=?
+                    GROUP BY s.media_path HAVING total_dur>0 ORDER BY total_dur DESC,s.media_path LIMIT ?
+                )
+                SELECT r.media_path,r.title,r.artist,r.album,r.total_dur,
+                (SELECT COUNT(DISTINCT playback_id) FROM listening_day_plays p WHERE p.path=r.media_path AND p.date>=? AND p.date<=?)+
+                COALESCE((SELECT SUM(play_count) FROM legacy_listening_plays p WHERE p.path=r.media_path AND p.date>=? AND p.date<=?),0)
+                FROM ranked r ORDER BY r.total_dur DESC,r.media_path""",
+                arrayOf(startDate, endDate, limit.coerceAtLeast(0).toString(), startDate, endDate, startDate, endDate),
             )
             .use { c ->
                 while (c.moveToNext()) result +=

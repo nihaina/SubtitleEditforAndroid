@@ -37,12 +37,37 @@ class ListeningStatsCalculatorTest {
             ListeningDayStat("2026-11-01", 0L, 0, 0),
             ListeningDayStat("2026-10-14", 30_000L, 1, 1)
         )
-        val result = StatsCalculator.buildSummary(stats, "2026-11-14", null, StatsGranularity.MONTH)
+        val result = StatsCalculator.buildSummary(ListeningStatsIndex(stats), "2026-11-14", null, StatsGranularity.MONTH)
         assertEquals(180_000L, result.totalDurationMs)
         assertEquals(3, result.totalTrackCount)
         assertEquals(4, result.totalPlayCount)
         assertEquals(2, result.activeDayCount)
         assertEquals(150_000L, result.deltaDurationMs)
+    }
+
+    @Test fun summaryVisitsOnlyTheRequestedDatesInALongRetainedHistory() {
+        val earlier = LocalDate.of(1970, 1, 1)
+        val history = List(20_000) { day -> ListeningDayStat(earlier.plusDays(day.toLong()).toString(), 1_000L, 1, 1) }
+        val index = ListeningStatsIndex(history + listOf(
+            ListeningDayStat("2026-11-13", 80_000L, 2, 1),
+            ListeningDayStat("2026-11-14", 1L, 3, 6),
+            ListeningDayStat("2026-11-14", 100_000L, -1, 4),
+            ListeningDayStat("2026-11-15", 90_000L, 3, 4)
+        ))
+        val visited = mutableListOf<String>()
+        index.forEachInRange("2026-11-13", "2026-11-14") { visited += it.date }
+        assertEquals(listOf("2026-11-13", "2026-11-14"), visited)
+        assertEquals(100_000L, index.durationOn("2026-11-14"))
+        assertEquals(0L, index.durationOn("2026-11-01"))
+
+        val daily = StatsCalculator.buildSummary(index, "2026-11-14", "2026-11-13", StatsGranularity.DAY)
+        assertEquals(100_000L, daily.totalDurationMs)
+        assertEquals(20_000L, daily.deltaDurationMs)
+        assertEquals(0, daily.totalTrackCount)
+        assertEquals(3, daily.deltaPlayCount)
+        val month = StatsCalculator.buildSummary(index, "2026-11-14", null, StatsGranularity.MONTH)
+        assertEquals(180_000L, month.totalDurationMs)
+        assertEquals(2, month.activeDayCount)
     }
 
     @Test fun yearViewStopsAtTodayAndPastYearIncludesDecember() {

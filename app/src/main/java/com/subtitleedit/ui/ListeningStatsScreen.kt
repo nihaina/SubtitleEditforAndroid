@@ -87,7 +87,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
 import com.subtitleedit.library.ListeningDay
-import com.subtitleedit.library.ListeningDayStat
 import com.subtitleedit.library.ListeningSessionRecord
 import com.subtitleedit.library.SharedMediaCache
 import com.subtitleedit.util.SharedFileCache
@@ -134,7 +133,7 @@ internal fun ListeningStatsScreen(
     val selectedDate = pageState.selectedDate
 
     val content = pageState.content ?: ListeningStatsContent()
-    val allStats = content.allStats
+    val stats = content.stats
     val availableYears = content.availableYears.ifEmpty { listOf(currentYear) }
     val heatmapDays = remember(content.heatmapDays, currentDate, selectedYear) {
         content.heatmapDays.takeIf { it.firstOrNull()?.date?.take(4)?.toIntOrNull() == selectedYear }
@@ -180,18 +179,18 @@ internal fun ListeningStatsScreen(
                 if (previous != null && previousQuery != null) {
                     return@withContext previous.copy(
                         heatmapDays = if (previousQuery.selectedYear == year) previous.heatmapDays
-                        else buildHeatmapDays(previous.allStats, year, currentDate),
+                        else buildHeatmapDays(previous.stats, year, currentDate),
                         sessions = if (previousQuery.selectedDate == day) previous.sessions
                         else repository.getSessionsForDate(day),
                         topItems = if (previous.topItemsRange == range) previous.topItems
                         else range?.let { repository.getTopListeningItems(it.first, it.second, limit = 5) }.orEmpty()
                     )
                 }
-                val stats = repository.getAllDailyStats()
+                val index = ListeningStatsIndex(repository.getAllDailyStats())
                 ListeningStatsContent(
-                    allStats = stats,
-                    availableYears = StatsCalculator.availableYears(stats.map { it.date }, currentYear),
-                    heatmapDays = buildHeatmapDays(stats, year, currentDate),
+                    stats = index,
+                    availableYears = index.availableYears(currentYear),
+                    heatmapDays = buildHeatmapDays(index, year, currentDate),
                     sessions = repository.getSessionsForDate(day),
                     topItems = range?.let { repository.getTopListeningItems(it.first, it.second, limit = 5) }.orEmpty(),
                     recentHistory = repository.getPlaybackHistory(limit = 20)
@@ -239,8 +238,8 @@ internal fun ListeningStatsScreen(
         }
     }
 
-    val rawSummary = remember(allStats, currentDate, selectedDate, granularity) {
-        StatsCalculator.buildSummary(allStats, currentDate, selectedDate, granularity)
+    val rawSummary = remember(stats, currentDate, selectedDate, granularity) {
+        traceStats("Stats:summary:aggregate") { StatsCalculator.buildSummary(stats, currentDate, selectedDate, granularity) }
     }
     val summary = rawSummary.copy(referenceLabel = rawSummary.referenceLabelRes?.let { stringResource(it) }
         ?: rawSummary.referenceLabel)
@@ -386,14 +385,13 @@ private data class StatsMeasureTrace(val name: String) : LayoutModifier {
 }
 
 private fun buildHeatmapDays(
-    stats: List<ListeningDayStat>,
+    stats: ListeningStatsIndex,
     year: Int,
     currentDate: String
 ): List<StatsHeatmapDay> {
     val (startDate, endDate) = StatsCalculator.yearRange(year, currentDate)
-    val yearStats = stats.filter { it.date in startDate..endDate }.associateBy { it.date }
     return ListeningDay.datesBetween(startDate, endDate).map { date ->
-        val duration = yearStats[date]?.durationMs ?: 0L
+        val duration = stats.durationOn(date)
         StatsHeatmapDay(date, duration, StatsCalculator.levelFor(duration))
     }
 }

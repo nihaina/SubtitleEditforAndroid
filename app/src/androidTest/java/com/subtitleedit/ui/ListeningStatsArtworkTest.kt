@@ -142,7 +142,7 @@ class ListeningStatsArtworkTest {
     }
 
     private fun content(today: String, items: List<TopListeningItem>) = ListeningStatsContent(
-        allStats = listOf(ListeningDayStat(today, items.sumOf { it.totalDurationMs }, items.size, items.size)),
+        stats = ListeningStatsIndex(listOf(ListeningDayStat(today, items.sumOf { it.totalDurationMs }, items.size, items.size))),
         availableYears = listOf(today.take(4).toInt()),
         topItems = items,
     )

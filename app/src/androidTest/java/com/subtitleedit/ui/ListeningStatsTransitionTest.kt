@@ -207,7 +207,7 @@ class ListeningStatsTransitionTest {
     private fun content(today: String, year: Int): ListeningStatsContent {
         val (start, end) = StatsCalculator.yearRange(year, today)
         return ListeningStatsContent(
-            allStats = listOf(ListeningDayStat(today, durationMs = 120_000L, trackCount = 7, playCount = 9)),
+            stats = ListeningStatsIndex(listOf(ListeningDayStat(today, durationMs = 120_000L, trackCount = 7, playCount = 9))),
             availableYears = listOf(today.take(4).toInt(), year).distinct(),
             heatmapDays = ListeningDay.datesBetween(start, end).map { date ->
                 StatsHeatmapDay(date, if (date == today) 120_000L else 0L, if (date == today) 1 else 0)

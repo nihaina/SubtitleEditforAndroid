@@ -7,7 +7,7 @@ import android.database.sqlite.SQLiteOpenHelper
 
 /** Schema upgrades extend the original tables in place; user collections are never rebuilt. */
 internal class MediaLibraryDatabase(context: Context, name: String = NAME) :
-    SQLiteOpenHelper(context.applicationContext, name, null, 4) {
+    SQLiteOpenHelper(context.applicationContext, name, null, 5) {
 
     init {
         setWriteAheadLoggingEnabled(true)
@@ -18,6 +18,7 @@ internal class MediaLibraryDatabase(context: Context, name: String = NAME) :
         createAccountingTables(db)
         MediaAlbumMetadataStore.createTable(db)
         createPathIndexes(db)
+        createPlaybackRankingIndexes(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -38,6 +39,18 @@ internal class MediaLibraryDatabase(context: Context, name: String = NAME) :
         if (oldVersion < 4) {
             createPathIndexes(db)
         }
+        if (oldVersion < 5) {
+            createPlaybackRankingIndexes(db)
+        }
+    }
+
+    private fun createPlaybackRankingIndexes(db: SQLiteDatabase) {
+        // Match the exact ordering of the bounded ranking queries, including their tie-breakers.
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_playback_history_rank ON playback_history(play_count DESC,played_at_ms DESC,id DESC)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_library_tracks_title_path ON library_tracks(title COLLATE NOCASE,path)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_favorites_title_path ON favorites(title COLLATE NOCASE,path)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_playlist_items_title_path ON playlist_items(title COLLATE NOCASE,path)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_playlist_items_path ON playlist_items(path)")
     }
 
     /**
