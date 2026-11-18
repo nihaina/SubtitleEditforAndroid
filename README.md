@@ -74,7 +74,8 @@
 ## 环境要求
 
 - JDK 17
-- Android SDK 26+
+- Android SDK Platform 37.0、Build Tools 36.0.0（应用最低支持 API 26）
+- Android NDK 28.2.13676358、CMake 3.22.1
 
 ### 构建步骤
 
@@ -89,8 +90,8 @@
 4. 构建 Debug APK（普通版或 QNN 版）
 
    ```bash
-   ./gradlew :app:assembleStandardDebug  # 不包含 QNN 运行库
-   ./gradlew :app:assembleQnnDebug       # arm64 QNN 版
+   bash ./gradlew :app:assembleStandardDebug  # 不包含 QNN 运行库
+   bash ./gradlew :app:assembleQnnDebug      # arm64 QNN 版
    ```
 
    Release 构建使用对应的 `assembleStandardRelease` 和
@@ -98,6 +99,14 @@
    `app/build/outputs/apk/<flavor>/<buildType>/export/`，普通版提供所有
    ABI，QNN 版仅提供 arm64-v8a APK。
 5. 运行应用
+
+### GitHub Actions
+
+[Android CI](.github/workflows/android-ci.yml) 会在推送到 `main`，以及以 `main` 为目标的 PR 新建、更新或重新打开时运行。也可以在 GitHub 的 **Actions → Android CI → Run workflow** 手动启动。CI 会运行普通版的 JVM 单元测试，并构建普通版和 QNN 版 Debug APK。不运行真机或模拟器测试；依赖 `MEDIA_CONVERT_SMOKE_FFMPEG` 的主机烟雾测试会跳过。
+
+- 单元测试报告可在运行详情的 **Artifacts** 中下载。推送到 `main` 和手动运行还会上传普通版 APK（含各 ABI 和通用版）及 QNN 版 `arm64-v8a` APK，保留 7 天。PR 只构建 APK，不上传 APK。
+- 这些 APK 使用 CI 的调试签名，不用于正式更新；如果设备上已有不同签名的同包名应用，无法直接覆盖安装。工作流无需配置签名 Secrets，也不会发布 GitHub Release。
+- 修改 `app/build.gradle.kts` 中的 SDK、NDK 或 CMake 版本时，同步更新工作流中的 SDK 安装列表。升级 llama.cpp 依赖的 KleidiAI 时，也要同步工作流中固定的源码提交。
 
 ## 使用说明
 

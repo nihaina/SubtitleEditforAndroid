@@ -128,6 +128,10 @@ android {
                     "-DANDROID_STL=c++_static",
                     "-DCMAKE_BUILD_TYPE=Release",
                 )
+                // CI checks out the pinned KleidiAI sources before invoking CMake.
+                providers.gradleProperty("kleidiaiSourceDir").orNull?.let { sourceDir ->
+                    arguments("-DFETCHCONTENT_SOURCE_DIR_KLEIDIAI=$sourceDir")
+                }
             }
         }
     }
