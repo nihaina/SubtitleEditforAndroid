@@ -21,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
@@ -34,6 +35,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.flow.collectLatest
 import kotlin.math.abs
 
 @Composable
@@ -46,6 +48,7 @@ internal fun rememberMainTopLevelMotion(pageOrder: List<Int>, selectedItemId: In
 }
 
 private val TabSlideSpec = tween<Float>(300, easing = CubicBezierEasing(.25f, .1f, .25f, 1f))
+private val PagerState.isPageAligned: Boolean get() = !isScrollInProgress && currentPageOffsetFraction == 0f
 
 internal class MainTopLevelMotion(val pager: PagerState) {
     private class Jump(val from: Int, val to: Int) {
@@ -117,8 +120,7 @@ internal fun MainTopLevelPager(
 
     LaunchedEffect(motion, state.selectedTopLevelItem, pageOrder) {
         val page = pageOrder.indexOf(state.selectedTopLevelItem)
-        val atDestination = pager.settledPage == page && !pager.isScrollInProgress &&
-            pager.currentPageOffsetFraction == 0f
+        val atDestination = pager.isPageAligned && pager.currentPage == page
         if (page < 0 || atDestination) return@LaunchedEffect
         requestedPage = page
         if (state.selectedTopLevelItem !in visited) visited.add(state.selectedTopLevelItem)
@@ -131,14 +133,25 @@ internal fun MainTopLevelPager(
         }
     }
     LaunchedEffect(pager, pageOrder) {
-        snapshotFlow { pager.settledPage to pager.isScrollInProgress }.collect { (page, moving) ->
-            if (!moving && requestedPage == null) {
-                val id = pageOrder[page]
-                if (id != latestState.selectedTopLevelItem) latestOnSelected(id)
-            }
+        snapshotFlow {
+            val moving = pager.isScrollInProgress
+            val idlePage = pager.currentPage.takeIf { !moving && requestedPage == null }
+            Triple(moving, idlePage, idlePage != null && !pager.isPageAligned)
+        }.collectLatest { (moving, page, needsAlignment) ->
             if (moving) {
                 focusManager.clearFocus()
                 keyboard?.hide()
+            } else if (page != null) {
+                if (needsAlignment) {
+                    withFrameNanos { }
+                    if (!pager.isScrollInProgress && requestedPage == null &&
+                        pager.currentPage == page && !pager.isPageAligned) {
+                        pager.requestScrollToPage(page)
+                    }
+                } else if (pager.isPageAligned && requestedPage == null && pager.currentPage == page) {
+                    val id = pageOrder.getOrNull(page)
+                    if (id != null && id != latestState.selectedTopLevelItem) latestOnSelected(id)
+                }
             }
         }
     }
@@ -169,7 +182,7 @@ internal fun MainTopLevelPager(
             latestState.copy(selectedTopLevelItem = id, toolbarTitle = "", toolbarHasBack = false,
                 isSearchExpanded = false)
         }
-        val active = selected && pager.settledPage == page && !pager.isScrollInProgress
+        val active = selected && pager.isPageAligned && pager.currentPage == page
         Box(Modifier.fillMaxSize().graphicsLayer {
             translationX = motion.pageTranslation(page) * size.width * if (rtl) -1 else 1
         }.testTag("main-page:$id")) {

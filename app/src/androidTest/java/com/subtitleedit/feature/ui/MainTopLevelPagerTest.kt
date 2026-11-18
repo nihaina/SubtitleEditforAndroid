@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.MutableState
@@ -56,9 +57,11 @@ class MainTopLevelPagerTest {
     private val lifecycles = mutableMapOf<Int, Lifecycle>()
     private val backCalls = mutableListOf<Int>()
     private val selections = mutableListOf<Int>()
+    private val offsetsAtSelection = mutableListOf<Float>()
     private val updates = MutableStateFlow(0)
     private val displayedValues = mutableMapOf<Int, Int>()
     private val horizontalStates = mutableMapOf<Int, ScrollState>()
+    private lateinit var pager: PagerState
 
     @Test fun tapsMoveOpaquePagesHorizontallyAndKeepVisitedUiMounted() {
         val state = showPager()
@@ -112,6 +115,25 @@ class MainTopLevelPagerTest {
         compose.waitForIdle()
         compose.onNodeWithTag("body:1").assertIsDisplayed()
         assertEquals(listOf(2, 1), selections)
+    }
+
+    @Test fun interruptedShortSwipeReturnsToTheSelectedPage() {
+        val state = showPager(initialPageId = 4)
+        leavePagerOffset(0.25f)
+
+        assertPagerAlignedOn(4)
+        assertEquals(4, state.value.selectedTopLevelItem)
+        assertTrue(selections.isEmpty())
+    }
+
+    @Test fun interruptedLongSwipeAlignsOnTheNearestPageBeforeSelectingIt() {
+        val state = showPager(initialPageId = 4)
+        leavePagerOffset(0.75f)
+
+        assertPagerAlignedOn(5)
+        assertEquals(5, state.value.selectedTopLevelItem)
+        assertEquals(listOf(5), selections)
+        assertEquals(listOf(0f), offsetsAtSelection)
     }
 
     @Test fun rapidNonAdjacentTapsSettleOnTheLastRequest() {
@@ -213,15 +235,32 @@ class MainTopLevelPagerTest {
         assertEquals(2, state.value.selectedTopLevelItem)
     }
 
+    private fun leavePagerOffset(fraction: Float) = compose.runOnIdle {
+        pager.dispatchRawDelta(pager.layoutInfo.pageSize * fraction)
+        assertTrue(pager.currentPageOffsetFraction != 0f)
+        assertTrue(!pager.isScrollInProgress)
+    }
+
+    private fun assertPagerAlignedOn(id: Int) {
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(0f, pager.currentPageOffsetFraction, 0f) }
+        val viewport = compose.onNodeWithTag("main-page-pager").fetchSemanticsNode().boundsInRoot
+        assertEquals(viewport, compose.onNodeWithTag("body:$id").fetchSemanticsNode().boundsInRoot)
+    }
+
     private fun showPager(files: List<File> = emptyList(), enabled: Boolean = true,
-        nested: Boolean = false): MutableState<MainActivityScreenState> {
-        val state = mutableStateOf(MainActivityScreenState(selectedTopLevelItem = 1, toolbarTitle = "Directory", files = files))
+        nested: Boolean = false, initialPageId: Int = 1): MutableState<MainActivityScreenState> {
+        val order = listOf(1, 2, 3, 4, 5)
+        val state = mutableStateOf(MainActivityScreenState(selectedTopLevelItem = initialPageId, toolbarTitle = "Directory", files = files))
         compose.setContent {
+            val motion = rememberMainTopLevelMotion(order, state.value.selectedTopLevelItem)
+            SideEffect { pager = motion.pager }
             Box(Modifier.requiredSize(360.dp, 600.dp).background(Color.Magenta)) {
-                MainTopLevelPager(state.value, listOf(1, 2, 3, 4, 5), onSelected = {
+                MainTopLevelPager(state.value, order, onSelected = {
                     selections += it
+                    offsetsAtSelection += pager.currentPageOffsetFraction
                     state.value = state.value.copy(selectedTopLevelItem = it, toolbarTitle = "Page $it")
-                }, userScrollEnabled = enabled) { snapshot, active ->
+                }, userScrollEnabled = enabled, motion = motion) { snapshot, active ->
                     val id = snapshot.selectedTopLevelItem
                     val token = rememberSaveable { "mounted:${(mounts[id] ?: 0) + 1}" }
                     val value = updates.collectRetainedPageState(active).value
