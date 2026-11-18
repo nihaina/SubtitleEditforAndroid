@@ -3,6 +3,7 @@ package com.subtitleedit.feature.ui
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.MutatePriority
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.pager.HorizontalPager
@@ -112,14 +113,26 @@ internal fun MainTopLevelPager(
     val latestState by rememberUpdatedState(state)
     val latestOnSelected by rememberUpdatedState(onSelected)
     val visited = remember { mutableStateListOf(state.selectedTopLevelItem) }
-    val snapshots = remember { mutableMapOf<Int, MainActivityScreenState>() }
+    val snapshots = remember(pageOrder) { mutableMapOf<Int, MainActivityScreenState>() }
     snapshots[state.selectedTopLevelItem] = state
+    var synchronizedOrder by remember(pager) { mutableStateOf(pageOrder) }
     var requestedPage by remember { mutableStateOf<Int?>(null) }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
 
     LaunchedEffect(motion, state.selectedTopLevelItem, pageOrder) {
         val page = pageOrder.indexOf(state.selectedTopLevelItem)
+        if (synchronizedOrder != pageOrder) {
+            val target = page.coerceAtLeast(0)
+            if (!pager.isPageAligned || pager.currentPage != target ||
+                synchronizedOrder.getOrNull(target) != pageOrder.getOrNull(target)) {
+                pager.scroll(MutatePriority.PreventUserInput) {
+                    pager.run { updateCurrentPage(target) }
+                }
+            }
+            synchronizedOrder = pageOrder
+            return@LaunchedEffect
+        }
         val atDestination = pager.isPageAligned && pager.currentPage == page
         if (page < 0 || atDestination) return@LaunchedEffect
         requestedPage = page
@@ -135,7 +148,7 @@ internal fun MainTopLevelPager(
     LaunchedEffect(pager, pageOrder) {
         snapshotFlow {
             val moving = pager.isScrollInProgress
-            val idlePage = pager.currentPage.takeIf { !moving && requestedPage == null }
+            val idlePage = pager.currentPage.takeIf { !moving && requestedPage == null && synchronizedOrder == pageOrder }
             Triple(moving, idlePage, idlePage != null && !pager.isPageAligned)
         }.collectLatest { (moving, page, needsAlignment) ->
             if (moving) {

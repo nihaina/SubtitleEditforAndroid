@@ -1,7 +1,10 @@
 package com.subtitleedit
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -13,6 +16,7 @@ import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.util.DirectoryWatcher
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -25,6 +29,50 @@ class MainDirectoryReturnStateTest {
     @Test fun systemBackRestoresTheParentListViewport() = checkReturn(FileBrowserViewMode.DETAILED)
 
     @Test fun systemBackRestoresTheParentGridAnchor() = checkReturn(FileBrowserViewMode.GRID)
+
+    @Test fun togglingPlayerModeKeepsTheMountedDirectoryAndItsScrollPosition() {
+        val activity = compose.activity
+        val root = File(activity.cacheDir, "directory-mode-${System.nanoTime()}").apply { check(mkdir()) }
+        val folders = (0 until 60).map { File(root, "folder-%03d".format(it)).apply { check(mkdir()) } }
+        val original = screen()
+        try {
+            compose.runOnIdle {
+                call("showTopLevelPage", arrayOf(Int::class.javaPrimitiveType!!), R.id.nav_directory)
+                call("changeFileViewMode", arrayOf(FileBrowserViewMode::class.java), FileBrowserViewMode.DETAILED)
+                load(root)
+            }
+            awaitDirectory(root)
+            val tag = "directory-file:${folders[30].path}"
+            val list = compose.onNodeWithTag("directory-files")
+            list.performScrollToNode(hasTestTag(tag))
+            val row = compose.onNodeWithTag(tag)
+            val listId = list.fetchSemanticsNode().id
+            val rowId = row.fetchSemanticsNode().id
+            val before = position()
+            val files = screen().files
+            val bottomNavigation = hasAnyAncestor(hasTestTag("main-bottom-navigation"))
+            for (enabled in listOf(!original.playerModeEnabled, original.playerModeEnabled)) {
+                compose.onNodeWithTag("directory-player-mode").performClick()
+                val tab = if (enabled) R.string.nav_library else R.string.nav_favorites
+                compose.onNode(hasText(activity.getString(tab)) and bottomNavigation).assertIsDisplayed()
+                compose.onNode(hasText(activity.getString(R.string.nav_directory)) and bottomNavigation).assertIsSelected()
+                assertEquals(enabled, screen().playerModeEnabled)
+                assertEquals(root, screen().currentDirectory)
+                assertSame(files, screen().files)
+                assertEquals(listId, list.fetchSemanticsNode().id)
+                assertEquals(rowId, row.fetchSemanticsNode().id)
+                assertEquals(before, position())
+                row.assertIsDisplayed()
+            }
+        } finally {
+            compose.runOnIdle {
+                if (screen().playerModeEnabled != original.playerModeEnabled) call("togglePlayerMode", emptyArray())
+                call("changeFileViewMode", arrayOf(FileBrowserViewMode::class.java), original.viewMode)
+                original.currentDirectory?.takeIf { it.isDirectory }?.let(::load)
+            }
+            root.deleteRecursively()
+        }
+    }
 
     private fun checkReturn(mode: FileBrowserViewMode) {
         val activity = compose.activity

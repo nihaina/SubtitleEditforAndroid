@@ -196,9 +196,7 @@ internal fun MainActivityScreen(
         categoryRevealRequest?.let { topLevelPagesState.mediaAlbumPage.revealRequest = it }
     }
     val topLevelOrder = remember(state.playerModeEnabled) { bottomNavigationItems(state.playerModeEnabled).map { it.first } }
-    val topLevelMotion = androidx.compose.runtime.key(state.playerModeEnabled) {
-        rememberMainTopLevelMotion(topLevelOrder, state.selectedTopLevelItem)
-    }
+    val topLevelMotion = rememberMainTopLevelMotion(topLevelOrder, state.selectedTopLevelItem)
     var createDialogKind by remember { mutableStateOf<MainCreateItemKind?>(null) }
     var createName by remember { mutableStateOf("") }
     var createExtension by remember { mutableStateOf("txt") }
@@ -243,78 +241,76 @@ internal fun MainActivityScreen(
             .windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.systemBarsIgnoringVisibility))
             .background(MaterialTheme.colorScheme.background)
     ) {
-        androidx.compose.runtime.key(state.playerModeEnabled) {
-            MainTopLevelPager(
-                state = state,
-                pageOrder = topLevelOrder,
-                onSelected = onTopLevelPageSelected,
-                motion = topLevelMotion,
-                userScrollEnabled = createDialogKind == null && mainDialog == null && batchRename == null,
-                modifier = Modifier.weight(1f).fillMaxWidth().background(settingsPageBackground())
-            ) { pageState, pageActive ->
-                val state = pageState
-                val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
-                val isMediaCategoriesPage = state.playerModeEnabled && state.selectedTopLevelItem == R.id.nav_tools
-                val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
-                Column(Modifier.fillMaxSize()) {
-                    if (!isMediaCategoriesPage) MainPageToolbar(
-                        state = state.toolbarState(),
-                        scrollBehavior = scrollBehavior,
-                        searchFocusRequester = searchFocusRequester,
-                        onSearchChanged = onSearchChanged,
-                        onToolbarBack = onToolbarBack,
-                        onTopLevelPageSelected = onTopLevelPageSelected,
-                        onSelectAll = onSelectAll,
-                        onSelectRange = onSelectRange,
-                        onOnlineClicked = onOnlineClicked,
-                        onTogglePlayerMode = onTogglePlayerMode,
-                        onViewModeChanged = onViewModeChanged,
-                        onSortFieldChanged = onSortFieldChanged,
-                        onSortDirectionChanged = onSortDirectionChanged,
-                        onCreateRequested = { kind ->
-                            createDialogKind = kind
-                            createName = ""
-                            createExtension = "txt"
-                            createNameError = null
-                            createExtensionError = null
-                        },
-                        onSearchRequested = onSearchRequested,
-                        onOpenFileManagementSettings = onOpenFileManagementSettings,
-                    )
+        MainTopLevelPager(
+            state = state,
+            pageOrder = topLevelOrder,
+            onSelected = onTopLevelPageSelected,
+            motion = topLevelMotion,
+            userScrollEnabled = createDialogKind == null && mainDialog == null && batchRename == null,
+            modifier = Modifier.weight(1f).fillMaxWidth().background(settingsPageBackground())
+        ) { pageState, pageActive ->
+            val state = pageState
+            val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
+            val isMediaCategoriesPage = state.playerModeEnabled && state.selectedTopLevelItem == R.id.nav_tools
+            val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+            Column(Modifier.fillMaxSize()) {
+                if (!isMediaCategoriesPage) MainPageToolbar(
+                    state = state.toolbarState(),
+                    scrollBehavior = scrollBehavior,
+                    searchFocusRequester = searchFocusRequester,
+                    onSearchChanged = onSearchChanged,
+                    onToolbarBack = onToolbarBack,
+                    onTopLevelPageSelected = onTopLevelPageSelected,
+                    onSelectAll = onSelectAll,
+                    onSelectRange = onSelectRange,
+                    onOnlineClicked = onOnlineClicked,
+                    onTogglePlayerMode = onTogglePlayerMode,
+                    onViewModeChanged = onViewModeChanged,
+                    onSortFieldChanged = onSortFieldChanged,
+                    onSortDirectionChanged = onSortDirectionChanged,
+                    onCreateRequested = { kind ->
+                        createDialogKind = kind
+                        createName = ""
+                        createExtension = "txt"
+                        createNameError = null
+                        createExtensionError = null
+                    },
+                    onSearchRequested = onSearchRequested,
+                    onOpenFileManagementSettings = onOpenFileManagementSettings,
+                )
 
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .background(settingsPageBackground())
-                            .nestedScroll(scrollBehavior.nestedScrollConnection)
-                    ) {
-                        if (isDirectoryPage) {
-                            DirectoryBrowserContent(
-                                state = state,
-                                onScrollPosition = onDirectoryScrollPosition,
-                                onDirectoryBreadcrumbClick = onDirectoryBreadcrumbClick,
-                                onFileClick = onFileClick,
-                                onFileLongClick = onFileLongClick,
-                                listState = directoryListState,
-                                gridState = directoryGridState,
-                                isActive = pageActive,
-                                onRevealFinished = onDirectoryRevealFinished
-                            )
-                        } else {
-                            MainTopLevelPages(
-                                selectedPage = state.selectedTopLevelItem,
-                                activePage = if (pageActive) state.selectedTopLevelItem else -1,
-                                refreshVersion = topLevelPageRefreshVersion,
-                                selectionVersion = topLevelPageSelectionVersion,
-                                state = topLevelPagesState,
-                                playerModeEnabled = state.playerModeEnabled,
-                                viewMode = state.viewMode,
-                                onOpenDirectory = onOpenDirectoryFromFavorites,
-                                onToolbarChanged = onUpdateTopLevelToolbar,
-                                saveableStateHolder = topLevelPageSaveableState
-                            )
-                        }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .background(settingsPageBackground())
+                        .nestedScroll(scrollBehavior.nestedScrollConnection)
+                ) {
+                    if (isDirectoryPage) {
+                        DirectoryBrowserContent(
+                            state = state,
+                            onScrollPosition = onDirectoryScrollPosition,
+                            onDirectoryBreadcrumbClick = onDirectoryBreadcrumbClick,
+                            onFileClick = onFileClick,
+                            onFileLongClick = onFileLongClick,
+                            listState = directoryListState,
+                            gridState = directoryGridState,
+                            isActive = pageActive,
+                            onRevealFinished = onDirectoryRevealFinished
+                        )
+                    } else {
+                        MainTopLevelPages(
+                            selectedPage = state.selectedTopLevelItem,
+                            activePage = if (pageActive) state.selectedTopLevelItem else -1,
+                            refreshVersion = topLevelPageRefreshVersion,
+                            selectionVersion = topLevelPageSelectionVersion,
+                            state = topLevelPagesState,
+                            playerModeEnabled = state.playerModeEnabled,
+                            viewMode = state.viewMode,
+                            onOpenDirectory = onOpenDirectoryFromFavorites,
+                            onToolbarChanged = onUpdateTopLevelToolbar,
+                            saveableStateHolder = topLevelPageSaveableState
+                        )
                     }
                 }
             }

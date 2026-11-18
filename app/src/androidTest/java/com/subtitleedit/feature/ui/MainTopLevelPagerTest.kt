@@ -117,6 +117,21 @@ class MainTopLevelPagerTest {
         assertEquals(listOf(2, 1), selections)
     }
 
+    @Test fun changingTabOrderKeepsTheSelectedDestinationWithoutDispatchingNavigation() {
+        val order = mutableStateOf(listOf(1, 2, 3, 4, 5))
+        val state = showPager(initialPageId = 4, pageOrder = order)
+
+        compose.runOnIdle { order.value = listOf(1, 6, 4, 7, 5) }
+        assertPagerAlignedOn(4)
+        assertEquals(4, state.value.selectedTopLevelItem)
+        assertTrue(selections.isEmpty())
+        assertEquals(1, mounts[4])
+
+        compose.onNodeWithTag("main-page-pager").performTouchInput { swipeLeft() }
+        assertPagerAlignedOn(7)
+        assertEquals(listOf(7), selections)
+    }
+
     @Test fun interruptedShortSwipeReturnsToTheSelectedPage() {
         val state = showPager(initialPageId = 4)
         leavePagerOffset(0.25f)
@@ -249,10 +264,11 @@ class MainTopLevelPagerTest {
     }
 
     private fun showPager(files: List<File> = emptyList(), enabled: Boolean = true,
-        nested: Boolean = false, initialPageId: Int = 1): MutableState<MainActivityScreenState> {
-        val order = listOf(1, 2, 3, 4, 5)
+        nested: Boolean = false, initialPageId: Int = 1,
+        pageOrder: MutableState<List<Int>> = mutableStateOf(listOf(1, 2, 3, 4, 5))): MutableState<MainActivityScreenState> {
         val state = mutableStateOf(MainActivityScreenState(selectedTopLevelItem = initialPageId, toolbarTitle = "Directory", files = files))
         compose.setContent {
+            val order = pageOrder.value
             val motion = rememberMainTopLevelMotion(order, state.value.selectedTopLevelItem)
             SideEffect { pager = motion.pager }
             Box(Modifier.requiredSize(360.dp, 600.dp).background(Color.Magenta)) {
