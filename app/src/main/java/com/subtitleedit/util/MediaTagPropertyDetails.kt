@@ -4,6 +4,7 @@ import android.os.ParcelFileDescriptor
 import com.subtitleedit.MediaTagAudioMetadata
 import com.subtitleedit.MediaTagNative
 import com.subtitleedit.MediaConvertMetadata
+import com.subtitleedit.MediaConvertMetadataField
 import java.io.File
 
 /** The properties dialog uses the same file-tag parser as the audio tag editor. */
@@ -20,13 +21,12 @@ internal object MediaTagPropertyDetails {
         return fromMetadata(metadata)
     }
 
-    internal fun fromMetadata(metadata: MediaConvertMetadata): List<PropertyDetail> {
-        return listOf(
-            "歌曲名" to metadata.title, "歌手" to metadata.artist, "专辑" to metadata.album,
-            "艺术家" to metadata.albumArtist, "作曲" to metadata.composer,
-            "流派" to metadata.genre, "年份" to metadata.year, "音轨号" to metadata.trackNumber,
-            "碟号" to metadata.discNumber, "注释" to metadata.comment,
-            "作词" to metadata.lyricist, "版权" to metadata.copyright, "语言" to metadata.language
-        ).mapNotNull { (label, text) -> text.takeIf { it.isNotBlank() }?.let { PropertyDetail(label, it) } }
+    internal fun fromMetadata(metadata: MediaConvertMetadata, isVideo: Boolean = false): List<PropertyDetail> {
+        return MediaConvertMetadata.audioFields.mapNotNull { field ->
+            val isVideoAuthor = isVideo && field == MediaConvertMetadataField.ARTIST
+            val displayField = if (isVideoAuthor) MediaConvertMetadataField.AUTHOR else field
+            val value = if (isVideoAuthor) metadata.author.ifBlank { metadata.artist } else metadata.value(field)
+            value.takeIf { it.isNotBlank() }?.let { PropertyDetail(displayField.labelResource, it) }
+        }
     }
 }

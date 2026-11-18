@@ -22,10 +22,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import com.subtitleedit.ui.components.MediaInfoComment
 import com.subtitleedit.util.FilePropertiesInfo
 
 internal sealed interface FilePropertiesDialogUiState {
@@ -111,13 +113,14 @@ private fun SingleProperties(
         )
     }
     info.mediaInfoTitle?.let { title ->
-        Text(title, modifier = Modifier.padding(top = 20.dp), style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(title), modifier = Modifier.padding(top = 20.dp), style = MaterialTheme.typography.titleMedium)
         info.mediaDetails.forEach { detail ->
             PropertyRow(
-                detail.label,
+                stringResource(detail.label),
                 detail.value,
                 topSpacing = 12.dp,
-                bottomSpacing = 0.dp
+                bottomSpacing = 0.dp,
+                expandable = detail.label == R.string.media_convert_info_comment
             )
         }
     }
@@ -142,7 +145,8 @@ private fun PropertyRow(
     onClick: (() -> Unit)? = null,
     contentDescription: String? = null,
     topSpacing: androidx.compose.ui.unit.Dp = 0.dp,
-    bottomSpacing: androidx.compose.ui.unit.Dp = 12.dp
+    bottomSpacing: androidx.compose.ui.unit.Dp = 12.dp,
+    expandable: Boolean = false
 ) {
     Row(
         modifier = Modifier.fillMaxWidth()
@@ -160,11 +164,9 @@ private fun PropertyRow(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyLarge
         )
-        Text(
-            value,
-            modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.onSurface,
-            style = MaterialTheme.typography.bodyLarge
-        )
+        val style = MaterialTheme.typography.bodyLarge
+        val color = MaterialTheme.colorScheme.onSurface
+        if (expandable) MediaInfoComment(value, style, color, Modifier.weight(1f))
+        else Text(value, modifier = Modifier.weight(1f), color = color, style = style)
     }
 }

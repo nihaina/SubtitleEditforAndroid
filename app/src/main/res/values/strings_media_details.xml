@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="media_details_video_title">视频信息</string>
+    <string name="media_details_audio_title">音频信息</string>
+    <string name="media_details_bitrate">比特率</string>
+    <string name="media_details_sample_rate">采样率</string>
+    <string name="media_details_bit_depth">采样精度</string>
+    <string name="media_details_format">格式</string>
+    <string name="media_details_codec">编码格式</string>
+    <string name="media_details_audio_codec">音频编码格式</string>
+    <string name="media_details_video_codec">视频编码格式</string>
+    <string name="media_details_channels">声道数</string>
+    <string name="media_details_resolution">分辨率</string>
+    <string name="media_details_frame_rate">帧率</string>
+    <string name="media_details_open_comment">查看完整注释</string>
+</resources>

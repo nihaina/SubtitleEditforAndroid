@@ -68,6 +68,7 @@ import com.subtitleedit.util.FavoriteDirectoryStore
 import com.subtitleedit.ui.MediaCategory
 import com.subtitleedit.ui.MediaCategoryRevealRequest
 import com.subtitleedit.ui.components.AppDialog
+import com.subtitleedit.ui.components.MediaInfoComment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
@@ -89,6 +90,7 @@ internal fun PlayerTrackInfoDialog(
     val context = LocalContext.current
     val track = state.currentTrack
     val details = state.trackInfo
+    val isVideo = details?.isVideo ?: (track?.isVideo == true)
     val unknownText = stringResource(R.string.player_info_unknown)
     var canNavigateCategories by remember(details?.filePath) { mutableStateOf(false) }
     LaunchedEffect(details?.filePath, onNavigateToCategory != null) {
@@ -141,7 +143,7 @@ internal fun PlayerTrackInfoDialog(
                         tint = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = stringResource(R.string.player_info_title),
+                        text = stringResource(if (isVideo) R.string.media_details_video_title else R.string.player_info_title),
                         style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -226,19 +228,10 @@ internal fun PlayerTrackInfoDialog(
                             }
                         )
 
-                        TrackInfoField(
-                            label = stringResource(R.string.player_info_duration),
-                            value = details.durationText.ifBlank { unknownText }
-                        )
-                        TrackInfoField(
-                            label = stringResource(R.string.player_info_file_size),
-                            value = details.fileSizeText.ifBlank { unknownText }
-                        )
-
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                         TrackInfoField(
-                            label = stringResource(R.string.player_info_genre),
+                            label = R.string.media_convert_info_genre,
                             value = details.genre.ifBlank { unknownText },
                             showActionIcon = true,
                             actionTag = "player-info-open:GENRES",
@@ -247,12 +240,12 @@ internal fun PlayerTrackInfoDialog(
                             }
                         )
                         TrackInfoField(
-                            label = stringResource(R.string.player_info_track_title),
+                            label = R.string.media_convert_info_title,
                             value = details.title.ifBlank { unknownText }
                         )
                         TrackInfoField(
-                            label = stringResource(R.string.player_info_artist),
-                            value = details.artist.ifBlank { unknownText },
+                            label = if (isVideo) R.string.media_convert_info_author else R.string.media_convert_info_artist,
+                            value = (if (isVideo) details.author else details.artist).ifBlank { unknownText },
                             showActionIcon = true,
                             actionTag = "player-info-open:SINGERS",
                             onActionClick = categoryNavigator?.let { navigate ->
@@ -260,7 +253,7 @@ internal fun PlayerTrackInfoDialog(
                             }
                         )
                         TrackInfoField(
-                            label = stringResource(R.string.player_info_album),
+                            label = R.string.media_convert_info_album,
                             value = details.album.ifBlank { unknownText },
                             showActionIcon = true,
                             actionTag = "player-info-open:ALBUMS",
@@ -269,11 +262,11 @@ internal fun PlayerTrackInfoDialog(
                             }
                         )
                         TrackInfoField(
-                            label = stringResource(R.string.player_info_year),
+                            label = R.string.media_convert_info_year,
                             value = details.year.ifBlank { unknownText }
                         )
                         TrackInfoField(
-                            label = stringResource(R.string.player_info_album_artist),
+                            label = R.string.media_convert_info_album_artist,
                             value = details.albumArtist.ifBlank { unknownText },
                             showActionIcon = true,
                             actionTag = "player-info-open:ARTISTS",
@@ -282,7 +275,7 @@ internal fun PlayerTrackInfoDialog(
                             }
                         )
                         TrackInfoField(
-                            label = stringResource(R.string.player_info_composer),
+                            label = R.string.media_convert_info_composer,
                             value = details.composer.ifBlank { unknownText },
                             showActionIcon = true,
                             actionTag = "player-info-open:COMPOSERS",
@@ -291,29 +284,36 @@ internal fun PlayerTrackInfoDialog(
                             }
                         )
                         TrackInfoField(
-                            label = stringResource(R.string.player_info_track_number),
+                            label = R.string.media_convert_info_track_number,
                             value = details.trackNumber.ifBlank { "0" }
                         )
                         TrackInfoField(
-                            label = stringResource(R.string.player_info_disc_number),
+                            label = R.string.media_convert_info_disc_number,
                             value = details.discNumber.ifBlank { "1" }
                         )
                         TrackInfoField(
-                            label = stringResource(R.string.player_info_comment),
-                            value = details.comment.ifBlank { unknownText }
+                            label = R.string.media_convert_info_comment,
+                            value = details.comment.ifBlank { unknownText },
+                            dialogWindow = { if (immersive) PlayerPanelImmersiveWindow() }
                         )
                         TrackInfoField(
-                            label = stringResource(R.string.player_info_lyricist),
+                            label = R.string.media_convert_info_lyricist,
                             value = details.lyricist.ifBlank { unknownText }
                         )
                         TrackInfoField(
-                            label = stringResource(R.string.player_info_copyright),
+                            label = R.string.media_convert_info_copyright,
                             value = details.copyright.ifBlank { unknownText }
                         )
                         TrackInfoField(
-                            label = stringResource(R.string.player_info_language),
+                            label = R.string.media_convert_info_language,
                             value = details.language.ifBlank { unknownText }
                         )
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                        TrackInfoField(R.string.player_info_duration, details.durationText.ifBlank { unknownText })
+                        details.technicalDetails.forEach { detail -> TrackInfoField(detail.label, detail.value) }
+                        TrackInfoField(R.string.player_info_file_size, details.fileSizeText.ifBlank { unknownText })
                     }
                 }
 
@@ -388,26 +388,28 @@ private fun TrackInfoLocationRow(
 
 @Composable
 private fun TrackInfoField(
-    label: String,
+    @androidx.annotation.StringRes label: Int,
     value: String,
     showActionIcon: Boolean = false,
     onActionClick: (() -> Unit)? = null,
-    actionTag: String? = null
+    actionTag: String? = null,
+    dialogWindow: @Composable () -> Unit = {}
 ) {
+    val labelText = stringResource(label)
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
-                text = label,
+                text = labelText,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface
             )
             if (showActionIcon && onActionClick != null) {
                 Icon(
                     painter = painterResource(R.drawable.ic_open_in_new),
-                    contentDescription = stringResource(R.string.player_info_open_category, label),
+                    contentDescription = stringResource(R.string.player_info_open_category, labelText),
                     modifier = Modifier
                         .size(16.dp)
                         .then(if (actionTag != null) Modifier.testTag(actionTag) else Modifier)
@@ -418,11 +420,10 @@ private fun TrackInfoField(
             }
         }
         Spacer(Modifier.height(2.dp))
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        val style = MaterialTheme.typography.bodyMedium
+        val color = MaterialTheme.colorScheme.onSurfaceVariant
+        if (label == R.string.media_convert_info_comment) MediaInfoComment(value, style, color, dialogWindow = dialogWindow)
+        else Text(value, style = style, color = color)
     }
 }
 

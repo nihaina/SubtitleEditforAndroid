@@ -40,11 +40,17 @@ class MediaTagNativeWorkflowTest {
             for (field in MediaConvertMetadata.audioFields) assertEquals("$extension $field",
                 expected.value(field), saved.metadata.value(field))
             assertEquals(extension, hash, audioHash(file, root))
-            val properties = MediaFilePropertiesReader.read(file, readTags = true).mediaDetails.associate { it.label to it.value }
-            assertEquals(extension, expected.title, properties["歌曲名"])
-            assertEquals(extension, expected.artist, properties["歌手"])
-            assertEquals(extension, expected.albumArtist, properties["艺术家"])
-            assertEquals(extension, expected.album, properties["专辑"])
+            val properties = MediaFilePropertiesReader.read(file, readTags = true, cacheDirectory = app.cacheDir)
+                .mediaDetails.associate { it.label to it.value }
+            assertEquals(extension, expected.title, properties[R.string.media_convert_info_title])
+            assertEquals(extension, expected.artist, properties[R.string.media_convert_info_artist])
+            assertEquals(extension, expected.albumArtist, properties[R.string.media_convert_info_album_artist])
+            assertEquals(extension, expected.album, properties[R.string.media_convert_info_album])
+            if (extension == "wav") {
+                assertEquals("48000 Hz", properties[R.string.media_details_sample_rate])
+                assertEquals("24 bit", properties[R.string.media_details_bit_depth])
+                assertTrue(properties[R.string.media_details_codec].orEmpty().startsWith("PCM"))
+            }
             val cleared = MediaConvertMetadata.audioFields.fold(MediaConvertMetadata()) { value, field -> value.withValue(field, "") }
             val blank = MediaTagAudioRepository.write(file, cleared)
             for (field in MediaConvertMetadata.audioFields) assertEquals("$extension $field", "", blank.metadata.value(field))

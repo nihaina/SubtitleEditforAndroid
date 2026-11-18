@@ -684,7 +684,8 @@ private fun PlayerQuickActionsRow(
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_info),
-                contentDescription = stringResource(R.string.player_action_info),
+                contentDescription = stringResource(if (state.currentTrack?.isVideo == true) R.string.media_details_video_title
+                    else R.string.player_info_title),
                 modifier = Modifier.size(20.dp),
                 tint = PlayerControlColors.Secondary
             )

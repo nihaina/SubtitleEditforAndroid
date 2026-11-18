@@ -7,16 +7,23 @@ import android.media.ThumbnailUtils
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import com.subtitleedit.MediaConvertMetadata
+import com.subtitleedit.MediaConvertMetadataField
 import com.subtitleedit.MediaTagAudioRepository
 import com.subtitleedit.model.BrowserFileMetadata
 import com.subtitleedit.util.FfprobeMediaInformation
 import com.subtitleedit.util.FileTypePolicy
+import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.MediaTechnicalDetails
 import java.io.File
 import java.util.Locale
 
 internal data class SharedMediaMetadata(val tags: MediaConvertMetadata, val durationMs: Long)
 internal data class SharedMediaPreview(val bitmap: Bitmap?, val durationMs: Long)
-private data class SoftwareMediaTags(val value: MediaConvertMetadata = MediaConvertMetadata(), val supported: Boolean = false)
+private data class SoftwareMediaTags(
+    val value: MediaConvertMetadata = MediaConvertMetadata(),
+    val supported: Boolean = false,
+    val technical: MediaTechnicalDetails? = null
+)
 
 /** Application-wide media data; directory previews and library scans enrich the same version. */
 internal object SharedMediaCache {
@@ -33,7 +40,7 @@ internal object SharedMediaCache {
         // Matroska's Segment Info title and FFmpeg's ALBUM_ARTIST are outside
         // TagLib's normalized property map even when it recognizes the container.
         val needsProbe = !data.tags.supported || metadata.file.extension.lowercase(Locale.ROOT) in matroskaExtensions
-        val tags = if (needsProbe) cacheDirectory?.let { softwareDetails(metadata, it) } ?: data.tags.value
+        val tags = if (needsProbe) cacheDirectory?.let { softwareDetails(metadata, it)?.value } ?: data.tags.value
             else data.tags.value
         return SharedMediaMetadata(tags, data.durationMs)
     }
@@ -59,11 +66,26 @@ internal object SharedMediaCache {
             artwork = MediaArtworkRequest(targetSize.coerceIn(1, 2048), allowVideoFrame)).artwork
     }
 
-    /** Detailed video tags are an additional field, never a prerequisite for indexing. */
-    fun videoDetails(metadata: BrowserFileMetadata, cacheDirectory: File): MediaConvertMetadata? =
-        softwareDetails(metadata, cacheDirectory)
+    fun readInfo(metadata: BrowserFileMetadata, cacheDirectory: File?): SharedMediaMetadata {
+        val snapshot = read(metadata, cacheDirectory)
+        if (!metadata.isRegularFile || !FileTypePolicy.isVideo(metadata.file) || cacheDirectory == null) return snapshot
+        val videoTags = softwareDetails(metadata, cacheDirectory)?.value ?: return snapshot
+        val fields = MediaConvertMetadata.audioFields + MediaConvertMetadataField.AUTHOR
+        val tags = fields.fold(snapshot.tags) { current, field ->
+            val value = videoTags.value(field)
+            if (value.isBlank()) current else current.withValue(field, value)
+        }.copy(editedFields = emptySet())
+        return snapshot.copy(tags = tags)
+    }
 
-    private fun softwareDetails(metadata: BrowserFileMetadata, cacheDirectory: File): MediaConvertMetadata? =
+    fun technicalDetails(metadata: BrowserFileMetadata, cacheDirectory: File?): MediaTechnicalDetails? {
+        val isVideo = FileTypePolicy.isVideo(metadata.file)
+        if (!metadata.isRegularFile || (!isVideo && !FileUtils.isAudioFile(metadata.file))) return null
+        return cacheDirectory?.let { softwareDetails(metadata, it)?.technical }
+            ?: MediaTechnicalDetails.fromPlatform(metadata.file, isVideo)
+    }
+
+    private fun softwareDetails(metadata: BrowserFileMetadata, cacheDirectory: File): SoftwareMediaTags? =
         cache.details(metadata) {
             runCatching {
                 val info = ParcelFileDescriptor.open(metadata.file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
@@ -80,9 +102,9 @@ internal object SharedMediaCache {
                         tags.keys().asSequence().firstOrNull { it.equals(key, ignoreCase = true) }
                             ?.let { tags.optString(it).takeIf { value -> value.isNotBlank() && !value.equals("null", true) } }
                     }
-                }, supported = true)
+                }, supported = true, technical = MediaTechnicalDetails.fromProbe(metadata.file, info, primaryAudio, primaryVideo))
             }.getOrNull()
-        }?.value
+        }
 
     fun invalidate(path: String) = cache.invalidate(path)
     fun clear() = cache.clear()

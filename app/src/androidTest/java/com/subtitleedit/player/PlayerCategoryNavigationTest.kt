@@ -44,11 +44,11 @@ class PlayerCategoryNavigationTest {
         f.writeTags(track)
         f.open(track).use { session ->
             val destinations = listOf(
-                Destination(MediaCategory.GENRES, "genre", R.string.player_info_genre, "Reveal Genre"),
-                Destination(MediaCategory.SINGERS, "singer", R.string.player_info_artist, "Reveal Singer"),
-                Destination(MediaCategory.ALBUMS, "album", R.string.player_info_album, "Reveal Album"),
-                Destination(MediaCategory.ARTISTS, "artist", R.string.player_info_album_artist, "Reveal Artist"),
-                Destination(MediaCategory.COMPOSERS, "composer", R.string.player_info_composer, "Reveal Composer")
+                Destination(MediaCategory.GENRES, "genre", R.string.media_convert_info_genre, "Reveal Genre"),
+                Destination(MediaCategory.SINGERS, "singer", R.string.media_convert_info_artist, "Reveal Singer"),
+                Destination(MediaCategory.ALBUMS, "album", R.string.media_convert_info_album, "Reveal Album"),
+                Destination(MediaCategory.ARTISTS, "artist", R.string.media_convert_info_album_artist, "Reveal Artist"),
+                Destination(MediaCategory.COMPOSERS, "composer", R.string.media_convert_info_composer, "Reveal Composer")
             )
             destinations.forEach { destination ->
                 openInfo(session.model)
@@ -88,7 +88,7 @@ class PlayerCategoryNavigationTest {
         f.open(track).use { session ->
             openInfo(session.model)
             awaitState(session.model, "the file has an empty genre tag") { it.trackInfo?.genre == "" }
-            clickInfoLink(Destination(MediaCategory.GENRES, "genre", R.string.player_info_genre,
+            clickInfoLink(Destination(MediaCategory.GENRES, "genre", R.string.media_convert_info_genre,
                 app.getString(R.string.media_genre_unknown)))
             await("unknown genre contains the selected song") {
                 findTag("genre-detail") != null && findText(app.getString(R.string.media_genre_unknown)) != null &&

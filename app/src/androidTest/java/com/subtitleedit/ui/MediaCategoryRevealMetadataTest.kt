@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.ReturnCode
+import com.subtitleedit.R
 import com.subtitleedit.library.MediaAlbumTrack
 import com.subtitleedit.library.MediaLibraryTrack
 import com.subtitleedit.library.PlayerTrackMetadataReader
@@ -44,8 +45,8 @@ class MediaCategoryRevealMetadataTest {
             assertEquals(3, target.trackNumber)
             assertEquals(2, target.discNumber)
             val properties = MediaFilePropertiesReader.read(file, readTags = true, cacheDirectory = context.cacheDir)
-            assertTrue(properties.mediaDetails.any { it.label == "歌曲名" && it.value == "Current title" })
-            assertTrue(properties.mediaDetails.any { it.label == "艺术家" && it.value == "Current artist" })
+            assertTrue(properties.mediaDetails.any { it.label == R.string.media_convert_info_title && it.value == "Current title" })
+            assertTrue(properties.mediaDetails.any { it.label == R.string.media_convert_info_album_artist && it.value == "Current artist" })
 
             val old = MediaAlbumTrack(MediaLibraryTrack(file.path, "Stale title", addedAtMs = 123L),
                 genre = "Stale genre", playCount = 7, lastPlayedAtMs = 456L)

@@ -5,9 +5,10 @@ import com.subtitleedit.MediaConvertMetadata
 import com.subtitleedit.model.BrowserFileMetadata
 import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.PropertyDetail
 import com.subtitleedit.util.SharedFileCache
+import com.subtitleedit.util.formatMediaDuration
 import java.io.File
-import java.util.Locale
 
 internal data class PlayerTrackDetails(
     val fileName: String,
@@ -18,6 +19,7 @@ internal data class PlayerTrackDetails(
     val title: String,
     val album: String,
     val artist: String,
+    val author: String,
     val albumArtist: String,
     val composer: String,
     val genre: String,
@@ -29,6 +31,7 @@ internal data class PlayerTrackDetails(
     val copyright: String,
     val language: String,
     val durationText: String,
+    val technicalDetails: List<PropertyDetail>,
     val fileSizeText: String,
     val canEditTags: Boolean,
     val tagsAvailable: Boolean = true
@@ -72,18 +75,12 @@ internal object PlayerTrackMetadataReader {
         val metadata = SharedFileCache.attributes.get(file)
         if (metadata != null && fallbackDurationMs > 0L) SharedMediaCache.seedDuration(metadata, fallbackDurationMs)
         val snapshot = metadata?.let {
-            if (readTags) SharedMediaCache.read(it, cacheDirectory)
+            if (readTags) SharedMediaCache.readInfo(it, cacheDirectory)
             else SharedMediaMetadata(MediaConvertMetadata(), SharedMediaCache.duration(it))
         } ?: SharedMediaMetadata(MediaConvertMetadata(), 0L)
         val isVideo = FileTypePolicy.isVideo(file)
-        val videoTags = if (readTags && isVideo && cacheDirectory != null && metadata != null) {
-            SharedMediaCache.videoDetails(metadata, cacheDirectory)
-        } else null
-        val tags = if (videoTags == null) snapshot.tags else {
-            MediaConvertMetadata.audioFields.fold(snapshot.tags) { current, field ->
-                videoTags.value(field).takeIf { it.isNotBlank() }?.let { current.withValue(field, it) } ?: current
-            }.copy(editedFields = emptySet())
-        }
+        val technical = metadata?.let { SharedMediaCache.technicalDetails(it, cacheDirectory) }
+        val tags = snapshot.tags
         return PlayerTrackDetails(
             fileName = file.name,
             filePath = file.absolutePath,
@@ -93,6 +90,7 @@ internal object PlayerTrackMetadataReader {
             title = tags.title.ifBlank { file.nameWithoutExtension },
             album = tags.album,
             artist = tags.artist,
+            author = tags.author.ifBlank { tags.artist },
             albumArtist = tags.albumArtist,
             composer = tags.composer,
             genre = tags.genre,
@@ -103,7 +101,9 @@ internal object PlayerTrackMetadataReader {
             comment = tags.comment,
             copyright = tags.copyright,
             language = tags.language,
-            durationText = formatDuration(fallbackDurationMs.takeIf { it > 0L } ?: snapshot.durationMs),
+            durationText = formatMediaDuration(fallbackDurationMs.takeIf { it > 0L }
+                ?: technical?.durationMs?.takeIf { it > 0L } ?: snapshot.durationMs),
+            technicalDetails = technical?.properties(isVideo).orEmpty(),
             fileSizeText = metadata?.takeIf { it.isRegularFile }?.let { FileUtils.formatFileSize(it.size) }.orEmpty(),
             canEditTags = metadata?.isRegularFile == true && (FileUtils.isAudioFile(file) || isVideo),
             tagsAvailable = readTags
@@ -113,11 +113,4 @@ internal object PlayerTrackMetadataReader {
     private fun formatStorageLocation(parent: String): String = parent
         .replaceFirst(Regex("^/storage/emulated/0(?=/|$)"), "内部存储器")
         .split('/').filter { it.isNotBlank() }.joinToString(" › ")
-
-    private fun formatDuration(ms: Long): String {
-        if (ms <= 0L) return ""
-        val seconds = ms / 1000L
-        return if (seconds >= 3600L) String.format(Locale.US, "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
-        else String.format(Locale.US, "%02d:%02d", seconds / 60, seconds % 60)
-    }
 }

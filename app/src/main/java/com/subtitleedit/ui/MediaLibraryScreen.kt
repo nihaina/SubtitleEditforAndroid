@@ -99,6 +99,7 @@ import com.subtitleedit.player.putPlayerQueueSource
 import com.subtitleedit.player.formatPlaybackTime
 import com.subtitleedit.ui.components.AppAlertDialog
 import com.subtitleedit.ui.components.AppDialog
+import com.subtitleedit.ui.components.MediaInfoComment
 import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.ui.theme.cardContainer
 import kotlinx.coroutines.CancellationException
@@ -1242,26 +1243,30 @@ internal fun MediaFileInfoDialog(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    FileInfoField(stringResource(R.string.player_info_file_name), current.fileName)
+                    FileInfoField(R.string.player_info_file_name, current.fileName)
                     FileInfoField(
-                        stringResource(R.string.player_info_location),
+                        R.string.player_info_location,
                         current.locationDisplay.ifBlank { current.filePath }
                     )
-                    FileInfoField(stringResource(R.string.player_info_duration), current.durationText.ifBlank { unknown })
-                    FileInfoField(stringResource(R.string.player_info_file_size), current.fileSizeText.ifBlank { unknown })
-                    FileInfoField(stringResource(R.string.player_info_genre), current.genre.ifBlank { unknown })
-                    FileInfoField(stringResource(R.string.player_info_track_title), current.title.ifBlank { unknown })
-                    FileInfoField(stringResource(R.string.player_info_artist), current.artist.ifBlank { unknown })
-                    FileInfoField(stringResource(R.string.player_info_album), current.album.ifBlank { unknown })
-                    FileInfoField(stringResource(R.string.player_info_year), current.year.ifBlank { unknown })
-                    FileInfoField(stringResource(R.string.player_info_album_artist), current.albumArtist.ifBlank { unknown })
-                    FileInfoField(stringResource(R.string.player_info_composer), current.composer.ifBlank { unknown })
-                    FileInfoField(stringResource(R.string.player_info_track_number), current.trackNumber.ifBlank { "0" })
-                    FileInfoField(stringResource(R.string.player_info_disc_number), current.discNumber.ifBlank { "1" })
-                    FileInfoField(stringResource(R.string.player_info_comment), current.comment.ifBlank { unknown })
-                    FileInfoField(stringResource(R.string.player_info_lyricist), current.lyricist.ifBlank { unknown })
-                    FileInfoField(stringResource(R.string.player_info_copyright), current.copyright.ifBlank { unknown })
-                    FileInfoField(stringResource(R.string.player_info_language), current.language.ifBlank { unknown })
+                    FileInfoField(R.string.player_info_duration, current.durationText.ifBlank { unknown })
+                    current.technicalDetails.forEach { detail -> FileInfoField(detail.label, detail.value) }
+                    FileInfoField(R.string.player_info_file_size, current.fileSizeText.ifBlank { unknown })
+                    FileInfoField(R.string.media_convert_info_genre, current.genre.ifBlank { unknown })
+                    FileInfoField(R.string.media_convert_info_title, current.title.ifBlank { unknown })
+                    FileInfoField(
+                        if (current.isVideo) R.string.media_convert_info_author else R.string.media_convert_info_artist,
+                        (if (current.isVideo) current.author else current.artist).ifBlank { unknown }
+                    )
+                    FileInfoField(R.string.media_convert_info_album, current.album.ifBlank { unknown })
+                    FileInfoField(R.string.media_convert_info_year, current.year.ifBlank { unknown })
+                    FileInfoField(R.string.media_convert_info_album_artist, current.albumArtist.ifBlank { unknown })
+                    FileInfoField(R.string.media_convert_info_composer, current.composer.ifBlank { unknown })
+                    FileInfoField(R.string.media_convert_info_track_number, current.trackNumber.ifBlank { "0" })
+                    FileInfoField(R.string.media_convert_info_disc_number, current.discNumber.ifBlank { "1" })
+                    FileInfoField(R.string.media_convert_info_comment, current.comment.ifBlank { unknown }, immersive)
+                    FileInfoField(R.string.media_convert_info_lyricist, current.lyricist.ifBlank { unknown })
+                    FileInfoField(R.string.media_convert_info_copyright, current.copyright.ifBlank { unknown })
+                    FileInfoField(R.string.media_convert_info_language, current.language.ifBlank { unknown })
                 }
             }
         },
@@ -1284,19 +1289,21 @@ internal fun MediaFileInfoDialog(
 }
 
 @Composable
-private fun FileInfoField(label: String, value: String) {
+private fun FileInfoField(@androidx.annotation.StringRes label: Int, value: String, immersive: Boolean = false) {
     Column {
         Text(
-            text = label,
+            text = stringResource(label),
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurface
         )
         Spacer(Modifier.height(2.dp))
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        val style = MaterialTheme.typography.bodyMedium
+        val color = MaterialTheme.colorScheme.onSurfaceVariant
+        if (label == R.string.media_convert_info_comment) {
+            MediaInfoComment(value, style, color, dialogWindow = {
+                if (immersive) com.subtitleedit.player.PlayerPanelImmersiveWindow()
+            })
+        } else Text(value, style = style, color = color)
     }
 }
 

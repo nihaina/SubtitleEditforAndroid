@@ -5,7 +5,25 @@ import java.util.Locale
 internal enum class MediaConvertCoverMode { DEFAULT, NONE, CUSTOM }
 internal enum class MediaConvertMetadataField {
     TITLE, AUTHOR, COMMENT, GENRE, ARTIST, ALBUM, YEAR,
-    ALBUM_ARTIST, COMPOSER, TRACK_NUMBER, DISC_NUMBER, LYRICIST, COPYRIGHT, LANGUAGE
+    ALBUM_ARTIST, COMPOSER, TRACK_NUMBER, DISC_NUMBER, LYRICIST, COPYRIGHT, LANGUAGE;
+
+    @get:androidx.annotation.StringRes
+    val labelResource: Int get() = when (this) {
+        TITLE -> R.string.media_convert_info_title
+        AUTHOR -> R.string.media_convert_info_author
+        COMMENT -> R.string.media_convert_info_comment
+        GENRE -> R.string.media_convert_info_genre
+        ARTIST -> R.string.media_convert_info_artist
+        ALBUM -> R.string.media_convert_info_album
+        YEAR -> R.string.media_convert_info_year
+        ALBUM_ARTIST -> R.string.media_convert_info_album_artist
+        COMPOSER -> R.string.media_convert_info_composer
+        TRACK_NUMBER -> R.string.media_convert_info_track_number
+        DISC_NUMBER -> R.string.media_convert_info_disc_number
+        LYRICIST -> R.string.media_convert_info_lyricist
+        COPYRIGHT -> R.string.media_convert_info_copyright
+        LANGUAGE -> R.string.media_convert_info_language
+    }
 }
 
 internal data class MediaConvertMetadata(

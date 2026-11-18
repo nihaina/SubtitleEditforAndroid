@@ -15,6 +15,6 @@
     <string name="player_end_repeat_queue">重复同一队列</string>
     <string name="player_end_simple">简单</string>
     <string name="player_end_advanced">高级</string>
-    <string name="player_settings_advanced_options">高级选项</string>
+    <string name="player_settings_advanced_options">更多播放模式</string>
     <string name="player_end_reset">恢复默认设置</string>
 </resources>

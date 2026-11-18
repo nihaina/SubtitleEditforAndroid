@@ -12,6 +12,7 @@ import com.subtitleedit.MediaConvertMetadata
 import com.subtitleedit.MediaConvertMetadataField
 import com.subtitleedit.MediaTagAudioRepository
 import com.subtitleedit.MediaTagEditorViewModel
+import com.subtitleedit.R
 import com.subtitleedit.feature.ui.MainFilePreviewLoader
 import com.subtitleedit.player.PlayerMediaNotificationMetadata
 import com.subtitleedit.player.PlayerTrack
@@ -64,8 +65,11 @@ class MediaReadPolicyTest {
             assertBlueCover("Ordinary information views temporarily read tags and cover", information.coverBitmap)
             val properties = MediaFilePropertiesReader.read(file, readTags = true, cacheDirectory = app.cacheDir)
                 .mediaDetails.associate { it.label to it.value }
-            assertEquals("Embedded title", properties["歌曲名"])
-            assertEquals("Embedded artist", properties["歌手"])
+            assertEquals("Embedded title", properties[R.string.media_convert_info_title])
+            assertEquals("Embedded artist", properties[R.string.media_convert_info_artist])
+            val playbackDetails = information.technicalDetails.associate { it.label to it.value }
+            assertEquals("16 bit", playbackDetails[R.string.media_details_bit_depth])
+            playbackDetails.forEach { (label, value) -> assertEquals(value, properties[label]) }
             assertNull("Viewing information must not add a collection record", repository.getStoredTrack(file.path))
             val notification = PlayerMediaNotificationMetadata.load(app, PlayerTrack(file.path, file.name, false), 1_000L)
             assertEquals("ordinary file", notification.title)
