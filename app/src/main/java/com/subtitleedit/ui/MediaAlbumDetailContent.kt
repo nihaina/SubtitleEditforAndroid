@@ -23,7 +23,6 @@ import com.subtitleedit.library.MediaAlbumTrack
 import com.subtitleedit.library.MediaLibraryTrack
 import com.subtitleedit.library.mediaAlbumArtworkPaths
 import com.subtitleedit.library.sortMediaAlbumTracks
-import com.subtitleedit.player.formatPlaybackTime
 
 /** Album membership, visible order and selection all feed the same playback/action callbacks. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -177,24 +176,7 @@ internal fun MediaAlbumDetailContent(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            stringResource(R.string.media_album_detail_song_count, visibleTracks.size),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Icon(
-                            painterResource(R.drawable.ic_player_alarm),
-                            contentDescription = stringResource(R.string.player_info_duration),
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            formatPlaybackTime(visibleTracks.sumOf { it.track.durationMs.coerceAtLeast(0) }),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    MediaTrackDurationSummary(visibleTracks.size, visibleTracks.sumOf { it.track.durationMs.coerceAtLeast(0L) })
                 }
                 MediaAlbumArtwork(artworkPaths, Modifier.size(40.dp), album.tracks.map { it.modifiedAtMs },
                     with(LocalDensity.current) { 40.dp.roundToPx() })

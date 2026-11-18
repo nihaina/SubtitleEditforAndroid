@@ -40,6 +40,7 @@ import kotlin.coroutines.coroutineContext
 
 internal enum class MediaCategory(val label: Int) {
     ALBUMS(R.string.media_category_albums),
+    FOLDERS(R.string.media_category_folders),
     SINGERS(R.string.media_category_singers),
     ARTISTS(R.string.media_category_artists),
     COMPOSERS(R.string.media_category_composers),
@@ -54,7 +55,8 @@ internal fun MediaAlbumScreen(
     mediaLibraryDirectories: List<File>,
     isActive: Boolean,
     pageState: MediaAlbumPageState = remember { MediaAlbumPageState() },
-    catalogLoader: MediaAlbumCatalogLoader? = null
+    catalogLoader: MediaAlbumCatalogLoader? = null,
+    onOpenSubtitle: (File) -> Unit = {}
 ) {
     val context = LocalContext.current
     val playerLauncher = LocalPlayerLauncher.current
@@ -222,12 +224,10 @@ internal fun MediaAlbumScreen(
         pageState.prepared = MediaAlbumPreparedSnapshot(source, history, loaded)
     }
 
-    fun playAlbum(album: MediaAlbum, clickedPath: String?, shuffle: Boolean = false,
-        queueSource: PlayerQueueSource = PlayerQueueSource(PlayerQueueSourceKind.ALBUM, album.key)) {
-        val source = queueSource.copy(roots = roots)
+    fun playPaths(paths: List<String>, clickedPath: String?, shuffle: Boolean, queueSource: PlayerQueueSource? = null) {
+        val source = queueSource?.copy(roots = roots)
         scope.launch {
             try {
-                val paths = album.tracks.map { it.track.path }
                 val clickedIndex = clickedPath?.let(paths::indexOf) ?: 0
                 val selection = withContext(Dispatchers.IO) {
                     LibraryPlaybackSelection.resolve(paths, clickedIndex, clickedPath == null) { File(it).isFile }
@@ -255,6 +255,10 @@ internal fun MediaAlbumScreen(
             }
         }
     }
+
+    fun playAlbum(album: MediaAlbum, clickedPath: String?, shuffle: Boolean = false,
+        queueSource: PlayerQueueSource = PlayerQueueSource(PlayerQueueSourceKind.ALBUM, album.key)) =
+        playPaths(album.tracks.map { it.track.path }, clickedPath, shuffle, queueSource)
 
     MediaAlbumPageContent(
         albums = albums,
@@ -293,7 +297,18 @@ internal fun MediaAlbumScreen(
         onAddSelectionToPlaylist = { selected, onComplete ->
             playlistRequest = AlbumPlaylistRequest(selected.distinctBy { it.path }, onComplete)
         },
-        onShowInfo = { infoPath = it }
+        onShowInfo = { infoPath = it },
+        folderContent = { tabs ->
+            MediaFolderCategoryContent(
+                roots = roots,
+                tracks = catalog?.takeIf { it.key.directories == roots }?.tracks,
+                isActive = isActive,
+                refreshVersion = refreshVersion,
+                onPlay = { tracks, path, shuffle -> playPaths(tracks.map { it.path }, path, shuffle) },
+                onOpenSubtitle = onOpenSubtitle,
+                tabs = tabs
+            )
+        }
     )
 
     playlistRequest?.let { request ->
@@ -354,7 +369,8 @@ internal fun MediaAlbumPageContent(
     onPlayFromSource: ((MediaAlbum, String?, PlayerQueueSource) -> Unit)? = null,
     onShuffleFromSource: ((MediaAlbum, PlayerQueueSource) -> Unit)? = null,
     revealRequest: MediaCategoryRevealRequest? = null,
-    onRevealFinished: (Long) -> Unit = {}
+    onRevealFinished: (Long) -> Unit = {},
+    folderContent: @Composable (tabs: @Composable () -> Unit) -> Unit = { tabs -> tabs() }
 ) {
     val globalSelection = LocalMediaSelection.current
     var category by rememberSaveable { mutableStateOf(MediaCategory.ALBUMS) }
@@ -381,16 +397,17 @@ internal fun MediaAlbumPageContent(
     LaunchedEffect(revealRequest?.token, albums, isActive) {
         val request = revealRequest ?: return@LaunchedEffect
         if (!isActive || handledRevealToken == request.token) return@LaunchedEffect
-        category = request.category
-        settingsOpen = false
-        sortOpen = false
         when (request.category) {
             MediaCategory.ALBUMS -> query = ""
+            MediaCategory.FOLDERS -> return@LaunchedEffect
             MediaCategory.SINGERS -> singerQuery = ""
             MediaCategory.ARTISTS -> artistQuery = ""
             MediaCategory.COMPOSERS -> composerQuery = ""
             MediaCategory.GENRES -> genreQuery = ""
         }
+        category = request.category
+        settingsOpen = false
+        sortOpen = false
         val album = albums.firstOrNull { item -> item.tracks.any { it.track.path == request.trackPath } }
             ?: return@LaunchedEffect
         val role = request.category.creditRole
@@ -432,8 +449,8 @@ internal fun MediaAlbumPageContent(
     val openedCredit = credits.firstOrNull { it.key == openedCreditKey }
     val showingTracks = !settingsOpen &&
         ((openedCredit != null && creditRole != null) || openedAlbum != null)
-    LaunchedEffect(isActive, showingTracks, globalSelection) {
-        if (isActive && !showingTracks) globalSelection?.updateVisiblePaths(emptyList())
+    LaunchedEffect(isActive, showingTracks, category, globalSelection) {
+        if (isActive && category != MediaCategory.FOLDERS && !showingTracks) globalSelection?.updateVisiblePaths(emptyList())
     }
     val visibleCredits = remember(credits, creditQuery, activeCreditOptions) {
         filterAndSortMediaSingers(credits, if (activeCreditOptions.quickSearch) creditQuery else "",
@@ -446,7 +463,8 @@ internal fun MediaAlbumPageContent(
         if (!loading && revealRequest == null && openedCreditKey != null && openedCredit == null) openedCreditKey = null
     }
 
-    BackHandler(isActive && (settingsOpen || openedAlbumKey != null || openedCreditKey != null)) {
+    BackHandler(isActive && category != MediaCategory.FOLDERS &&
+        (settingsOpen || openedAlbumKey != null || openedCreditKey != null)) {
         cancelReveal()
         when {
             settingsOpen -> settingsOpen = false
@@ -454,8 +472,33 @@ internal fun MediaAlbumPageContent(
             else -> openedAlbumKey = null
         }
     }
+    val categoryTabs: @Composable () -> Unit = {
+        LazyRow(
+            state = categoryTabsState,
+            modifier = Modifier.fillMaxWidth().testTag("media-category-tabs"),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(MediaCategory.entries) { item ->
+                FilterChip(
+                    selected = category == item,
+                    onClick = {
+                        cancelReveal()
+                        openedCreditKey = null
+                        openedAlbumKey = null
+                        category = item
+                    },
+                    label = { Text(stringResource(item.label)) },
+                    modifier = Modifier.testTag("media-category:${item.name}")
+                )
+            }
+        }
+    }
     Column(Modifier.fillMaxSize().background(settingsPageBackground()).testTag("media-categories-page")) {
         when {
+            category == MediaCategory.FOLDERS -> browseStateHolder.SaveableStateProvider(category.name) {
+                folderContent(categoryTabs)
+            }
             settingsOpen && creditRole != null -> MediaSingerSettings(
                 options = activeCreditOptions,
                 onChange = changeCreditOptions,
@@ -518,25 +561,7 @@ internal fun MediaAlbumPageContent(
                 onShowInfo = onShowInfo
             )
             else -> {
-                LazyRow(
-                    state = categoryTabsState,
-                    modifier = Modifier.fillMaxWidth().testTag("media-category-tabs"),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(MediaCategory.entries) { item ->
-                        FilterChip(
-                            selected = category == item,
-                            onClick = {
-                                cancelReveal()
-                                openedCreditKey = null
-                                category = item
-                            },
-                            label = { Text(stringResource(item.label)) },
-                            modifier = Modifier.testTag("media-category:${item.name}")
-                        )
-                    }
-                }
+                categoryTabs()
                 // Browse content leaves composition while a detail or settings page is open.
                 browseStateHolder.SaveableStateProvider(category.name) {
                     if (category == MediaCategory.ALBUMS) {

@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -83,46 +84,15 @@ internal fun MediaAlbumBrowseContent(
     val listState = rememberLazyListState()
     val gridState = rememberLazyGridState()
     Column(modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp).heightIn(min = 64.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (options.quickSearch) {
-                TextField(
-                    value = query,
-                    onValueChange = onQueryChanged,
-                    modifier = Modifier.weight(1f).testTag("album-search"),
-                    placeholder = { Text(stringResource(R.string.album_browse_search), maxLines = 1) },
-                    leadingIcon = {
-                        Icon(painterResource(R.drawable.ic_search), contentDescription = null)
-                    },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyLarge,
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent
-                    )
-                )
-            } else {
-                Spacer(Modifier.weight(1f))
-            }
-            IconButton(onClick = onSort, modifier = Modifier.testTag("album-sort")) {
-                Icon(
-                    painterResource(R.drawable.ic_album_sort),
-                    contentDescription = stringResource(R.string.album_browse_sort)
-                )
-            }
-            IconButton(onClick = onSettings, modifier = Modifier.testTag("album-settings")) {
-                Icon(
-                    painterResource(R.drawable.ic_settings),
-                    contentDescription = stringResource(R.string.album_browse_settings)
-                )
-            }
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        MediaCollectionBrowseHeader(
+            tagPrefix = "album",
+            query = query.takeIf { options.quickSearch },
+            searchHint = R.string.album_browse_search,
+            onQueryChanged = onQueryChanged,
+            sortDescription = R.string.album_browse_sort,
+            onSort = onSort,
+            onSettings = onSettings
+        )
         if (albums.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 Text(
@@ -136,31 +106,11 @@ internal fun MediaAlbumBrowseContent(
                 )
             }
         } else if (options.viewMode == AlbumViewMode.GRID) {
-            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
-                // At phone width the reference sizes are four, three and two columns.
-                // Wider windows add columns while retaining each size's visual density.
-                val columns = (options.gridSize.compactColumns * (maxWidth.value / 360f).coerceAtLeast(1f)).toInt()
-                // Match GridCells.Fixed's pixel distribution, including remainder pixels.
-                // The size is known before cell composition, so artwork needs no subcomposition
-                // or after-measure state update of its own.
-                val density = LocalDensity.current
-                val artworkSpace = with(density) {
-                    (constraints.maxWidth - 8.dp.roundToPx() * 2 - 10.dp.roundToPx() * (columns - 1)).coerceAtLeast(0)
-                }
-                LazyVerticalGrid(
-                    state = gridState,
-                    columns = GridCells.Fixed(columns),
-                    modifier = Modifier.fillMaxSize().testTag("album-grid"),
-                    contentPadding = PaddingValues(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    itemsIndexed(albums, key = { _, album -> album.key }) { index, album ->
-                        val artworkWidth = artworkSpace / columns + if (index % columns < artworkSpace % columns) 1 else 0
-                        AlbumGridCard(album, options, artworkWidth, onClick = { onOpenAlbum(album) })
-                    }
-                }
-                AppLazyGridScrollbar(gridState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+            MediaCollectionBrowseGrid(
+                entries = albums, gridSize = options.gridSize, state = gridState, key = { it.key },
+                tag = "album-grid", modifier = Modifier.fillMaxWidth().weight(1f)
+            ) { album, artworkWidth ->
+                AlbumGridCard(album, options, artworkWidth, onClick = { onOpenAlbum(album) })
             }
         } else {
             Box(Modifier.fillMaxWidth().weight(1f)) {
@@ -183,6 +133,89 @@ internal fun MediaAlbumBrowseContent(
             }
         }
     }
+}
+
+@Composable
+internal fun <Item> MediaCollectionBrowseGrid(
+    entries: List<Item>,
+    gridSize: AlbumGridSize,
+    state: LazyGridState,
+    key: (Item) -> String,
+    tag: String,
+    modifier: Modifier = Modifier,
+    itemContent: @Composable (Item, Int) -> Unit
+) {
+    BoxWithConstraints(modifier) {
+        // At phone width the reference sizes are four, three and two columns.
+        // Wider windows add columns while retaining each size's visual density.
+        val columns = (gridSize.compactColumns * (maxWidth.value / 360f).coerceAtLeast(1f)).toInt()
+        // Match GridCells.Fixed's pixel distribution, including remainder pixels.
+        // The size is known before cell composition, so artwork needs no subcomposition
+        // or after-measure state update of its own.
+        val density = LocalDensity.current
+        val artworkSpace = with(density) {
+            (constraints.maxWidth - 8.dp.roundToPx() * 2 - 10.dp.roundToPx() * (columns - 1)).coerceAtLeast(0)
+        }
+        LazyVerticalGrid(
+            state = state,
+            columns = GridCells.Fixed(columns),
+            modifier = Modifier.fillMaxSize().testTag(tag),
+            contentPadding = PaddingValues(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            itemsIndexed(entries, key = { _, entry -> key(entry) }) { index, entry ->
+                val artworkWidth = artworkSpace / columns + if (index % columns < artworkSpace % columns) 1 else 0
+                itemContent(entry, artworkWidth)
+            }
+        }
+        AppLazyGridScrollbar(state, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+    }
+}
+
+@Composable
+internal fun MediaCollectionBrowseHeader(
+    tagPrefix: String,
+    query: String?,
+    searchHint: Int,
+    onQueryChanged: (String) -> Unit,
+    sortDescription: Int,
+    onSort: () -> Unit,
+    onSettings: () -> Unit,
+    settingsDescription: Int = R.string.album_browse_settings
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp).heightIn(min = 64.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (query != null) {
+            TextField(
+                value = query,
+                onValueChange = onQueryChanged,
+                modifier = Modifier.weight(1f).testTag("$tagPrefix-search"),
+                placeholder = { Text(stringResource(searchHint), maxLines = 1) },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_search), contentDescription = null) },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge,
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent
+                )
+            )
+        } else {
+            Spacer(Modifier.weight(1f))
+        }
+        IconButton(onClick = onSort, modifier = Modifier.testTag("$tagPrefix-sort")) {
+            Icon(painterResource(R.drawable.ic_album_sort), stringResource(sortDescription))
+        }
+        IconButton(onClick = onSettings, modifier = Modifier.testTag("$tagPrefix-settings")) {
+            Icon(painterResource(R.drawable.ic_settings), stringResource(settingsDescription))
+        }
+    }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 @Composable

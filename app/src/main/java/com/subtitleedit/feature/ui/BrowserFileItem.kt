@@ -1,5 +1,6 @@
 package com.subtitleedit.feature.ui
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.runtime.*
@@ -33,7 +34,8 @@ internal fun BrowserFileRow(
     metadata: BrowserFileMetadata? = null,
     metadataRefreshKey: Any? = null,
     isDirectoryHint: Boolean? = null,
-    initialMetadata: BrowserFileMetadata? = null
+    initialMetadata: BrowserFileMetadata? = null,
+    directoryArtwork: Bitmap? = null
 ) {
     val context = LocalContext.current
     // FavoritesFragment historically used FileListAdapter without an
@@ -90,7 +92,7 @@ internal fun BrowserFileRow(
             onClick = onClick,
             onLongClick = { if (restricted) onClick() else onLongClick() }
         ),
-        preview = rowData?.preview,
+        preview = directoryArtwork?.let { MainFilePreview(bitmap = it) } ?: rowData?.preview,
         loadingDuration = MainFilePreviewLoader.isMediaFile(file) && rowData == null,
         restricted = restricted || !enabled,
         isSelected = isSelected,

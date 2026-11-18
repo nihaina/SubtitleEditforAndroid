@@ -90,7 +90,8 @@ internal fun MainTopLevelPages(
     viewMode: FileBrowserViewMode,
     onOpenDirectory: (File) -> Unit,
     onToolbarChanged: (String, Boolean, (() -> Unit)?) -> Unit,
-    saveableStateHolder: SaveableStateHolder? = null
+    saveableStateHolder: SaveableStateHolder? = null,
+    onOpenSubtitle: (File) -> Unit = {}
 ) {
     val isActive = selectedPage == activePage
     val activeNow by rememberUpdatedState(isActive)
@@ -460,7 +461,8 @@ internal fun MainTopLevelPages(
                 refreshVersion = refreshVersion,
                 mediaLibraryDirectories = mediaLibraryDirectories,
                 isActive = isActive,
-                pageState = state.mediaAlbumPage
+                pageState = state.mediaAlbumPage,
+                onOpenSubtitle = onOpenSubtitle
             )
         } else {
             ToolsScreen(

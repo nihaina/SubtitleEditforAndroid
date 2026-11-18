@@ -2,6 +2,7 @@
 <resources>
     <string name="media_categories_navigation">分类</string>
     <string name="media_category_albums">专辑</string>
+    <string name="media_category_folders">文件夹</string>
     <string name="media_category_singers">歌手</string>
     <string name="media_category_artists">艺术家</string>
     <string name="media_category_composers">作曲家</string>
@@ -13,4 +14,11 @@
     <string name="media_album_detail_back">返回专辑列表</string>
     <string name="media_album_play_all">播放全部</string>
     <string name="media_album_loading">正在加载专辑</string>
+    <string name="media_folder_search">搜索文件夹</string>
+    <string name="media_folder_sort">文件夹和文件排序</string>
+    <string name="media_folder_settings">文件夹设置</string>
+    <string name="media_folder_view_mode">文件夹视图模式</string>
+    <string name="media_folder_more_info">在文件夹列表中显示更多信息</string>
+    <string name="media_folder_empty">没有包含未设置专辑的音视频文件的文件夹</string>
+    <string name="media_folder_up">返回上层目录</string>
 </resources>

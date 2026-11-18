@@ -221,12 +221,12 @@ private fun BrowserFileIcon(
         modifier = Modifier.size(size).alpha(if (name.startsWith(".") && name != "..") 0.5f else 1f),
         contentAlignment = Alignment.Center
     ) {
-        if (bitmap != null && !isDirectory) {
+        if (bitmap != null) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = stringResource(R.string.file_name),
                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(size * 0.15f)),
-                contentScale = if (name.endsWith(".apk", ignoreCase = true)) ContentScale.Fit else ContentScale.Crop
+                contentScale = if (!isDirectory && name.endsWith(".apk", ignoreCase = true)) ContentScale.Fit else ContentScale.Crop
             )
         } else {
             Icon(

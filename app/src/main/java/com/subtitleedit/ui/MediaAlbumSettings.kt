@@ -50,12 +50,52 @@ import com.subtitleedit.ui.components.AppLazyListScrollbar
 import com.subtitleedit.ui.components.SettingsSwitchRow
 import com.subtitleedit.ui.settings.settingsPageBackground
 
-@OptIn(ExperimentalMaterial3Api::class)
+internal data class MediaCollectionViewOptions(
+    val viewMode: AlbumViewMode,
+    val gridSize: AlbumGridSize,
+    val showMoreInfo: Boolean,
+    val quickSearch: Boolean
+)
+
 @Composable
 internal fun MediaAlbumSettings(
     options: MediaAlbumViewOptions,
     onChange: (MediaAlbumViewOptions) -> Unit,
     onBack: () -> Unit
+) {
+    MediaCollectionViewSettings(
+        tagPrefix = "album",
+        titleRes = R.string.media_album_settings_title,
+        viewModeRes = R.string.media_album_view_mode,
+        moreInfoRes = R.string.media_album_more_info,
+        options = MediaCollectionViewOptions(options.viewMode, options.gridSize, options.showMoreInfo, options.quickSearch),
+        onChange = { updated ->
+            onChange(options.copy(viewMode = updated.viewMode, gridSize = updated.gridSize,
+                showMoreInfo = updated.showMoreInfo, quickSearch = updated.quickSearch))
+        },
+        onBack = onBack
+    ) {
+        SettingsSwitchRow(
+            title = stringResource(R.string.media_album_group_tracks),
+            checked = options.groupTracks,
+            onCheckedChange = { onChange(options.copy(groupTracks = it)) },
+            modifier = Modifier.padding(horizontal = 8.dp).heightIn(min = 64.dp)
+                .testTag("album-settings-group-tracks")
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun MediaCollectionViewSettings(
+    tagPrefix: String,
+    titleRes: Int,
+    viewModeRes: Int,
+    moreInfoRes: Int,
+    options: MediaCollectionViewOptions,
+    onChange: (MediaCollectionViewOptions) -> Unit,
+    onBack: () -> Unit,
+    additionalSetting: (@Composable () -> Unit)? = null
 ) {
     var choosingView by remember { mutableStateOf(false) }
     var choosingSize by remember { mutableStateOf(false) }
@@ -63,11 +103,11 @@ internal fun MediaAlbumSettings(
     LaunchedEffect(gridSizeEnabled) {
         if (!gridSizeEnabled) choosingSize = false
     }
-    Column(Modifier.fillMaxSize().background(settingsPageBackground()).testTag("album-settings-page")) {
+    Column(Modifier.fillMaxSize().background(settingsPageBackground()).testTag("$tagPrefix-settings-page")) {
         TopAppBar(
-            title = { Text(stringResource(R.string.media_album_settings_title)) },
+            title = { Text(stringResource(titleRes)) },
             navigationIcon = {
-                IconButton(onClick = onBack, modifier = Modifier.testTag("album-settings-back")) {
+                IconButton(onClick = onBack, modifier = Modifier.testTag("$tagPrefix-settings-back")) {
                     Icon(painterResource(R.drawable.ic_back), stringResource(R.string.tools_navigate_back))
                 }
             },
@@ -78,13 +118,13 @@ internal fun MediaAlbumSettings(
             val listState = rememberLazyListState()
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize().testTag("album-settings-list")
+                modifier = Modifier.fillMaxSize().testTag("$tagPrefix-settings-list")
             ) {
                 item {
                     AlbumPreferenceRow(
-                        title = stringResource(R.string.media_album_view_mode),
+                        title = stringResource(viewModeRes),
                         value = stringResource(options.viewMode.labelRes),
-                        modifier = Modifier.testTag("album-settings-view-mode"),
+                        modifier = Modifier.testTag("$tagPrefix-settings-view-mode"),
                         onClick = { choosingView = true }
                     )
                 }
@@ -92,36 +132,28 @@ internal fun MediaAlbumSettings(
                     AlbumPreferenceRow(
                         title = stringResource(R.string.media_album_grid_size),
                         value = stringResource(options.gridSize.labelRes),
-                        modifier = Modifier.testTag("album-settings-grid-size"),
+                        modifier = Modifier.testTag("$tagPrefix-settings-grid-size"),
                         enabled = gridSizeEnabled,
                         onClick = { choosingSize = true }
                     )
                 }
                 item {
                     SettingsSwitchRow(
-                        title = stringResource(R.string.media_album_more_info),
+                        title = stringResource(moreInfoRes),
                         checked = options.showMoreInfo,
                         onCheckedChange = { onChange(options.copy(showMoreInfo = it)) },
                         modifier = Modifier.padding(horizontal = 8.dp).heightIn(min = 64.dp)
-                            .testTag("album-settings-more-info")
+                            .testTag("$tagPrefix-settings-more-info")
                     )
                 }
-                item {
-                    SettingsSwitchRow(
-                        title = stringResource(R.string.media_album_group_tracks),
-                        checked = options.groupTracks,
-                        onCheckedChange = { onChange(options.copy(groupTracks = it)) },
-                        modifier = Modifier.padding(horizontal = 8.dp).heightIn(min = 64.dp)
-                            .testTag("album-settings-group-tracks")
-                    )
-                }
+                if (additionalSetting != null) item { additionalSetting() }
                 item {
                     SettingsSwitchRow(
                         title = stringResource(R.string.media_album_quick_search),
                         checked = options.quickSearch,
                         onCheckedChange = { onChange(options.copy(quickSearch = it)) },
                         modifier = Modifier.padding(horizontal = 8.dp).heightIn(min = 64.dp)
-                            .testTag("album-settings-quick-search")
+                            .testTag("$tagPrefix-settings-quick-search")
                     )
                 }
             }
@@ -132,7 +164,7 @@ internal fun MediaAlbumSettings(
     }
     if (choosingView) {
         AlbumChoiceDialog(
-            title = stringResource(R.string.media_album_view_mode),
+            title = stringResource(viewModeRes),
             choices = AlbumViewMode.entries,
             selected = options.viewMode,
             label = { stringResource(it.labelRes) },

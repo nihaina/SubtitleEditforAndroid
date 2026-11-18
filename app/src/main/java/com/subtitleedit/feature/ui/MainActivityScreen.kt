@@ -377,7 +377,8 @@ internal fun MainActivityScreen(
                             viewMode = state.viewMode,
                             onOpenDirectory = onOpenDirectoryFromFavorites,
                             onToolbarChanged = onUpdateTopLevelToolbar,
-                            saveableStateHolder = topLevelPageSaveableState
+                            saveableStateHolder = topLevelPageSaveableState,
+                            onOpenSubtitle = onFileClick
                         )
                     }
                 }

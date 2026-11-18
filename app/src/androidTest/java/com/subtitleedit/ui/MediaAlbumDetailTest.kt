@@ -52,10 +52,12 @@ class MediaAlbumDetailTest {
     @Test fun categoryDropdownStaysAboveFilesAndChangesTheDisplayedMembership() {
         val harness = showDetail(4, separateSingers = true)
         val selector = compose.onNodeWithTag("album-group-selector").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val playAll = compose.onNodeWithTag("album-play-all").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val shuffle = compose.onNodeWithTag("album-tracks-shuffle").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val sort = compose.onNodeWithTag("album-tracks-sort").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         assertTrue(selector.top < shuffle.top)
         assertTrue(selector.left < shuffle.left)
+        assertTrue(selector.left < playAll.left && playAll.left < shuffle.left)
         assertTrue(shuffle.left < sort.left)
         row(harness.tracks.first()).assertIsDisplayed()
         val all = compose.onNodeWithTag("album-group-all").assertIsDisplayed().assertIsSelected()

@@ -28,6 +28,7 @@ import com.subtitleedit.feature.ui.BrowserFileRow
 import com.subtitleedit.library.AlbumTrackSortOptions
 import com.subtitleedit.library.MediaAlbumTrack
 import com.subtitleedit.library.MediaLibraryTrack
+import com.subtitleedit.player.formatPlaybackTime
 import com.subtitleedit.ui.settings.settingsPageBackground
 
 /** Shared file playback and selection behavior for album and singer details. */
@@ -90,19 +91,9 @@ internal fun MediaTrackDetailContent(
     fun finishSelection(paths: Set<String>) { selectedPaths = selectedPaths - paths }
 
     Column(Modifier.fillMaxSize().testTag("$tagPrefix-detail")) {
-        TopAppBar(
-            title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            navigationIcon = {
-                IconButton(
-                    onClick = { if (localSelectionMode) selectedPaths = emptySet() else onBack() },
-                    modifier = Modifier.testTag("$tagPrefix-detail-back")
-                ) {
-                    Icon(painterResource(R.drawable.ic_back), backDescription)
-                }
-            },
-            windowInsets = WindowInsets(0, 0, 0, 0),
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = settingsPageBackground())
-        )
+        MediaTrackDetailTopBar(title, backDescription, tagPrefix) {
+            if (localSelectionMode) selectedPaths = emptySet() else onBack()
+        }
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
             LazyColumn(
                 state = listState,
@@ -112,22 +103,13 @@ internal fun MediaTrackDetailContent(
             ) {
                 header()
                 item(key = "actions") {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(
-                            onClick = { onPlay(visibleTracks, null) }, enabled = visibleTracks.isNotEmpty(),
-                            modifier = Modifier.testTag("$tagPrefix-play-all")
-                        ) { Text(stringResource(R.string.media_album_play_all)) }
-                        Spacer(Modifier.weight(1f))
-                        IconButton(
-                            onClick = { onShuffle(visibleTracks) }, enabled = visibleTracks.isNotEmpty(),
-                            modifier = Modifier.testTag("$tagPrefix-tracks-shuffle")
-                        ) {
-                            Icon(painterResource(R.drawable.ic_album_shuffle), stringResource(R.string.media_album_detail_shuffle))
-                        }
-                        IconButton(onClick = { sortOpen = true }, modifier = Modifier.testTag("$tagPrefix-tracks-sort")) {
-                            Icon(painterResource(R.drawable.ic_album_sort), stringResource(R.string.media_album_detail_sort))
-                        }
-                    }
+                    MediaTrackPlaylistActions(
+                        tagPrefix = tagPrefix,
+                        playbackEnabled = visibleTracks.isNotEmpty(),
+                        onPlayAll = { onPlay(visibleTracks, null) },
+                        onShuffle = { onShuffle(visibleTracks) },
+                        onSort = { sortOpen = true }
+                    )
                 }
                 items(visibleTracks, key = { it.track.path }) { item ->
                     BrowserFileRow(
@@ -193,4 +175,64 @@ internal fun MediaTrackDetailContent(
         onConfirm = onTrackSortChanged,
         onDismiss = { sortOpen = false }
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun MediaTrackDetailTopBar(title: String, backDescription: String, tagPrefix: String, onBack: () -> Unit) {
+    TopAppBar(
+        title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        navigationIcon = {
+            IconButton(onClick = onBack, modifier = Modifier.testTag("$tagPrefix-detail-back")) {
+                Icon(painterResource(R.drawable.ic_back), backDescription)
+            }
+        },
+        windowInsets = WindowInsets(0, 0, 0, 0),
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = settingsPageBackground())
+    )
+}
+
+@Composable
+internal fun MediaTrackPlaylistActions(
+    tagPrefix: String,
+    playbackEnabled: Boolean,
+    onPlayAll: (() -> Unit)?,
+    onShuffle: (() -> Unit)?,
+    onSort: () -> Unit,
+    onUp: (() -> Unit)? = null,
+    sortDescription: Int = R.string.media_album_detail_sort
+) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (onUp != null) {
+            IconButton(onClick = onUp, modifier = Modifier.testTag("$tagPrefix-up")) {
+                Icon(painterResource(R.drawable.ic_folder_up), stringResource(R.string.media_folder_up))
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        if (onPlayAll != null) {
+            TextButton(onClick = onPlayAll, enabled = playbackEnabled, modifier = Modifier.testTag("$tagPrefix-play-all")) {
+                Text(stringResource(R.string.media_album_play_all))
+            }
+        }
+        if (onShuffle != null) {
+            IconButton(onClick = onShuffle, enabled = playbackEnabled, modifier = Modifier.testTag("$tagPrefix-tracks-shuffle")) {
+                Icon(painterResource(R.drawable.ic_album_shuffle), stringResource(R.string.media_album_detail_shuffle))
+            }
+        }
+        IconButton(onClick = onSort, modifier = Modifier.testTag("$tagPrefix-tracks-sort")) {
+            Icon(painterResource(R.drawable.ic_album_sort), stringResource(sortDescription))
+        }
+    }
+}
+
+@Composable
+internal fun MediaTrackDurationSummary(trackCount: Int, durationMs: Long) {
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    val style = MaterialTheme.typography.bodyMedium
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(stringResource(R.string.media_album_detail_song_count, trackCount), style = style, color = color)
+        Icon(painterResource(R.drawable.ic_player_alarm), stringResource(R.string.player_info_duration),
+            modifier = Modifier.size(16.dp), tint = color)
+        Text(formatPlaybackTime(durationMs), style = style, color = color)
+    }
 }

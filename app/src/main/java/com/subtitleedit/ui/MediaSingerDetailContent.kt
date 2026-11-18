@@ -16,7 +16,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 import com.subtitleedit.library.*
-import com.subtitleedit.player.formatPlaybackTime
 
 /** Credit membership is fixed by the catalog; album filters never change that membership. */
 @Composable
@@ -154,14 +153,7 @@ internal fun MediaSingerDetailContent(
                         stringResource(R.string.media_category_albums)),
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(stringResource(R.string.media_album_detail_song_count, visibleTracks.size),
-                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Icon(painterResource(R.drawable.ic_player_alarm), stringResource(R.string.player_info_duration),
-                        modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(formatPlaybackTime(visibleTracks.sumOf { it.track.durationMs.coerceAtLeast(0L) }),
-                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                MediaTrackDurationSummary(visibleTracks.size, visibleTracks.sumOf { it.track.durationMs.coerceAtLeast(0L) })
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
