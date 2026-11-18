@@ -55,7 +55,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -118,11 +117,12 @@ internal fun ListeningStatsScreen(
     refreshVersion: Int,
     pageState: ListeningStatsPageState = remember { ListeningStatsPageState() },
     isActive: Boolean = true,
+    libraryRepository: MediaLibraryRepository? = null,
     contentLoader: ListeningStatsLoader? = null
 ) {
     val context = LocalContext.current
     val playerLauncher = LocalPlayerLauncher.current
-    val repository = remember(context) { MediaLibraryRepository.getInstance(context) }
+    val repository = libraryRepository ?: remember(context) { MediaLibraryRepository.getInstance(context) }
     val revision by repository.revision.collectRetainedPageState(isActive)
 
     val scope = rememberCoroutineScope()
@@ -194,9 +194,7 @@ internal fun ListeningStatsScreen(
                     heatmapDays = buildHeatmapDays(stats, year, currentDate),
                     sessions = repository.getSessionsForDate(day),
                     topItems = range?.let { repository.getTopListeningItems(it.first, it.second, limit = 5) }.orEmpty(),
-                    recentHistory = repository.getPlaybackHistory(limit = 20),
-                    mostPlayed = repository.getMostPlayed(limit = 20),
-                    neverPlayed = repository.getNeverPlayedTracks(limit = 100)
+                    recentHistory = repository.getPlaybackHistory(limit = 20)
                 )
             }
             pageState.content = loaded.copy(topItemsRange = range)
@@ -205,6 +203,39 @@ internal fun ListeningStatsScreen(
             throw cancelled
         } catch (error: Exception) {
             showLibraryError(context, error)
+        }
+    }
+
+    // Keep the default report independent from the rankings. In particular, Never Played
+    // can scan a large catalog, even though it returns at most 100 rows.
+    val insightVersion = InsightVersion(revision, refreshVersion)
+    var insightLoadFailed by remember(insightVersion, insightTab, isActive) { mutableStateOf(false) }
+    val requestedInsight = insightTab
+    if (contentLoader == null && requestedInsight != PlaybackInsightTab.RECENT) {
+        LaunchedEffect(requestedInsight, insightVersion, isActive) {
+            if (!isActive) return@LaunchedEffect
+            try {
+                when (requestedInsight) {
+                    PlaybackInsightTab.MOST_PLAYED -> if (pageState.mostPlayed?.version != insightVersion) {
+                        val entries = withContext(Dispatchers.IO) {
+                            traceStats("Stats:insights-most:query") { repository.getMostPlayed(limit = 20) }
+                        }
+                        pageState.mostPlayed = InsightSnapshot(insightVersion, entries)
+                    }
+                    PlaybackInsightTab.NEVER_PLAYED -> if (pageState.neverPlayed?.version != insightVersion) {
+                        val entries = withContext(Dispatchers.IO) {
+                            traceStats("Stats:insights-never:query") { repository.getNeverPlayedTracks(limit = 100) }
+                        }
+                        pageState.neverPlayed = InsightSnapshot(insightVersion, entries)
+                    }
+                    PlaybackInsightTab.RECENT -> Unit
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                insightLoadFailed = true
+                showLibraryError(context, error)
+            }
         }
     }
 
@@ -294,8 +325,9 @@ internal fun ListeningStatsScreen(
 
         playbackInsightsItems(
             recentHistory = content.recentHistory,
-            mostPlayed = content.mostPlayed,
-            neverPlayed = content.neverPlayed,
+            mostPlayed = if (contentLoader != null) pageState.content?.mostPlayed else pageState.mostPlayed?.entries,
+            neverPlayed = if (contentLoader != null) pageState.content?.neverPlayed else pageState.neverPlayed?.entries,
+            loadFailed = insightLoadFailed,
             selectedTab = insightTab,
             neverPlayedLimit = neverPlayedLimit,
             timeFormat = historyTimeFormat,
@@ -376,8 +408,9 @@ private enum class PlaybackInsightTab(val labelRes: Int, val iconRes: Int) {
 // Adjacent surfaces retain the original single-card appearance without an eager inner Column.
 private fun LazyListScope.playbackInsightsItems(
     recentHistory: List<PlaybackHistoryEntry>,
-    mostPlayed: List<PlaybackHistoryEntry>,
-    neverPlayed: List<MediaLibraryTrack>,
+    mostPlayed: List<PlaybackHistoryEntry>?,
+    neverPlayed: List<MediaLibraryTrack>?,
+    loadFailed: Boolean,
     selectedTab: PlaybackInsightTab,
     neverPlayedLimit: Int,
     timeFormat: SimpleDateFormat,
@@ -429,12 +462,23 @@ private fun LazyListScope.playbackInsightsItems(
             }
         }
     }
+    if ((selectedTab == PlaybackInsightTab.MOST_PLAYED && mostPlayed == null) ||
+        (selectedTab == PlaybackInsightTab.NEVER_PLAYED && neverPlayed == null)
+    ) {
+        item(key = "insights-pending") {
+            InsightCardPart(last = true) {
+                InsightEmptyText(if (loadFailed) R.string.error else R.string.loading)
+            }
+        }
+        return
+    }
     val entries = when (selectedTab) {
         PlaybackInsightTab.RECENT -> recentHistory
-        PlaybackInsightTab.MOST_PLAYED -> mostPlayed
+        PlaybackInsightTab.MOST_PLAYED -> mostPlayed.orEmpty()
         PlaybackInsightTab.NEVER_PLAYED -> {
-            val shown = neverPlayed.take(neverPlayedLimit)
-            val hasMore = shown.size < neverPlayed.size
+            val tracks = neverPlayed.orEmpty()
+            val shown = tracks.take(neverPlayedLimit)
+            val hasMore = shown.size < tracks.size
             if (shown.isEmpty()) {
                 item(key = "insights-empty") {
                     InsightCardPart(last = true) {
@@ -792,7 +836,7 @@ private fun SummaryMetricCard(
                     maxLines = 1
                 )
             }
-            key(animateChanges) {
+            if (animateChanges) {
                 AnimatedContent(
                     targetState = deltaText to referenceText,
                     transitionSpec = {
@@ -801,26 +845,34 @@ private fun SummaryMetricCard(
                     },
                     label = "stats-delta"
                 ) { (headline, caption) ->
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = headline,
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                            color = deltaColor,
-                            textAlign = TextAlign.End,
-                            maxLines = 1
-                        )
-                        if (caption.isNotBlank()) {
-                            Text(
-                                text = caption,
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.End,
-                                maxLines = 1
-                            )
-                        }
-                    }
+                    SummaryMetricDelta(headline, caption, deltaColor)
                 }
+            } else {
+                // The placeholder never animated: the first real snapshot starts a fresh transition.
+                SummaryMetricDelta(deltaText, referenceText, deltaColor)
             }
+        }
+    }
+}
+
+@Composable
+private fun SummaryMetricDelta(headline: String, caption: String, color: Color) {
+    Column(horizontalAlignment = Alignment.End) {
+        Text(
+            text = headline,
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+            color = color,
+            textAlign = TextAlign.End,
+            maxLines = 1
+        )
+        if (caption.isNotBlank()) {
+            Text(
+                text = caption,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.End,
+                maxLines = 1
+            )
         }
     }
 }
@@ -869,7 +921,9 @@ private fun HeatmapSection(
                 )
             } else {
                 val columns = remember(days) { StatsCalculator.buildHeatmapColumns(days) }
-                val monthLabels = remember(columns) { StatsCalculator.buildMonthLabels(columns) }
+                val monthLabels = remember(columns) {
+                    traceStats("Stats:heatmap:months") { StatsCalculator.buildMonthLabels(columns) }
+                }
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
                     val density = LocalDensity.current
                     val stridePx = with(density) { (STATS_HEATMAP_CELL_SIZE + STATS_HEATMAP_CELL_GAP).toPx() }
@@ -910,7 +964,9 @@ private fun HeatmapSection(
                                 }
                             }
                         }
-                        StatsHeatmapGrid(columns, visibleColumns, selectedDate, onDayClick)
+                        traceStats("Stats:heatmap:grid:compose") {
+                            StatsHeatmapGrid(columns, visibleColumns, selectedDate, onDayClick)
+                        }
                     }
                 }
 

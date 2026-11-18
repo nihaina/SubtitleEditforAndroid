@@ -85,11 +85,15 @@ internal object StatsCalculator {
     fun buildMonthLabels(columns: List<List<StatsHeatmapDay?>>): List<Pair<String, Int>> {
         val markers = ArrayList<Pair<Int, String>>()
         columns.forEachIndexed { index, column ->
-            val real = column.filterNotNull()
-            val first = real.firstOrNull() ?: return@forEachIndexed
-            val monthStart = real.firstOrNull { parse(it.date)?.dayOfMonth == 1 }
-            if (index == 0 || monthStart != null) {
-                val date = parse((monthStart ?: first).date) ?: return@forEachIndexed
+            // ISO calendar dates end in the day of the month. Only possible markers need
+            // full parsing; malformed candidates still do not create month labels.
+            val monthStart = column.firstNotNullOfOrNull { day ->
+                day?.date?.takeIf { it.endsWith("-01") }?.let(::parse)
+            }
+            val date = monthStart ?: if (index == 0) {
+                column.firstOrNull { it != null }?.date?.let(::parse)
+            } else null
+            if (date != null) {
                 val month = "${date.monthValue}月"
                 if (markers.lastOrNull()?.second != month) markers += index to month
             }

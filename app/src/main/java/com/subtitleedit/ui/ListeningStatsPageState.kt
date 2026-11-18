@@ -7,6 +7,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.subtitleedit.library.ListeningDay
+import com.subtitleedit.library.MediaLibraryTrack
+import com.subtitleedit.library.PlaybackHistoryEntry
 
 /** The main navigation owns this snapshot, so returning to statistics does not render empty data. */
 internal class ListeningStatsPageState(currentDate: String = ListeningDay.currentDate()) {
@@ -16,6 +18,8 @@ internal class ListeningStatsPageState(currentDate: String = ListeningDay.curren
     var previousCurrentDate by mutableStateOf(currentDate)
     var content by mutableStateOf<ListeningStatsContent?>(null)
     internal var loadedQuery: ListeningStatsQuery? = null
+    internal var mostPlayed by mutableStateOf<InsightSnapshot<PlaybackHistoryEntry>?>(null)
+    internal var neverPlayed by mutableStateOf<InsightSnapshot<MediaLibraryTrack>?>(null)
     private val heatmapScrollStates = mutableMapOf<Int, ScrollState>()
     val listState = LazyListState()
 
@@ -31,6 +35,11 @@ internal data class ListeningStatsQuery(
     val granularity: StatsGranularity,
     val selectedDate: String
 )
+
+// Day/period selection changes the report, not the all-time insight rankings.
+internal data class InsightVersion(val revision: Long, val refreshVersion: Int)
+
+internal data class InsightSnapshot<T>(val version: InsightVersion, val entries: List<T>)
 
 internal typealias ListeningStatsLoader = suspend (
     currentDate: String,

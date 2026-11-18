@@ -61,11 +61,12 @@ class StatsHeatmapGridTest {
     @Test fun daysMatchOriginalPixelsAtFractionalDensitiesAndInBothDirections() {
         val density = mutableStateOf(1f)
         val direction = mutableStateOf(LayoutDirection.Ltr)
+        val dark = mutableStateOf(false)
         val selected = mutableStateOf("2024-02-04")
         val columns = StatsCalculator.buildHeatmapColumns(days("2024-02-01", "2024-03-10"))
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(density.value), LocalLayoutDirection provides direction.value) {
-                SubtitleEditComposeTheme {
+                SubtitleEditComposeTheme(darkTheme = dark.value) {
                     Column {
                         Box(Modifier.testTag("current")) { StatsHeatmapGrid(columns, columns.indices, selected.value) {} }
                         Box(Modifier.testTag("original")) { OriginalHeatmapGrid(columns, columns.indices, selected.value) }
@@ -81,6 +82,9 @@ class StatsHeatmapGridTest {
         }
         // Replacing the selected border must preserve both its old and new cell rendering.
         compose.runOnIdle { selected.value = "2024-03-09" }
+        assertMatchingPixels()
+        // A retained grid must pick up the new palette without resetting the selection.
+        compose.runOnIdle { dark.value = true }
         assertMatchingPixels()
     }
 

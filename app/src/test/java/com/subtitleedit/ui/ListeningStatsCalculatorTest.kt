@@ -61,6 +61,25 @@ class ListeningStatsCalculatorTest {
         assertEquals(columns.size, StatsCalculator.buildMonthLabels(columns).sumOf { it.second })
     }
 
+    @Test fun heatmapMonthsKeepWeekSpansAcrossLeapDayAndPartialWeeks() {
+        val first = LocalDate.of(2024, 2, 21)
+        val days = (0..43).map { StatsHeatmapDay(first.plusDays(it.toLong()).toString(), 0L, 0) }
+        assertEquals(
+            listOf("2月" to 1, "3月" to 5, "4月" to 1),
+            StatsCalculator.buildMonthLabels(StatsCalculator.buildHeatmapColumns(days))
+        )
+    }
+
+    @Test fun heatmapMonthMarkersIgnoreInvalidDatesAndKeepTheFirstValidMonthStartInAWeek() {
+        fun day(date: String) = StatsHeatmapDay(date, 0L, 0)
+        val columns = listOf(
+            listOf(null, day("2024-02-28")),
+            listOf(day("2024-13-01"), day("2024-03-02")),
+            listOf(day("2024-00-01"), day("2024-04-01"), day("2024-05-01"))
+        )
+        assertEquals(listOf("2月" to 2, "4月" to 1), StatsCalculator.buildMonthLabels(columns))
+    }
+
     @Test fun heatLevelsHandleBoundaryAndLargeDurationsWithoutOverflow() {
         assertEquals(0, StatsCalculator.levelFor(0L))
         assertEquals(1, StatsCalculator.levelFor(9 * 60_000L))

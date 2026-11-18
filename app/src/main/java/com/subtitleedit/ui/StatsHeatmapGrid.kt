@@ -4,8 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
@@ -27,6 +27,21 @@ private val HeatmapCellShape = RoundedCornerShape(3.dp)
 
 private data class HeatmapCellPosition(val column: Int, val row: Int)
 
+// Modifiers describe immutable styles, so cells can share them while keeping separate draw,
+// pointer and semantics nodes (and hence independent ripples and clicks).
+private class HeatmapCellStyles(colors: ColorScheme) {
+    private val fills = List(5) { level ->
+        Modifier.clip(HeatmapCellShape).background(heatmapColor(colors, level))
+    }
+    private val empty = fills[0].border(0.5.dp, colors.outlineVariant.copy(alpha = 0.5f), HeatmapCellShape)
+    private val selected = fills.map { it.border(1.5.dp, colors.primary, HeatmapCellShape) }
+
+    fun forDay(level: Int, isSelected: Boolean): Modifier {
+        val index = if (level in fills.indices) level else fills.lastIndex
+        return if (isSelected) selected[index] else if (index == 0) empty else fills[index]
+    }
+}
+
 /** One layout positions visible days directly; every day keeps its clickable semantics node. */
 @Composable
 internal fun StatsHeatmapGrid(
@@ -35,6 +50,8 @@ internal fun StatsHeatmapGrid(
     selectedDate: String,
     onDayClick: (String) -> Unit,
 ) {
+    val colors = MaterialTheme.colorScheme
+    val styles = remember(colors) { HeatmapCellStyles(colors) }
     val cells = remember(columns, visibleColumns) {
         buildList {
             for (column in visibleColumns) {
@@ -70,7 +87,7 @@ internal fun StatsHeatmapGrid(
             // the original calendar positions without a keyed group for every single day.
             key(column) {
                 columns[column].forEach { day ->
-                    if (day != null) StatsHeatmapCell(day.date, day.level, day.date == selectedDate, onDayClick)
+                    if (day != null) StatsHeatmapCell(day.date, styles.forDay(day.level, day.date == selectedDate), onDayClick)
                 }
             }
         }
@@ -78,29 +95,22 @@ internal fun StatsHeatmapGrid(
 }
 
 @Composable
-private fun StatsHeatmapCell(date: String, level: Int, selected: Boolean, onDayClick: (String) -> Unit) {
+private fun StatsHeatmapCell(date: String, appearance: Modifier, onDayClick: (String) -> Unit) {
+    // The grid already supplies exact pixel constraints, including clipped final rows.
     Box(
-        Modifier.size(STATS_HEATMAP_CELL_SIZE)
-            .testTag("stats-heatmap-day:$date")
-            .clip(HeatmapCellShape)
-            .background(heatmapColor(level))
-            .then(
-                if (selected) Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, HeatmapCellShape)
-                else if (level == 0) Modifier.border(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), HeatmapCellShape)
-                else Modifier
-            )
+        Modifier.testTag("stats-heatmap-day:$date")
+            .then(appearance)
             .clickable { onDayClick(date) }
     )
 }
 
 @Composable
-internal fun heatmapColor(level: Int): Color {
-    val base = MaterialTheme.colorScheme.primary
-    return when (level) {
-        0 -> MaterialTheme.colorScheme.surfaceContainerHighest
-        1 -> base.copy(alpha = 0.28f)
-        2 -> base.copy(alpha = 0.50f)
-        3 -> base.copy(alpha = 0.74f)
-        else -> base
-    }
+internal fun heatmapColor(level: Int): Color = heatmapColor(MaterialTheme.colorScheme, level)
+
+private fun heatmapColor(colors: ColorScheme, level: Int): Color = when (level) {
+    0 -> colors.surfaceContainerHighest
+    1 -> colors.primary.copy(alpha = 0.28f)
+    2 -> colors.primary.copy(alpha = 0.50f)
+    3 -> colors.primary.copy(alpha = 0.74f)
+    else -> colors.primary
 }
