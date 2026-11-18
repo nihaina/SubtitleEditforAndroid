@@ -1,6 +1,7 @@
 package com.subtitleedit
 
 import android.Manifest
+import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioManager
@@ -15,6 +16,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -418,7 +420,13 @@ class MainActivity : AppComposeActivity() {
                         onFileClick = ::onFileClicked,
                         onFileLongClick = ::enterSelectionMode,
                         imagePreviewFile = stateModel.imagePreviewFile,
+                        onImagePreviewPageChanged = { file ->
+                            if (stateModel.imagePreviewFile != null) stateModel.imagePreviewFile = file
+                        },
                         onCloseImagePreview = ::closeImagePreview,
+                        onShareImagePreview = ::shareImagePreview,
+                        onDeleteImagePreview = { file -> confirmDeleteFiles(listOf(file).filter(File::isFile)) },
+                        onShowImagePreviewInfo = { file -> filePropertiesDialogController.show(listOf(file)) },
                         onCopy = { startDestinationSelection(FileOperation.COPY) },
                         onMove = { startDestinationSelection(FileOperation.MOVE) },
                         onRename = ::renameSelectedFile,
@@ -1157,6 +1165,22 @@ class MainActivity : AppComposeActivity() {
         stateModel.imagePreviewFile = null
     }
 
+    private fun shareImagePreview(file: File) {
+        try {
+            check(file.isFile)
+            val uri = FileProvider.getUriForFile(this, "$packageName.provider", file)
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = contentResolver.getType(uri)?.takeIf { it.startsWith("image/") } ?: "image/*"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                clipData = ClipData.newUri(contentResolver, file.name, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(send, getString(R.string.media_selection_share)))
+        } catch (_: RuntimeException) {
+            showShortToast(getString(R.string.directory_image_preview_share_failed))
+        }
+    }
+
     private fun navigateToDirectoryBreadcrumb(directory: File): Boolean {
         val current = stateModel.documentState.currentDirectory ?: return false
         if (stateModel.documentState.selectedPaths.isNotEmpty() &&
@@ -1537,15 +1561,14 @@ class MainActivity : AppComposeActivity() {
     }
 
     private fun confirmDeleteSelectedFiles() {
-        val files = selectedFiles()
-        if (files.isEmpty()) return
-        pendingDeleteFiles = files
-        pendingMediaDeleteSuccess = null
-        mainDialog = MainActivityDialogUi.DeleteConfirmation(files.size)
+        confirmDeleteFiles(selectedFiles())
     }
 
     private fun confirmDeleteMediaFiles(paths: List<String>, onSuccess: () -> Unit) {
-        val files = paths.distinct().map(::File).filter(::isAudioOrVideoFile)
+        confirmDeleteFiles(paths.distinct().map(::File).filter(::isAudioOrVideoFile), onSuccess)
+    }
+
+    private fun confirmDeleteFiles(files: List<File>, onSuccess: (() -> Unit)? = null) {
         if (files.isEmpty()) return
         pendingDeleteFiles = files
         pendingMediaDeleteSuccess = onSuccess
@@ -2403,7 +2426,11 @@ class MainActivity : AppComposeActivity() {
     
     private fun handleBackNavigation() {
         if (stateModel.imagePreviewFile != null) {
-            closeImagePreview()
+            if (stateModel.documentState.selectedPaths.isNotEmpty()) {
+                exitSelectionMode()
+            } else {
+                closeImagePreview()
+            }
             return
         }
         if (stateModel.mediaSelection.active) {

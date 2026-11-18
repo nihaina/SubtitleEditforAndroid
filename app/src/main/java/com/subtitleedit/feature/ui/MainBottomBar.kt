@@ -52,7 +52,7 @@ internal fun MainBottomBar(
     onCancelDestination: () -> Unit,
     onProcessMediaSelection: () -> Unit,
     indicatorFrame: (() -> MainTabIndicatorFrame)? = null,
-    showNavigation: Boolean = true,
+    previewActions: (@Composable () -> Unit)? = null,
 ) {
     val isSelectionActive = state.selectedTopLevelItem == R.id.nav_directory &&
         (state.selectionCount > 0 || state.pendingOperation != null)
@@ -78,11 +78,12 @@ internal fun MainBottomBar(
             onProcessMedia = onProcessMediaSelection
         )
     }
-    if (!showNavigation) {
+    if (previewActions != null) {
         Box(
             modifier = Modifier.fillMaxWidth().height(68.dp).background(Color.Black).clipToBounds(),
             contentAlignment = Alignment.BottomCenter
         ) {
+            if (!isSelectionActive) previewActions()
             AnimatedVisibility(
                 visible = isSelectionActive,
                 enter = slideInVertically(AppMotion.enter()) { it } + fadeIn(AppMotion.enter()),

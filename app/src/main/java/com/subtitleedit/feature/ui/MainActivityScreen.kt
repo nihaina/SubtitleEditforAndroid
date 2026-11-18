@@ -3,6 +3,7 @@ package com.subtitleedit.feature.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,8 +28,10 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +44,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.safeDrawing
@@ -56,6 +60,7 @@ import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.util.BatchRename
 import com.subtitleedit.util.FileOperationUiPolicy
+import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
 import com.subtitleedit.model.FileBrowserViewMode
@@ -188,7 +193,11 @@ internal fun MainActivityScreen(
     categoryRevealRequest: MediaCategoryRevealRequest? = null,
     onDirectoryRevealFinished: (Long) -> Unit = {},
     imagePreviewFile: File? = null,
-    onCloseImagePreview: () -> Unit = {}
+    onImagePreviewPageChanged: (File) -> Unit = {},
+    onCloseImagePreview: () -> Unit = {},
+    onShareImagePreview: (File) -> Unit = {},
+    onDeleteImagePreview: (File) -> Unit = {},
+    onShowImagePreviewInfo: (File) -> Unit = {}
 ) {
     val directoryListState = rememberDirectoryListState(state)
     val directoryGridState = rememberDirectoryGridState(state)
@@ -208,11 +217,23 @@ internal fun MainActivityScreen(
     val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
     val previewFile = imagePreviewFile.takeIf { isDirectoryPage && state.pendingOperation == null }
     val isPreviewingImage = previewFile != null
+    val previewDirectory = previewFile?.parent
+    val previewFiles = remember(previewDirectory, state.files, state.fileMetadata) {
+        if (previewDirectory == null) emptyList() else state.files.filter { file ->
+            FileTypePolicy.isImage(file) && file.parent == previewDirectory &&
+                state.fileMetadata[file.absolutePath]?.isRegularFile == true
+        }
+    }
+    var previewControlsVisible by rememberSaveable(isPreviewingImage) { mutableStateOf(true) }
+    var previewQuarterTurns by rememberSaveable(previewFile?.absolutePath) { mutableIntStateOf(0) }
     // Selection actions belong to directoryContent in the legacy layout. The
     // selection state can survive a top-level tab switch, but its toolbar and
     // bottom action row stay hidden until the directory tab is visible again.
     val isSelectionActive = isDirectoryPage &&
         (state.selectedPaths.isNotEmpty() || state.pendingOperation != null)
+    val restorePreviewControls = if (isPreviewingImage && !previewControlsVisible && !isSelectionActive) {
+        Modifier.pointerInput(Unit) { detectTapGestures { previewControlsVisible = true } }
+    } else Modifier
     val searchFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -245,15 +266,20 @@ internal fun MainActivityScreen(
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.systemBarsIgnoringVisibility))
             .background(MaterialTheme.colorScheme.background)
+            .then(restorePreviewControls)
     ) {
         if (previewFile != null) {
-            val isSelected = previewFile.absolutePath in state.selectedPaths
             DirectoryImagePreview(
                 file = previewFile,
-                isSelected = isSelected,
-                selectionTitle = state.toolbarTitle.takeIf { isSelected },
-                onNavigationClick = if (isSelected) onToolbarBack else onCloseImagePreview,
+                files = previewFiles.takeIf { previewFile in it } ?: listOf(previewFile),
+                isSelected = previewFile.absolutePath in state.selectedPaths,
+                selectionTitle = state.toolbarTitle.takeIf { isSelectionActive },
+                controlsVisible = previewControlsVisible,
+                quarterTurns = previewQuarterTurns,
+                onPageChanged = onImagePreviewPageChanged,
+                onNavigationClick = if (isSelectionActive) onToolbarBack else onCloseImagePreview,
                 onToggleSelection = { onFileLongClick(previewFile) },
+                onToggleControls = { previewControlsVisible = !previewControlsVisible },
                 modifier = Modifier.weight(1f).fillMaxWidth()
             )
         } else MainTopLevelPager(
@@ -340,7 +366,18 @@ internal fun MainActivityScreen(
         }
         MainBottomBar(
             state = state.bottomBarState(),
-            showNavigation = !isPreviewingImage,
+            previewActions = if (previewFile == null) null else {
+                {
+                    if (previewControlsVisible) {
+                        DirectoryImagePreviewActions(
+                            onShare = { onShareImagePreview(previewFile) },
+                            onRotate = { previewQuarterTurns = (previewQuarterTurns + 1) % 4 },
+                            onDelete = { onDeleteImagePreview(previewFile) },
+                            onShowInfo = { onShowImagePreviewInfo(previewFile) }
+                        )
+                    }
+                }
+            },
             indicatorFrame = topLevelMotion.indicatorFrame,
             onTopLevelPageSelected = onTopLevelPageSelected,
             onCopy = onCopy,

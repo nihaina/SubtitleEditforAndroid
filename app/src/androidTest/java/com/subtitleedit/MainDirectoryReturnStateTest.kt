@@ -1,10 +1,12 @@
 package com.subtitleedit
 
 import android.graphics.Bitmap
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
@@ -16,6 +18,10 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.pinch
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.subtitleedit.feature.ui.MainActivityScreenState
@@ -43,7 +49,7 @@ class MainDirectoryReturnStateTest {
         val root = File(activity.cacheDir, "directory-image-${System.nanoTime()}").apply { check(mkdir()) }
         repeat(40) { index -> check(File(root, "folder-$index").mkdir()) }
         val image = File(root, "cover.PNG")
-        val bitmap = Bitmap.createBitmap(16, 8, Bitmap.Config.ARGB_8888)
+        val bitmap = Bitmap.createBitmap(64, 2, Bitmap.Config.ARGB_8888)
         image.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
         bitmap.recycle()
         val original = screen()
@@ -65,6 +71,48 @@ class MainDirectoryReturnStateTest {
             preview.assertIsDisplayed()
             val previewNodeId = preview.fetchSemanticsNode().id
             val checkbox = compose.onNodeWithContentDescription(activity.getString(R.string.select_file))
+            val title = compose.onNodeWithText(image.name)
+            val previewActions = listOf(
+                R.string.media_selection_share,
+                R.string.directory_image_preview_rotate,
+                R.string.delete,
+                R.string.directory_image_preview_info
+            ).map { compose.onNodeWithText(activity.getString(it)) }
+            val more = compose.onNodeWithText(activity.getString(R.string.activity_main_text_01))
+            more.assertDoesNotExist()
+            val controls = previewActions + checkbox
+            val columns = previewActions.map { it.assertIsDisplayed().fetchSemanticsNode().boundsInRoot.left }
+            assertTrue(columns.zipWithNext().all { (left, right) -> left < right })
+            val previewBounds = preview.fetchSemanticsNode().boundsInRoot
+            val checkboxBounds = checkbox.assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertTrue(
+                "Selection checkbox should be in the top right",
+                checkboxBounds.bottom <= previewBounds.top && checkboxBounds.center.x > previewBounds.center.x
+            )
+            fun awaitToolbar(visible: Boolean) {
+                compose.waitUntil(5_000L) {
+                    compose.onAllNodes(hasText(image.name)).fetchSemanticsNodes().isNotEmpty() == visible
+                }
+            }
+
+            preview.performTouchInput { click(center) }
+            awaitToolbar(false)
+            controls.forEach { it.assertDoesNotExist() }
+            title.assertDoesNotExist()
+            assertEquals(previewNodeId, preview.fetchSemanticsNode().id)
+            preview.performTouchInput { click(center) }
+            awaitToolbar(true)
+            checkbox.assertIsOff()
+            preview.performTouchInput { click(Offset(centerX, 8f)) }
+            awaitToolbar(false)
+            controls.forEach { it.assertDoesNotExist() }
+            title.assertDoesNotExist()
+            assertEquals(previewNodeId, preview.fetchSemanticsNode().id)
+            preview.performTouchInput { click(Offset(centerX, 8f)) }
+            awaitToolbar(true)
+            title.assertIsDisplayed()
+            controls.forEach { it.assertIsDisplayed() }
+
             val copyAction = compose.onNodeWithText(activity.getString(R.string.activity_main_contentdescription_01))
             val previewBottom = preview.fetchSemanticsNode().boundsInRoot.bottom
             compose.mainClock.autoAdvance = false
@@ -93,6 +141,18 @@ class MainDirectoryReturnStateTest {
                 compose.mainClock.autoAdvance = true
             }
 
+            checkbox.performClick().assertIsOn()
+            preview.performTouchInput { click(Offset(centerX, 8f)) }
+            checkbox.assertIsOn()
+            title.assertIsDisplayed()
+            copyAction.assertIsDisplayed()
+
+            pressBack()
+            checkbox.assertIsOff()
+            copyAction.assertDoesNotExist()
+            assertEquals(emptySet<String>(), screen().selectedPaths)
+            assertEquals(previewNodeId, preview.fetchSemanticsNode().id)
+
             pressBack()
             preview.assertDoesNotExist()
             row.assertIsDisplayed()
@@ -105,6 +165,77 @@ class MainDirectoryReturnStateTest {
             assertEquals(FileOperation.COPY, screen().pendingOperation)
             assertEquals(setOf(image.absolutePath), screen().selectedPaths)
             assertEquals(root, screen().currentDirectory)
+        } finally {
+            compose.runOnIdle {
+                call("closeImagePreview", emptyArray())
+                call("exitSelectionMode", emptyArray())
+                call("changeFileViewMode", arrayOf(FileBrowserViewMode::class.java), original.viewMode)
+                original.currentDirectory?.takeIf { it.isDirectory }?.let(::load)
+            }
+            root.deleteRecursively()
+        }
+    }
+
+    @Test fun imagePreviewSwipesInDirectoryOrderAndUpdatesTheHeader() {
+        val activity = compose.activity
+        val root = File(activity.cacheDir, "directory-image-pages-${System.nanoTime()}").apply { check(mkdir()) }
+        val bitmap = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888)
+        val images = (1..3).map { number ->
+            File(root, "$number.png").apply {
+                outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+            }
+        }
+        bitmap.recycle()
+        check(File(root, "folder.png").mkdir())
+        File(root, "notes.txt").writeText("not an image")
+
+        val original = screen()
+        try {
+            compose.runOnIdle {
+                call("showTopLevelPage", arrayOf(Int::class.javaPrimitiveType!!), R.id.nav_directory)
+                call("changeFileViewMode", arrayOf(FileBrowserViewMode::class.java), FileBrowserViewMode.DETAILED)
+                load(root)
+            }
+            awaitDirectory(root)
+            val orderedImages = screen().files.filter { it in images }
+            assertEquals(3, orderedImages.size)
+            val middleImage = orderedImages[1]
+            compose.onNodeWithTag("directory-file:${middleImage.path}").performClick()
+
+            val previewLabel = activity.getString(R.string.directory_image_preview)
+            val preview = compose.onNodeWithContentDescription(previewLabel)
+            val checkbox = compose.onNodeWithContentDescription(activity.getString(R.string.select_file))
+            fun assertPage(index: Int) {
+                val title = activity.getString(R.string.directory_image_preview_position, index + 1, images.size)
+                compose.onNodeWithText(title).assertIsDisplayed()
+                compose.onNodeWithText(orderedImages[index].name).assertIsDisplayed()
+                compose.waitUntil(5_000L) { compose.onAllNodes(hasContentDescription(previewLabel)).fetchSemanticsNodes().size == 1 }
+            }
+
+            assertPage(1)
+            preview.performTouchInput { swipeLeft(startX = width * 0.85f, endX = width * 0.15f) }
+            assertPage(2)
+            preview.performTouchInput { swipeLeft(startX = width * 0.85f, endX = width * 0.15f) }
+            assertPage(2)
+
+            checkbox.performClick().assertIsOn()
+            preview.performTouchInput { swipeRight(startX = width * 0.15f, endX = width * 0.85f) }
+            compose.onNodeWithText(middleImage.name).assertIsDisplayed()
+            checkbox.assertIsOff()
+            assertEquals(setOf(orderedImages.last().absolutePath), screen().selectedPaths)
+            compose.onNodeWithContentDescription(activity.getString(R.string.file_picker_clear_selection)).performClick()
+            assertPage(1)
+
+            preview.performTouchInput {
+                pinch(
+                    start0 = center - Offset(width * 0.07f, 0f),
+                    end0 = center - Offset(width * 0.36f, 0f),
+                    start1 = center + Offset(width * 0.07f, 0f),
+                    end1 = center + Offset(width * 0.36f, 0f)
+                )
+                swipeRight(startX = width * 0.15f, endX = width * 0.85f)
+            }
+            assertPage(1)
         } finally {
             compose.runOnIdle {
                 call("closeImagePreview", emptyArray())
