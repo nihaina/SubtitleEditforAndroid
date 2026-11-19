@@ -24,9 +24,11 @@ class FileManagementSettingsActivity : AppComposeActivity() {
                 FileManagementSettingsScreen(
                     showAllFileTypes = state.showAllFileTypes,
                     showHiddenFiles = state.showHiddenFiles,
+                    showFullFileNames = state.showFullFileNames,
                     onBack = { onBackPressedDispatcher.onBackPressed() },
                     onShowAllFileTypesChanged = viewModel::setShowAllFileTypes,
-                    onShowHiddenFilesChanged = viewModel::setShowHiddenFiles
+                    onShowHiddenFilesChanged = viewModel::setShowHiddenFiles,
+                    onShowFullFileNamesChanged = viewModel::setShowFullFileNames
                 )
             }
         }
@@ -37,9 +39,11 @@ class FileManagementSettingsActivity : AppComposeActivity() {
 private fun FileManagementSettingsScreen(
     showAllFileTypes: Boolean,
     showHiddenFiles: Boolean,
+    showFullFileNames: Boolean,
     onBack: () -> Unit,
     onShowAllFileTypesChanged: (Boolean) -> Unit,
-    onShowHiddenFilesChanged: (Boolean) -> Unit
+    onShowHiddenFilesChanged: (Boolean) -> Unit,
+    onShowFullFileNamesChanged: (Boolean) -> Unit
 ) {
     AppToolScaffold(
         title = stringResource(R.string.file_management_settings),
@@ -56,6 +60,12 @@ private fun FileManagementSettingsScreen(
             description = stringResource(R.string.activity_settings_text_16),
             checked = showHiddenFiles,
             onCheckedChange = onShowHiddenFilesChanged
+        )
+        SettingsSwitchRow(
+            title = stringResource(R.string.show_full_file_names),
+            description = stringResource(R.string.show_full_file_names_description),
+            checked = showFullFileNames,
+            onCheckedChange = onShowFullFileNamesChanged
         )
     }
 }

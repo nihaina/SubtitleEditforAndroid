@@ -70,6 +70,7 @@ class SettingsManager private constructor(context: Context) {
         )
         private const val KEY_SHOW_ALL_FILE_TYPES = "show_all_file_types"
         private const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
+        private const val KEY_SHOW_FULL_FILE_NAMES = "show_full_file_names"
         private const val KEY_FILE_SORT_FIELD = "file_sort_field"
         private const val KEY_FILE_SORT_DIRECTION = "file_sort_direction"
         private const val KEY_FILE_VIEW_MODE = "file_view_mode"
@@ -315,6 +316,7 @@ class SettingsManager private constructor(context: Context) {
     fun exportSettingsSnapshot(): Map<String, Any?> {
         val snapshot = prefs.all.toMutableMap()
         snapshot[KEY_AI_CUSTOM_PROVIDERS] = CustomAiProviders.encode(getCustomAiProviders())
+        snapshot[KEY_SHOW_FULL_FILE_NAMES] = isShowFullFileNamesEnabled()
         // Dynamic Padding defaults to enabled and therefore may not have a
         // persisted key until the user changes it. Export the effective value
         // for every ASR timeline so the backup is complete even in that case.
@@ -1617,6 +1619,13 @@ class SettingsManager private constructor(context: Context) {
 
     fun setShowHiddenFilesEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_SHOW_HIDDEN_FILES, enabled).apply()
+    }
+
+    fun isShowFullFileNamesEnabled(): Boolean =
+        prefs.getBoolean(KEY_SHOW_FULL_FILE_NAMES, false)
+
+    fun setShowFullFileNamesEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SHOW_FULL_FILE_NAMES, enabled).apply()
     }
 
     fun getFileSortField(): com.subtitleedit.model.FileSortField = runCatching {

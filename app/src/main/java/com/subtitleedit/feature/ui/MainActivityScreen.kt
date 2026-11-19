@@ -116,6 +116,7 @@ internal data class MainActivityScreenState(
     val sortField: FileSortField = FileSortField.NAME,
     val sortDirection: FileSortDirection = FileSortDirection.ASCENDING,
     val viewMode: FileBrowserViewMode = FileBrowserViewMode.DETAILED,
+    val showFullFileNames: Boolean = false,
     val canConvertSelected: Boolean = false,
     val canCompressSelected: Boolean = true,
     val canEditTagsSelected: Boolean = false,

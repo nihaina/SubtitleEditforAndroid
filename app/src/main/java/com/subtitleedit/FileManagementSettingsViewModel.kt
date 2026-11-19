@@ -5,7 +5,8 @@ import com.subtitleedit.util.SettingsManager
 
 internal data class FileManagementSettingsUiState(
     val showAllFileTypes: Boolean = false,
-    val showHiddenFiles: Boolean = false
+    val showHiddenFiles: Boolean = false,
+    val showFullFileNames: Boolean = false
 )
 
 internal class FileManagementSettingsViewModel(
@@ -15,7 +16,8 @@ internal class FileManagementSettingsViewModel(
     SettingsManager.getInstance(application).let {
         FileManagementSettingsUiState(
             showAllFileTypes = it.isShowAllFileTypesEnabled(),
-            showHiddenFiles = it.isShowHiddenFilesEnabled()
+            showHiddenFiles = it.isShowHiddenFilesEnabled(),
+            showFullFileNames = it.isShowFullFileNamesEnabled()
         )
     }
 ) {
@@ -29,5 +31,10 @@ internal class FileManagementSettingsViewModel(
     fun setShowHiddenFiles(enabled: Boolean) {
         setState { copy(showHiddenFiles = enabled) }
         settings.setShowHiddenFilesEnabled(enabled)
+    }
+
+    fun setShowFullFileNames(enabled: Boolean) {
+        setState { copy(showFullFileNames = enabled) }
+        settings.setShowFullFileNamesEnabled(enabled)
     }
 }

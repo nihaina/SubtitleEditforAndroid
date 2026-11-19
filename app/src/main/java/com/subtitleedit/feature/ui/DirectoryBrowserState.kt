@@ -16,6 +16,7 @@ internal class DirectoryBrowserState(
     val selectedPaths: Set<String>,
     val pendingOperation: FileOperation?,
     val viewMode: FileBrowserViewMode,
+    val showFullFileNames: Boolean,
     val scrollRequest: MainDirectoryScrollRequest?,
     val directoryRevealRequest: MainDirectoryRevealRequest?,
     val relativePathRoot: File?,
@@ -38,13 +39,15 @@ private class DirectoryRowsKey(
 @Composable
 internal fun rememberDirectoryBrowserState(state: MainActivityScreenState): DirectoryBrowserState = remember(
     DirectoryRowsKey(state.files, state.fileMetadata), state.currentDirectory, state.canonicalDirectoryPath,
-    state.selectedPaths, state.pendingOperation, state.viewMode, state.scrollRequest, state.directoryRevealRequest,
+    state.selectedPaths, state.pendingOperation, state.viewMode, state.showFullFileNames,
+    state.scrollRequest, state.directoryRevealRequest,
     state.relativePathRoot, state.isDirectoryLoading, state.isDirectoryNavigationPending,
     state.isSearchInProgress, state.showDirectoryEmptyState, state.directoryEmptyStateMessage,
 ) {
     DirectoryBrowserState(
         state.currentDirectory, state.canonicalDirectoryPath, state.files, state.fileMetadata,
-        state.selectedPaths, state.pendingOperation, state.viewMode, state.scrollRequest, state.directoryRevealRequest,
+        state.selectedPaths, state.pendingOperation, state.viewMode, state.showFullFileNames,
+        state.scrollRequest, state.directoryRevealRequest,
         state.relativePathRoot, state.isDirectoryLoading, state.isDirectoryNavigationPending,
         state.isSearchInProgress, state.showDirectoryEmptyState, state.directoryEmptyStateMessage,
     )

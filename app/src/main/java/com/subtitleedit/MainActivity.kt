@@ -162,6 +162,7 @@ class MainActivity : AppComposeActivity() {
     private var directoryEmptyStateMessage = R.string.no_files
     private var showAllFileTypes = false
     private var showHiddenFiles = false
+    private var showFullFileNames = false
     private var directoryLoading = false
     private val directoryNavigationPending: Boolean
         get() = directoryLoading && directorySnapshot?.directory?.absolutePath !=
@@ -250,12 +251,14 @@ class MainActivity : AppComposeActivity() {
             lifecycleScope, stateModel.directoryCache, ::applyDirectorySnapshot
         )
         directoryDisplayPreparer = DirectoryDisplayPreparer(lifecycleScope, ::applyDirectoryDisplay)
+        showFullFileNames = settingsManager.isShowFullFileNamesEnabled()
         screenState = MainActivityScreenState(
             selectedTopLevelItem = MainNavigationPolicy.pageForMode(
                 stateModel.documentState.selectedTopLevelItem,
                 com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled
             ),
-            playerModeEnabled = com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled
+            playerModeEnabled = com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled,
+            showFullFileNames = showFullFileNames
         )
         searchExpanded = stateModel.documentState.isFileSearchActive &&
             stateModel.documentState.searchQuery.isNotEmpty()
@@ -544,6 +547,7 @@ class MainActivity : AppComposeActivity() {
     override fun onResume() {
         super.onResume()
         applyPlayerWindow()
+        showFullFileNames = SettingsManager.getInstance(this).isShowFullFileNamesEnabled()
         lifecycleCoordinator.onResume()
         refreshPlayerModeNavigation()
         topLevelPageRefreshVersion++
@@ -694,6 +698,7 @@ class MainActivity : AppComposeActivity() {
             sortField = document.sortField ?: FileSortField.NAME,
             sortDirection = document.sortDirection ?: FileSortDirection.ASCENDING,
             viewMode = document.viewMode ?: FileBrowserViewMode.DETAILED,
+            showFullFileNames = showFullFileNames,
             canConvertSelected = canConvertSelected,
             canCompressSelected = !isFileSearchQueryActive(),
             canEditTagsSelected = canEditTagsSelected,

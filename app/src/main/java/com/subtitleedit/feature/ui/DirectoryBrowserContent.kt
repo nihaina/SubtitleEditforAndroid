@@ -216,7 +216,8 @@ private fun DirectoryBrowserPage(
                     onClick = { if (!state.isDirectoryNavigationPending) onFileClick(file) },
                     onLongClick = { if (!state.isDirectoryNavigationPending) onFileLongClick(file) },
                     viewMode = state.viewMode,
-                    directoryPageStyle = true
+                    directoryPageStyle = true,
+                    showFullFileName = state.showFullFileNames
                 )
             }
         } else {

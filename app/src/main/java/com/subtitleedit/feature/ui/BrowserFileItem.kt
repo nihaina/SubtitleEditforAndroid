@@ -37,6 +37,7 @@ internal fun BrowserFileRow(
     initialMetadata: BrowserFileMetadata? = null,
     directoryArtwork: Bitmap? = null,
     translatedName: String? = null,
+    showFullFileName: Boolean = false,
 ) {
     val context = LocalContext.current
     // FavoritesFragment historically used FileListAdapter without an
@@ -98,7 +99,8 @@ internal fun BrowserFileRow(
         restricted = restricted || !enabled,
         isSelected = isSelected,
         alpha = alpha,
-        directoryPageStyle = directoryPageStyle
+        directoryPageStyle = directoryPageStyle,
+        showFullFileName = showFullFileName
     )
 }
 
