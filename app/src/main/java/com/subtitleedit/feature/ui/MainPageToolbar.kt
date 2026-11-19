@@ -60,6 +60,7 @@ internal fun MainPageToolbar(
     onCreateRequested: (MainCreateItemKind) -> Unit,
     onSearchRequested: () -> Unit,
     onOpenFileManagementSettings: () -> Unit,
+    directoryTitleAction: (@Composable () -> Unit)? = null,
 ) {
     var createMenuExpanded by remember { mutableStateOf(false) }
     var directoryMenuExpanded by remember { mutableStateOf(false) }
@@ -75,22 +76,27 @@ internal fun MainPageToolbar(
             scrolledContainerColor = if (usesPageBackground) settingsPageBackground() else MaterialTheme.colorScheme.surfaceContainer
         ),
         title = {
-            DirectoryToolbarTitle(
-                searchOpen = state.isSearchExpanded && isDirectoryPage && !isSelectionActive,
-                query = state.searchQuery,
-                title = when {
-                    state.toolbarTitle.isNotBlank() -> state.toolbarTitle
-                    isSelectionActive -> FileOperationUiPolicy.selectionTitle(
-                        state.pendingOperation,
-                        state.selectionCount
-                    )
-                    isDirectoryPage -> stringResource(R.string.nav_directory)
-                    else -> stringResource(MainNavigationPolicy.titleRes(state.selectedTopLevelItem))
-                },
-                onQueryChanged = onSearchChanged,
-                onCloseSearch = onToolbarBack,
-                focusRequester = searchFocusRequester
-            )
+            val titleAction = directoryTitleAction?.takeIf { !state.isSearchExpanded && !isSelectionActive }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DirectoryToolbarTitle(
+                    searchOpen = state.isSearchExpanded && isDirectoryPage && !isSelectionActive,
+                    query = state.searchQuery,
+                    title = when {
+                        state.toolbarTitle.isNotBlank() -> state.toolbarTitle
+                        isSelectionActive -> FileOperationUiPolicy.selectionTitle(
+                            state.pendingOperation,
+                            state.selectionCount
+                        )
+                        isDirectoryPage -> stringResource(R.string.nav_directory)
+                        else -> stringResource(MainNavigationPolicy.titleRes(state.selectedTopLevelItem))
+                    },
+                    onQueryChanged = onSearchChanged,
+                    onCloseSearch = onToolbarBack,
+                    focusRequester = searchFocusRequester,
+                    modifier = if (titleAction == null) Modifier else Modifier.weight(1f, fill = false),
+                )
+                titleAction?.invoke()
+            }
         },
         navigationIcon = {
             if (state.toolbarHasBack || isSelectionActive) {

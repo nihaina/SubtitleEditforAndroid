@@ -311,6 +311,11 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".PageTranslationSettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
+
+        <activity
             android:name=".TtsSettingsActivity"
             android:exported="false"
             android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />

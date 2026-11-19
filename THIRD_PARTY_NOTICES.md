@@ -4,6 +4,19 @@ SubtitleEdit for Android includes the following third-party components.
 Their licenses apply to those components independently of the project's
 GPL-3.0 license.
 
+## Foxlet Translate 0.5.0
+
+On-device directory-name translation uses [Foxlet Translate](https://github.com/yinvoke/foxlet-translate/tree/v0.5.0),
+licensed under MIT. The app [rebuilds the ARM64 native library for API 26](native/foxlet/README.md)
+and retains the upstream SDK, notices, native dependency licenses, and source
+references under `io/github/yinvoker/foxlet/licenses/`.
+It uses [Mozilla Firefox Translations models](https://github.com/mozilla/translations),
+licensed under MPL-2.0 and downloaded separately from Mozilla at the user's request.
+
+## Google ML Kit Language Identification 17.0.6
+
+Automatic directory-name language detection uses the [bundled ML Kit Android SDK and model](https://developers.google.com/ml-kit/language/identification/android), subject to the [ML Kit terms](https://developers.google.com/ml-kit/terms). The input filename is processed on device. The SDK may collect identified language codes and other diagnostics as described in [Google's data disclosure](https://developers.google.com/ml-kit/android-data-disclosure).
+
 ## chardet4j 78.1.0
 
 Automatic subtitle charset detection uses [chardet4j](https://github.com/sigpwned/chardet4j),

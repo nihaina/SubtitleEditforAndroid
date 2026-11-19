@@ -1,0 +1,54 @@
+diff --git a/engine/marian-fork/src/3rd_party/pathie-cpp/src/pathie.cpp b/engine/marian-fork/src/3rd_party/pathie-cpp/src/pathie.cpp
+--- a/engine/marian-fork/src/3rd_party/pathie-cpp/src/pathie.cpp
++++ b/engine/marian-fork/src/3rd_party/pathie-cpp/src/pathie.cpp
+@@ -78,7 +78,17 @@
+ }
+ #endif
+
+-#ifdef _PATHIE_UNIX
++#if defined(__ANDROID__)
++std::string Pathie::utf8_to_filename(const std::string& utf8)
++{
++  return utf8;
++}
++
++std::string Pathie::filename_to_utf8(const std::string& native_filename)
++{
++  return native_filename;
++}
++#elif defined(_PATHIE_UNIX)
+ #include <cstring>
+ #include <cstdlib>
+ #include <errno.h>
+diff --git a/engine/marian-fork/src/3rd_party/pathie-cpp/src/path.cpp b/engine/marian-fork/src/3rd_party/pathie-cpp/src/path.cpp
+--- a/engine/marian-fork/src/3rd_party/pathie-cpp/src/path.cpp
++++ b/engine/marian-fork/src/3rd_party/pathie-cpp/src/path.cpp
+@@ -3170,6 +3170,7 @@
+ ///
+ /// \see dglob() fnmatch()
+ ///
++#if !defined(__ANDROID__) || __ANDROID_API__ >= 28
+ std::vector<Path> Path::glob(const std::string& pattern, int flags /* = 0 */)
+ {
+ #if defined(_PATHIE_UNIX)
+@@ -3243,6 +3244,7 @@
+ #endif
+   flags; // make compiler happy
+ }
++#endif
+
+ ///@}
+
+@@ -3302,10 +3304,12 @@
+  *
+  * \see glob() fnmatch()
+  */
++#if !defined(__ANDROID__) || __ANDROID_API__ >= 28
+ std::vector<Path> Path::dglob(const std::string& pattern, int flags /* = 0 */) const
+ {
+   return glob(m_path + "/" + pattern, flags);
+ }
++#endif
+
+ /**
+  * Appends a /, then the new component, and

@@ -118,6 +118,7 @@ fun SettingsScreen(
     onSelectPlayingChanged: (Boolean) -> Unit,
     onOpenAiSettings: () -> Unit,
     onOpenModelManagement: () -> Unit,
+    onOpenPageTranslation: () -> Unit,
     onOpenTtsSettings: () -> Unit,
     onOpenLogs: () -> Unit,
     onOpenAbout: () -> Unit,
@@ -171,7 +172,7 @@ fun SettingsScreen(
             item(key = "appearance-gap", contentType = "group-gap") {
                 Spacer(Modifier.height(AppSpacing.CardGap * 2 + if (useMaterial3Visuals) 8.dp else 20.dp))
             }
-            settingsGroupItems("general", 8, useMaterial3Visuals) { index ->
+            settingsGroupItems("general", 9, useMaterial3Visuals) { index ->
                 when (index) {
                     0 -> SettingsPageRow(
                         useMaterial3Visuals = useMaterial3Visuals,
@@ -187,31 +188,38 @@ fun SettingsScreen(
                     )
                     2 -> SettingsPageRow(
                         useMaterial3Visuals = useMaterial3Visuals,
+                        title = stringResource(R.string.page_translation),
+                        iconRes = R.drawable.ic_page_translation,
+                        showArrow = true,
+                        onClick = onOpenPageTranslation
+                    )
+                    3 -> SettingsPageRow(
+                        useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.tts_settings),
                         iconRes = R.drawable.ic_tts,
                         onClick = onOpenTtsSettings
                     )
-                    3 -> SettingsPageRow(
+                    4 -> SettingsPageRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.activity_settings_text_05),
                         value = state.cacheSize,
                         iconRes = R.drawable.ic_delete_normal,
                         onClick = { showCacheDialog = true }
                     )
-                    4 -> SettingsPageRow(
+                    5 -> SettingsPageRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.activity_settings_text_06),
                         iconRes = R.drawable.ic_document,
                         onClick = onOpenLogs
                     )
-                    5 -> SettingsPageRow(
+                    6 -> SettingsPageRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.about),
                         iconRes = R.drawable.ic_info,
                         showArrow = true,
                         onClick = onOpenAbout
                     )
-                    6 -> SettingsPageRow(
+                    7 -> SettingsPageRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.activity_settings_software_directory),
                         value = state.softwareDirectory.ifBlank {
@@ -222,7 +230,7 @@ fun SettingsScreen(
                         showArrow = true,
                         onClick = onSelectSoftwareDirectory
                     )
-                    7 -> SettingsPageSwitchRow(
+                    8 -> SettingsPageSwitchRow(
                         useMaterial3Visuals = useMaterial3Visuals,
                         title = stringResource(R.string.activity_settings_text_07),
                         description = stringResource(R.string.activity_settings_text_08),

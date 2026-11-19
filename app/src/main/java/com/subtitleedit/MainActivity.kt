@@ -396,6 +396,7 @@ class MainActivity : AppComposeActivity() {
                 ) {
                 MainActivityScreen(
                         state = screenState,
+                        onOpenPageTranslation = { startActivity(Intent(this, PageTranslationSettingsActivity::class.java)) },
                         topLevelPageRefreshVersion = topLevelPageRefreshVersion,
                         topLevelPageSelectionVersion = topLevelPageSelectionVersion,
                         onDirectoryScrollPosition = { directoryScrollPosition = it },

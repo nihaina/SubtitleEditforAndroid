@@ -19,6 +19,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.DirectoryScrollPosition
+import com.subtitleedit.R
 import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.ui.theme.AppMotion
 import com.subtitleedit.ui.settings.settingsPageBackground
@@ -64,7 +65,8 @@ internal fun DirectoryBrowserContent(
     gridState: LazyGridState = rememberDirectoryGridState(state),
     appliedScrollGeneration: MutableState<Long?> = remember { mutableStateOf(null) },
     isActive: Boolean = true,
-    onRevealFinished: (Long) -> Unit = {}
+    onRevealFinished: (Long) -> Unit = {},
+    translatedNames: Map<String, String> = emptyMap(),
 ) {
     DirectoryBrowserPage(
         state = rememberDirectoryBrowserState(state),
@@ -77,6 +79,7 @@ internal fun DirectoryBrowserContent(
         appliedScrollGenerationState = appliedScrollGeneration,
         isActive = isActive,
         onRevealFinished = onRevealFinished,
+        translatedNames = translatedNames,
     )
 }
 
@@ -92,6 +95,7 @@ private fun DirectoryBrowserPage(
     appliedScrollGenerationState: MutableState<Long?>,
     isActive: Boolean,
     onRevealFinished: (Long) -> Unit,
+    translatedNames: Map<String, String>,
 ) {
     // Directory long-press keeps file operations; only an already active media selection takes over.
     val mediaSelection = com.subtitleedit.ui.LocalMediaSelection.current?.takeIf { it.active }
@@ -156,6 +160,15 @@ private fun DirectoryBrowserPage(
             trackColor = Color.Transparent,
             progress = { 1f }
         )
+        val showAttribution by remember(translatedNames) { derivedStateOf { translatedNames.isNotEmpty() } }
+        if (showAttribution) {
+            Text(
+                text = stringResource(R.string.page_translation_attribution),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
 
         if (state.showDirectoryEmptyState) {
             Box(
@@ -191,6 +204,7 @@ private fun DirectoryBrowserPage(
                             } else Modifier
                     ),
                     file = file,
+                    translatedName = translatedNames[file.absolutePath],
                     metadata = state.fileMetadata[file.absolutePath],
                     relativePathRoot = state.relativePathRoot,
                     isSelected = mediaSelection?.contains(file.absolutePath) ?: (file.absolutePath in state.selectedPaths),

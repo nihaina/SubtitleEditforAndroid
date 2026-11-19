@@ -1,3 +1,11 @@
+## Foxlet Translate 0.5.0
+
+`foxlet-v0.5.0.aar` 保留[上游发行版](https://github.com/yinvoke/foxlet-translate/releases/tag/v0.5.0)的 JVM SDK，
+原生库以 Android 8.0（API 26）、ARM64 为目标重新编译。构建和打包步骤见 `native/foxlet/README.md`。
+当前 AAR 的 SHA-256 为 `f0a5afe611f54251ae177a74074ae2179d810b6839d686274e6f2b9d754cabba`。
+JVM SDK 使用 Kotlin 2.4 元数据。AAR 不另带 `libc++_shared.so`，复用应用已有的 C++ 运行库。
+模型不随 AAR 分发，运行时由 WorkManager 调度 SDK 的应用内下载。
+
 ## FFmpegKitNext
 
 当前应用使用 `ffmpeg-kit-next:8.1.0-mpv5`，在下述构建配置上新增 x265 4.2、

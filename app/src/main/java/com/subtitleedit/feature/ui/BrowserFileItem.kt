@@ -35,7 +35,8 @@ internal fun BrowserFileRow(
     metadataRefreshKey: Any? = null,
     isDirectoryHint: Boolean? = null,
     initialMetadata: BrowserFileMetadata? = null,
-    directoryArtwork: Bitmap? = null
+    directoryArtwork: Bitmap? = null,
+    translatedName: String? = null,
 ) {
     val context = LocalContext.current
     // FavoritesFragment historically used FileListAdapter without an
@@ -82,7 +83,7 @@ internal fun BrowserFileRow(
             size = fileMetadata?.size ?: -1L,
             modifiedTimeMillis = fileMetadata?.modifiedTimeMillis,
             itemCount = rowData?.directoryCount.takeUnless { restricted },
-            displayName = displayName,
+            displayName = translatedName?.let { displayName.removeSuffix(file.name) + it } ?: displayName,
             isParentDirectory = file.name == ".."
         ),
         viewMode = viewMode,

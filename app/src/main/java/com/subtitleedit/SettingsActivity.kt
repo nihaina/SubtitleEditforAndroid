@@ -41,6 +41,7 @@ class SettingsActivity : AppComposeActivity() {
                     onSelectPlayingChanged = viewModel::setSelectPlayingSubtitle,
                     onOpenAiSettings = { open(AiSettingsActivity::class.java) },
                     onOpenModelManagement = { open(ModelManagementActivity::class.java) },
+                    onOpenPageTranslation = { open(PageTranslationSettingsActivity::class.java) },
                     onOpenTtsSettings = { open(TtsSettingsActivity::class.java) },
                     onOpenLogs = { open(LogActivity::class.java) },
                     onOpenAbout = { open(AboutActivity::class.java) },

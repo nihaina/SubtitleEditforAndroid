@@ -509,6 +509,7 @@ internal fun MainTopLevelPages(
             },
             onOpenAiSettings = { context.openActivity(AiSettingsActivity::class.java) },
             onOpenModelManagement = { context.openActivity(ModelManagementActivity::class.java) },
+            onOpenPageTranslation = { context.openActivity(PageTranslationSettingsActivity::class.java) },
             onOpenTtsSettings = { context.openActivity(TtsSettingsActivity::class.java) },
             onOpenLogs = { context.openActivity(LogActivity::class.java) },
             onOpenAbout = { context.openActivity(AboutActivity::class.java) },

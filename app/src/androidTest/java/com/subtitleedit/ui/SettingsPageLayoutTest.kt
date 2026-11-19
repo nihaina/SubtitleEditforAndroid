@@ -48,6 +48,7 @@ class SettingsPageLayoutTest {
                         onCheckUpdatesChanged = {}, onPreserveDirectoriesChanged = {},
                         onLoopSelectedChanged = {}, onSelectPlayingChanged = {},
                         onOpenAiSettings = {}, onOpenModelManagement = {}, onOpenTtsSettings = {},
+                        onOpenPageTranslation = { actions += "translation" },
                         onOpenLogs = {}, onOpenAbout = {}, onSelectSoftwareDirectory = {},
                         onConfirmSoftwareDirectory = {}, onCancelSoftwareDirectory = {},
                         onCacheClear = {}, onEmptyCacheClear = {},
@@ -62,6 +63,9 @@ class SettingsPageLayoutTest {
         // while still becoming reachable through normal list scrolling.
         compose.onNodeWithText(compose.activity.getString(R.string.activity_settings_software_directory)).assertDoesNotExist()
         compose.onNodeWithText(backup).assertDoesNotExist()
+        val translation = compose.activity.getString(R.string.page_translation)
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText(translation))
+        compose.onNodeWithText(translation).assertIsDisplayed().performClick()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText(backup))
         val row = compose.onNodeWithText(backup)
         val before = row.fetchSemanticsNode().boundsInRoot
@@ -72,6 +76,6 @@ class SettingsPageLayoutTest {
         row.performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.settings_backup_continue)).performClick()
         compose.onNodeWithText(restore).assertIsDisplayed().performClick()
-        compose.runOnIdle { assertEquals(listOf("backup", "restore"), actions) }
+        compose.runOnIdle { assertEquals(listOf("translation", "backup", "restore"), actions) }
     }
 }

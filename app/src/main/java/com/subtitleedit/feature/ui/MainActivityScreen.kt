@@ -196,7 +196,8 @@ internal fun MainActivityScreen(
     onCloseImagePreview: () -> Unit = {},
     onShareImagePreview: (File) -> Unit = {},
     onDeleteImagePreview: (File) -> Unit = {},
-    onShowImagePreviewInfo: (File) -> Unit = {}
+    onShowImagePreviewInfo: (File) -> Unit = {},
+    onOpenPageTranslation: (() -> Unit)? = null,
 ) {
     val directoryListState = rememberDirectoryListState(state)
     val directoryGridState = rememberDirectoryGridState(state)
@@ -216,6 +217,9 @@ internal fun MainActivityScreen(
     val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
     val previewFile = imagePreviewFile.takeIf { isDirectoryPage && state.pendingOperation == null }
     val isPreviewingImage = previewFile != null
+    val directoryTranslation = if (onOpenPageTranslation != null) {
+        rememberDirectoryTranslationPreview(state, !isPreviewingImage, onOpenPageTranslation)
+    } else null
     val previewDirectory = previewFile?.parent
     val previewFiles = remember(previewDirectory, state.files, state.fileMetadata) {
         if (previewDirectory == null) emptyList() else state.files.filter { file ->
@@ -318,6 +322,7 @@ internal fun MainActivityScreen(
         ) { pageState, pageActive ->
             val state = pageState
             val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
+            val canTranslateDirectory = isDirectoryPage && state.canTranslateDirectory()
             val isMediaCategoriesPage = state.playerModeEnabled && state.selectedTopLevelItem == R.id.nav_tools
             val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
             Column(Modifier.fillMaxSize()) {
@@ -344,6 +349,9 @@ internal fun MainActivityScreen(
                     },
                     onSearchRequested = onSearchRequested,
                     onOpenFileManagementSettings = onOpenFileManagementSettings,
+                    directoryTitleAction = if (directoryTranslation != null && isDirectoryPage && pageActive) {
+                        { DirectoryTranslationButton(directoryTranslation, canTranslateDirectory) }
+                    } else null,
                 )
 
                 Box(
@@ -364,7 +372,8 @@ internal fun MainActivityScreen(
                             gridState = directoryGridState,
                             appliedScrollGeneration = appliedDirectoryScrollGeneration,
                             isActive = pageActive,
-                            onRevealFinished = onDirectoryRevealFinished
+                            onRevealFinished = onDirectoryRevealFinished,
+                            translatedNames = directoryTranslation?.translatedNames.orEmpty(),
                         )
                     } else {
                         MainTopLevelPages(

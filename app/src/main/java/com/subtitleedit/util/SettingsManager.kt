@@ -2,6 +2,8 @@ package com.subtitleedit.util
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.subtitleedit.translation.PageTranslationLanguage
+import com.subtitleedit.translation.PageTranslationOptions
 import java.io.File
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
@@ -148,6 +150,8 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_TTS_ENGINE = "tts_engine"
         private const val KEY_TTS_LANGUAGE = "tts_language"
+        private const val KEY_PAGE_TRANSLATION_SOURCE = "page_translation_source"
+        private const val KEY_PAGE_TRANSLATION_TARGET = "page_translation_target"
         private const val KEY_DEMIX_VOCALS_MODEL_URI = "demix_vocals_model_uri"
         private const val KEY_DEMIX_DRUMS_MODEL_URI = "demix_drums_model_uri"
         private const val KEY_DEMIX_BASS_MODEL_URI = "demix_bass_model_uri"
@@ -1676,6 +1680,19 @@ class SettingsManager private constructor(context: Context) {
 
     fun setTtsLanguage(language: String) {
         prefs.edit().putString(KEY_TTS_LANGUAGE, language).apply()
+    }
+
+    internal fun getPageTranslationOptions(): PageTranslationOptions = PageTranslationOptions(
+        source = PageTranslationLanguage.fromTag(prefs.getString(KEY_PAGE_TRANSLATION_SOURCE, null)),
+        target = PageTranslationLanguage.fromTag(prefs.getString(KEY_PAGE_TRANSLATION_TARGET, null))
+            ?: PageTranslationLanguage.CHINESE,
+    )
+
+    internal fun setPageTranslationOptions(options: PageTranslationOptions) {
+        prefs.edit()
+            .putString(KEY_PAGE_TRANSLATION_SOURCE, options.source?.tag)
+            .putString(KEY_PAGE_TRANSLATION_TARGET, options.target.tag)
+            .apply()
     }
 
     fun getDemixModelUri(stem: String): String = prefs.getString(demixModelKey(stem), "") ?: ""

@@ -252,7 +252,10 @@ dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
 
     // Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
+    implementation("com.google.mlkit:language-id:17.0.6")
+    implementation(files("libs/foxlet-v0.5.0.aar"))
 
     // FFmpegKitNext is built locally because upstream does not publish Android artifacts.
     implementation("com.arthenica:ffmpeg-kit-next:8.1.0-mpv5")

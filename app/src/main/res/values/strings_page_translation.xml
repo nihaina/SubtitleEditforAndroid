@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="page_translation">页面翻译</string>
+    <string name="page_translation_description">在设备上预览文件和文件夹的译名，不修改原文件。自动识别使用内置语种模型；无法确定语种时保留原名，也可手动选择原语言。</string>
+    <string name="page_translation_unsupported">离线页面翻译仅支持 ARM64 版应用。</string>
+    <string name="page_translation_source">原语言</string>
+    <string name="page_translation_target">目标语言</string>
+    <string name="page_translation_auto">自动识别</string>
+    <string name="page_translation_chinese">中文（简体）</string>
+    <string name="page_translation_traditional_chinese">中文（繁體）</string>
+    <string name="page_translation_japanese">日语</string>
+    <string name="page_translation_english">英语</string>
+    <string name="page_translation_models">离线语言包</string>
+    <string name="page_translation_models_description">以下是 Foxlet 支持的 Mozilla 语言包。没有直译模型时，经英语中转。下载使用非计费网络（如 Wi-Fi），完成后可离线翻译。</string>
+    <string name="page_translation_model_direction">%1$s → %2$s</string>
+    <string name="page_translation_download">下载</string>
+    <string name="page_translation_retry">重试</string>
+    <string name="page_translation_model_downloaded">已下载</string>
+    <string name="page_translation_model_not_downloaded">未下载</string>
+    <string name="page_translation_model_unknown">状态未知</string>
+    <string name="page_translation_checking_models">正在检查…</string>
+    <string name="page_translation_model_queued">正在排队或等待非计费网络…</string>
+    <string name="page_translation_model_downloading">正在下载…</string>
+    <string name="page_translation_model_progress">正在下载 %1$d%%</string>
+    <string name="page_translation_model_verifying">正在校验模型…</string>
+    <string name="page_translation_model_deleting">正在删除…</string>
+    <string name="page_translation_check_failed">无法检查语言包，请重试。</string>
+    <string name="page_translation_download_failed">下载失败，请检查网络连接和可用存储空间后重试。</string>
+    <string name="page_translation_delete_failed">删除语言包失败，请重试。</string>
+    <string name="page_translation_delete_model">删除语言包</string>
+    <string name="page_translation_delete_model_confirmation">删除“%1$s”语言包？下次使用时需要重新下载。</string>
+    <string name="page_translation_missing_models">需要下载语言包</string>
+    <string name="page_translation_missing_models_inline">缺少语言包：%1$s</string>
+    <string name="page_translation_download_missing">一键下载缺失语言包</string>
+    <string name="page_translation_required_models_pending">语言包正在排队、下载或校验，完成后会自动更新。</string>
+    <string name="page_translation_system_language_unavailable">系统语言（%1$s）暂无可用的翻译方向。</string>
+    <string name="page_translation_missing_models_message">请在页面翻译设置中下载以下语言包：%1$s。</string>
+    <string name="page_translation_detected_models_message">部分名称识别出了其他语言，但缺少以下翻译包：%1$s。对应名称暂时保留原样，其他译名照常显示。</string>
+    <string name="page_translation_detected_models_queued">下载已安排，语言包下载完成后可重新预览。</string>
+    <string name="page_translation_open_settings">前往设置</string>
+    <string name="page_translation_show_preview">翻译文件和文件夹名</string>
+    <string name="page_translation_show_original">显示原名</string>
+    <string name="page_translation_no_changes">没有可翻译的名称</string>
+    <string name="page_translation_preview_failed">部分或全部名称无法翻译，已保留对应原名。</string>
+    <string name="page_translation_attribution">Foxlet 离线翻译</string>
+    <string name="page_translation_disclaimer">Google ML Kit 在设备上识别语种，不上传文件名，但可能发送识别到的语种等使用统计。Foxlet 使用 Mozilla Firefox Translations 模型离线翻译，译名仅供参考。</string>
+</resources>
