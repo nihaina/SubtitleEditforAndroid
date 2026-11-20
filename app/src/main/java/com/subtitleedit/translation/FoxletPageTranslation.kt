@@ -3,8 +3,6 @@ package com.subtitleedit.translation
 import android.content.Context
 import android.content.res.Resources
 import android.icu.util.ULocale
-import android.os.Build
-import android.os.Process
 import io.github.yinvoker.foxlet.DeleteStatus
 import io.github.yinvoker.foxlet.DownloadOptions
 import io.github.yinvoker.foxlet.DownloadProgress
@@ -18,8 +16,14 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 internal object FoxletPageTranslation {
-    val isSupported: Boolean get() = Process.is64Bit() &&
-        Build.SUPPORTED_64_BIT_ABIS.firstOrNull() == "arm64-v8a"
+    val isSupported: Boolean by lazy {
+        try {
+            System.loadLibrary("foxlet")
+            true
+        } catch (_: LinkageError) {
+            false
+        }
+    }
 
     private val clientLock = Mutex()
     private val catalogLock = Mutex()

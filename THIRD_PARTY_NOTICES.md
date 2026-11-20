@@ -7,7 +7,7 @@ GPL-3.0 license.
 ## Foxlet Translate 0.5.0
 
 On-device directory-name translation uses [Foxlet Translate](https://github.com/yinvoke/foxlet-translate/tree/v0.5.0),
-licensed under MIT. The app [rebuilds the ARM64 native library for API 26](native/foxlet/README.md)
+licensed under MIT. The app [builds the native libraries for API 26](native/foxlet/README.md)
 and retains the upstream SDK, notices, native dependency licenses, and source
 references under `io/github/yinvoker/foxlet/licenses/`.
 It uses [Mozilla Firefox Translations models](https://github.com/mozilla/translations),

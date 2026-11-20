@@ -1,0 +1,410 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index af7d231..4c0846b 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -16,11 +16,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
+ # header code paths diverge from the compiled engine (raw x86 intrinsics on
+ # ARM, wrong string_view, etc.). Mirrors the flag set the engine itself is
+ # built with.
+-if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|armv8)")
+-  message(FATAL_ERROR "Foxlet Translate is ARM-only (see engine/UPSTREAM.md)")
++if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|armv[78])")
++  add_compile_definitions(ARM SSE)
++  if(NOT ANDROID_ABI STREQUAL "armeabi-v7a")
++    add_compile_definitions(FMA)
++  endif()
++  add_compile_options(-flax-vector-conversions -fno-strict-aliasing)
++elseif(NOT ANDROID OR NOT ANDROID_ABI MATCHES "^x86(_64)?$")
++  message(FATAL_ERROR "Unsupported Foxlet target: ${CMAKE_SYSTEM_PROCESSOR}")
+ endif()
+-add_compile_definitions(ARM FMA SSE COMPILE_CPU=1 USE_PTHREADS USE_SENTENCEPIECE _USE_INTERNAL_STRING_VIEW)
+-add_compile_options(-flax-vector-conversions -fno-strict-aliasing)
++add_compile_definitions(FOXLET_USE_RUY COMPILE_CPU=1 USE_PTHREADS USE_SENTENCEPIECE _USE_INTERNAL_STRING_VIEW)
+ 
+ if(ANDROID)
+   # Vendor CMAKE_*_FLAGS assignments can remove NDK defaults. Directory options
+diff --git a/engine/marian-fork/CMakeLists.txt b/engine/marian-fork/CMakeLists.txt
+index 5737168..0fe32fc 100644
+--- a/engine/marian-fork/CMakeLists.txt
++++ b/engine/marian-fork/CMakeLists.txt
+@@ -83,6 +83,9 @@ if(${CMAKE_TARGET_ARCHITECTURE_CODE} MATCHES "arm")
+   # Define that we are using ARM
+   add_compile_definitions(ARM)
+   #
++elseif(ANDROID AND ANDROID_ABI MATCHES "^x86(_64)?$")
++  option(USE_RUY "Use Ruy" ON)
++  option(USE_RUY_SGEMM "Compile with Ruy SGEMM" ON)
+ else()
+   message(FATAL_ERROR "bergamot-android is ARM-only: the x86 intgemm backend is not vendored. Build on an ARM host (Apple Silicon / ARM Linux) or for an ARM target.")
+ endif()
+@@ -93,7 +96,10 @@ endif(USE_INTGEMM)
+ 
+ if(USE_SIMD_UTILS)
+   if(${CMAKE_TARGET_ARCHITECTURE_CODE} MATCHES "arm")
+-    add_compile_definitions(ARM FMA SSE) #added for ARM
++    add_compile_definitions(ARM SSE)
++    if(NOT ANDROID_ABI STREQUAL "armeabi-v7a")
++      add_compile_definitions(FMA)
++    endif()
+   endif()
+   if(MSVC)
+     add_compile_options(/flax-vector-conversions)
+@@ -302,7 +308,7 @@ else(MSVC)
+     # -msse4.1 once marian can solely be compiled with intgemm ("onnxjs" will be removed in that case)
+     set(INTRINSICS "-mssse3 -msimd128")
+   else()
+-    if(CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL amd64)
++    if(NOT ANDROID AND (CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL amd64))
+       set(INTRINSICS "-msse4.1")
+     endif ()
+   endif()
+diff --git a/engine/marian-fork/src/3rd_party/faiss/VectorTransform.cpp b/engine/marian-fork/src/3rd_party/faiss/VectorTransform.cpp
+index a26c2b4..fec9f28 100644
+--- a/engine/marian-fork/src/3rd_party/faiss/VectorTransform.cpp
++++ b/engine/marian-fork/src/3rd_party/faiss/VectorTransform.cpp
+@@ -13,6 +13,9 @@
+ #include <cmath>
+ #include <cstring>
+ #include <memory>
++#ifdef __SSE3__
++#include <pmmintrin.h>
++#endif
+ 
+ #include <faiss/utils/random.h>
+ #include "common/logging.h"
+@@ -143,7 +146,7 @@ float fvec_norm_L2sqr_ref(const float *x, size_t d)
+ 
+ 
+ 
+-#ifdef __SSE__
++#ifdef __SSE3__
+ // reads 0 <= d < 4 floats as __m128
+ static inline __m128 masked_read(int d, const float *x)
+ {
+diff --git a/engine/marian-fork/src/3rd_party/simd_utils/sse2neon.h b/engine/marian-fork/src/3rd_party/simd_utils/sse2neon.h
+index 59fff6d..17cf8fe 100644
+--- a/engine/marian-fork/src/3rd_party/simd_utils/sse2neon.h
++++ b/engine/marian-fork/src/3rd_party/simd_utils/sse2neon.h
+@@ -5988,7 +5988,7 @@ FORCE_INLINE void _mm_storeu_si32(void *p, __m128i a)
+ // https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm_stream_pd
+ FORCE_INLINE void _mm_stream_pd(double *p, __m128d a)
+ {
+-#if __has_builtin(__builtin_nontemporal_store)
++#if defined(__aarch64__) && __has_builtin(__builtin_nontemporal_store)
+     __builtin_nontemporal_store(a, (float64x2_t *) p);
+ #elif defined(__aarch64__)
+     vst1q_f64(p, vreinterpretq_f64_m128d(a));
+diff --git a/engine/marian-fork/src/3rd_party/simd_utils/sse2neon_wrapper.h b/engine/marian-fork/src/3rd_party/simd_utils/sse2neon_wrapper.h
+index 71b9291..e13b1d1 100644
+--- a/engine/marian-fork/src/3rd_party/simd_utils/sse2neon_wrapper.h
++++ b/engine/marian-fork/src/3rd_party/simd_utils/sse2neon_wrapper.h
+@@ -211,7 +211,7 @@ FORCE_INLINE __m128i _mm_cvtpd_epi64(__m128d a)
+ #else
+     int64_t a0 = (int64_t) ((double *) &a)[0];
+     int64_t a1 = (int64_t) ((double *) &a)[1];
+-    return _mm_set_epi64(a1, a0);
++    return _mm_set_epi64x(a1, a0);
+ #endif
+ }
+ 
+diff --git a/engine/marian-fork/src/common/binary.cpp b/engine/marian-fork/src/common/binary.cpp
+index 72a15ae..0f4865e 100644
+--- a/engine/marian-fork/src/common/binary.cpp
++++ b/engine/marian-fork/src/common/binary.cpp
+@@ -99,7 +99,7 @@ void loadItems(const void* current, std::vector<io::Item>& items, bool mapped) {
+     if(matchType<intgemm8>(items[i].type)) {
+       if(items[i].name.find("Wemb") != std::string::npos) {  // Since Wemb need to be dequantised,
+                                                              // we have a special case for them
+-#ifdef ARM
++#ifdef FOXLET_USE_RUY
+         // keep the embedding table quantised. The stored bytes are
+         // already the row-major [vocab x dim] int8 table both consumers want:
+         // the input side dequantises the handful of rows it actually gathers
+diff --git a/engine/marian-fork/src/data/shortlist.cpp b/engine/marian-fork/src/data/shortlist.cpp
+index cae7fbb..f5d5afb 100644
+--- a/engine/marian-fork/src/data/shortlist.cpp
++++ b/engine/marian-fork/src/data/shortlist.cpp
+@@ -169,6 +169,17 @@ void BinaryShortlistGenerator::contentCheck() {
+     if (shortLists_[j] >= trgVocab_->size()) throw std::invalid_argument("Invalid shortlist token");
+ }
+ 
++static uint64_t shortlistChecksum(const void* data, size_t size) {
++  const auto* bytes = static_cast<const char*>(data);
++  uint64_t checksum = 0;
++  for (size_t offset = 2 * sizeof(uint64_t); offset + sizeof(uint64_t) <= size; offset += sizeof(uint64_t)) {
++    uint64_t word;
++    std::memcpy(&word, bytes + offset, sizeof(word));
++    checksum ^= word + UINT64_C(0x9e3779b9) + (checksum << 6) + (checksum >> 2);
++  }
++  return checksum;
++}
++
+ // load shortlist from buffer
+ void BinaryShortlistGenerator::load(const void* ptr_void, size_t blobSize, bool check /*= true*/) {
+   /* File layout:
+@@ -191,9 +202,7 @@ void BinaryShortlistGenerator::load(const void* ptr_void, size_t blobSize, bool
+       header.shortListsSize * sizeof(WordIndex) != remaining)
+     throw std::invalid_argument("Invalid shortlist data length");
+   if (check) {
+-    uint64_t checksumActual = util::hashMem<uint64_t, uint64_t>(
+-      reinterpret_cast<const uint64_t*>(ptr_void) + 2,
+-      (blobSize - sizeof(header.magic) - sizeof(header.checksum)) / sizeof(uint64_t));
++    uint64_t checksumActual = shortlistChecksum(ptr_void, blobSize);
+     if (checksumActual != header.checksum) throw std::invalid_argument("Shortlist checksum mismatch");
+   }
+ 
+@@ -395,8 +404,7 @@ void BinaryShortlistGenerator::import(const std::string& filename, double thresh
+   for(int i = 1; i < wordToOffsetSize_; i++) {
+     std::sort(&shortLists[wordToOffset[i-1]], &shortLists[wordToOffset[i]]);
+   }
+-  pHeader->checksum = (uint64_t)util::hashMem<uint64_t>((uint64_t *)blob_.data()+2,
+-                                                        blob_.size()/sizeof(uint64_t)-2);
++  pHeader->checksum = shortlistChecksum(blob_.data(), blob_.size());
+ 
+   wordToOffset_ = wordToOffset;
+   shortLists_ = shortLists;
+diff --git a/engine/marian-fork/src/data/shortlist.h b/engine/marian-fork/src/data/shortlist.h
+index b50c0cd..4b958af 100644
+--- a/engine/marian-fork/src/data/shortlist.h
++++ b/engine/marian-fork/src/data/shortlist.h
+@@ -185,7 +185,7 @@ private:
+ 
+   struct Header {
+     uint64_t magic; // BINARY_SHORTLIST_MAGIC
+-    uint64_t checksum; // util::hashMem<uint64_t, uint64_t> from &firstNum to end of file.
++    uint64_t checksum;
+     uint64_t firstNum; // Limits used to create the shortlist.
+     uint64_t bestNum;
+     uint64_t wordToOffsetSize; // Length of wordToOffset_ array.
+diff --git a/engine/marian-fork/src/functional/operators.h b/engine/marian-fork/src/functional/operators.h
+index 5d71967..99b0cba 100755
+--- a/engine/marian-fork/src/functional/operators.h
++++ b/engine/marian-fork/src/functional/operators.h
+@@ -274,7 +274,7 @@ struct Ops<float32x4> {
+ 
+   // @TODO: get rid of loop4 with proper intrisics
+   static inline float32x4 sgn(const float32x4& x)  { return loop4(Ops<float>::sgn, x); }
+-#ifndef WASM_COMPATIBLE_SOURCE
++#if !defined(WASM_COMPATIBLE_SOURCE) && (defined(__SSE4_1__) || defined(__ARM_NEON))
+   static inline float32x4 round(const float32x4& x)  { return _mm_round_ps(x, _MM_FROUND_TO_NEAREST_INT); }
+   static inline float32x4 floor(const float32x4& x)  { return _mm_floor_ps(x); }
+   static inline float32x4 ceil(const float32x4& x)   { return _mm_ceil_ps(x); }
+diff --git a/engine/marian-fork/src/graph/expression_operators.cpp b/engine/marian-fork/src/graph/expression_operators.cpp
+index cf9dc8e..b0020b7 100644
+--- a/engine/marian-fork/src/graph/expression_operators.cpp
++++ b/engine/marian-fork/src/graph/expression_operators.cpp
+@@ -7,7 +7,7 @@
+ #include "graph/node_operators_tuple.h"
+ 
+ #include "graph/auto_tuner.h"
+-#ifdef ARM
++#ifdef FOXLET_USE_RUY
+ #include "tensors/cpu/ruy_interface.h"
+ #else
+ #include "tensors/cpu/intgemm_interface.h"
+@@ -479,7 +479,7 @@ Expr dot(Expr a, Expr b, bool transA, bool transB, float scale) {
+   // --optimize --cpu-thread=N with N > 0 are set.
+   if(device == DeviceType::cpu) {
+     if(isFloat(aElementType) && (isFloat(bElementType) || isIntgemm(bElementType))) {
+-#ifdef ARM
++#ifdef FOXLET_USE_RUY
+       if (a->graph()->getBackend()->isInt8() || matchType<intgemm8>(bElementType)) {
+         return cpu::integer::affineOrDotRUI(a, b, nullptr, transA, transB, clipValue);
+       }
+@@ -569,7 +569,7 @@ Expr affine(Expr a, Expr b, Expr bias, bool transA, bool transB, float scale) {
+   Type bElementType = b->value_type();
+   if(device == DeviceType::cpu) {
+     if(isFloat(aElementType) && (isFloat(bElementType) || isIntgemm(bElementType))) {
+-#ifdef ARM
++#ifdef FOXLET_USE_RUY
+       if (a->graph()->getBackend()->isInt8() || matchType<intgemm8>(bElementType)) {
+         return cpu::integer::affineOrDotRUI(a, b, bias, transA, transB, clipValue);
+       }
+diff --git a/engine/marian-fork/src/layers/generic.cpp b/engine/marian-fork/src/layers/generic.cpp
+index 086c1e2..d1577a1 100755
+--- a/engine/marian-fork/src/layers/generic.cpp
++++ b/engine/marian-fork/src/layers/generic.cpp
+@@ -9,7 +9,7 @@
+ #include "rnn/types.h"     // for State::select()
+ #include "models/states.h" // for EncoderState
+ #include "layers/lsh.h"
+-#ifdef ARM
++#ifdef FOXLET_USE_RUY
+ #include "tensors/cpu/ruy_interface.h"
+ #else
+ #include "tensors/cpu/intgemm_interface.h"
+@@ -284,7 +284,7 @@ namespace marian {
+       }
+     }
+ 
+-#ifdef ARM
++#ifdef FOXLET_USE_RUY
+     // PATCH D1: an int8 Wemb parameter is stored row-major as [vocab x dim],
+     // which is byte-for-byte the column-major [dim x vocab] B that ruy expects.
+     // Only the shape metadata disagrees, so a zero-copy reshape view is enough;
+@@ -324,7 +324,7 @@ namespace marian {
+       if (shortlist_ && !cachedShortWt_) { // shortlisted versions of parameters are cached within one batch, then clear()ed
+         Expr preparedBias = nullptr;
+         if ((graph_->getBackend()->isInt8() || matchType<intgemm8>(Wt_->value_type()) )&& graph_->getDeviceId().type == DeviceType::cpu) {
+-#ifdef ARM
++#ifdef FOXLET_USE_RUY
+             if (matchType<intgemm8>(Wt_->value_type())) {
+               // PATCH D1: the model's own int8 table already *is* the prepared B.
+               // The FP32 path dequantised it at load time and then quantised it
+@@ -527,7 +527,7 @@ namespace marian {
+       } else if (shortlist_) {
+         return Logits(affineOrLSH(input, cachedShortWt_, cachedShortb_, false, /*transB=*/isLegacyUntransposedW ? false : true));
+       } else {
+-#ifdef ARM
++#ifdef FOXLET_USE_RUY
+         // PATCH D1: without a shortlist the whole table is B. Route it through
+         // the same SelectColumnsB + WembQuantMult pair as the shortlisted path
+         // (selecting every column) so the multiplier is the exact value the
+@@ -677,7 +677,7 @@ namespace marian {
+     ABORT_IF(factoredVocab_, "Embedding: applyIndices must not be used with a factored vocabulary");
+     auto embIdxExpr = E_->graph()->indices(embIdx);
+     embIdxExpr->set_name("data_" + std::to_string(/*batchIndex_=*/0));  // @TODO: how to know the batch index?
+-#ifdef ARM
++#ifdef FOXLET_USE_RUY
+     // PATCH D2: the table may have stayed int8 (see binary.cpp). Dequantise the
+     // gathered rows instead of the whole table at load time.
+     auto selectedEmbs = isIntgemm(E_->value_type())
+diff --git a/engine/marian-fork/src/tensors/cpu/backend.h b/engine/marian-fork/src/tensors/cpu/backend.h
+index a571cbc..68f5694 100644
+--- a/engine/marian-fork/src/tensors/cpu/backend.h
++++ b/engine/marian-fork/src/tensors/cpu/backend.h
+@@ -79,8 +79,8 @@ public:
+   bool isInt8() override { return int8_; }
+ 
+   void setShifted(bool shifted) override { 
+-#if (defined(__arm__) || defined(__aarch64__))
+-      LOG(info, "gemm-precision: *shifted* is not available on ARM; Setting to false.");
++#if defined(FOXLET_USE_RUY)
++      LOG(info, "gemm-precision: *shifted* is not available with Ruy; Setting to false.");
+       shifted_ = false;
+ #else
+       shifted_ = shifted; 
+@@ -89,8 +89,8 @@ public:
+   bool isShifted() override { return shifted_; }
+ 
+   void setShiftedAll(bool shiftedAll) override {
+-#if (defined(__arm__) || defined(__aarch64__))
+-      LOG(info, "gemm-precision: *shifted* is not available on ARM; Setting to false.");
++#if defined(FOXLET_USE_RUY)
++      LOG(info, "gemm-precision: *shifted* is not available with Ruy; Setting to false.");
+       shiftedAll_ = false;
+       shifted_ = false;
+ #else
+diff --git a/engine/marian-fork/src/tensors/cpu/integer_common.cpp b/engine/marian-fork/src/tensors/cpu/integer_common.cpp
+index f589057..8294ae0 100644
+--- a/engine/marian-fork/src/tensors/cpu/integer_common.cpp
++++ b/engine/marian-fork/src/tensors/cpu/integer_common.cpp
+@@ -2,7 +2,7 @@
+ 
+ // releaseThreadPackingCaches() needs the per-thread cache owners. Both are
+ // architecture-gated exactly as their GEMM paths are.
+-#if defined(ARM)
++#if defined(FOXLET_USE_RUY)
+ #include "ruy_interface.h"
+ #endif
+ #if defined(__aarch64__)
+@@ -41,7 +41,7 @@ void bumpPrepackGeneration() {
+ // touches the calling thread's state -- no locking needed, and no ordering
+ // against other threads' GEMMs.
+ void releaseThreadPackingCaches() {
+-#if defined(ARM)
++#if defined(FOXLET_USE_RUY)
+   releaseThreadRuyCache();
+ #endif
+ #if defined(__aarch64__)
+diff --git a/engine/marian-fork/src/tensors/cpu/integer_common.h b/engine/marian-fork/src/tensors/cpu/integer_common.h
+index 06007eb..567a7f3 100644
+--- a/engine/marian-fork/src/tensors/cpu/integer_common.h
++++ b/engine/marian-fork/src/tensors/cpu/integer_common.h
+@@ -176,7 +176,7 @@ void prepareAndTransposeB(io::Item& item, const char * input) {
+ #ifdef COMPILE_CPU
+     typedef typename intgemm_<vtype>::type Integer;
+     Integer * output_tensor = reinterpret_cast<Integer *>(&(*item.bytes->begin()));
+-#ifdef ARM
++#ifdef FOXLET_USE_RUY
+     // On arm we do RowM * ColM. Our input already comes transposed due to the way we prepare matrices in the binary
+     // So on arm ALL we need to do is just copy. No need for pre
+     std::memcpy(output_tensor, reinterpret_cast<const Integer *>(input), sizeof(Integer) * item.shape.elements());
+diff --git a/engine/marian-fork/src/tensors/cpu/ruy_interface.h b/engine/marian-fork/src/tensors/cpu/ruy_interface.h
+index d74af3b..26566c8 100644
+--- a/engine/marian-fork/src/tensors/cpu/ruy_interface.h
++++ b/engine/marian-fork/src/tensors/cpu/ruy_interface.h
+@@ -74,7 +74,7 @@ inline void releaseThreadRuyCache() {
+   state.seenGeneration = prepackGeneration().load(std::memory_order_relaxed);
+ }
+ 
+-#if RUY_PLATFORM_NEON
++#if RUY_PLATFORM_NEON && defined(__aarch64__)
+ 
+ /*
+  * Optimized path using ARM NEON SIMD intrinsics. Currently only supports int8_t.
+@@ -126,6 +126,16 @@ inline void quantize(const float *input, int8_t *output, float scale, Index rows
+   };
+ }
+ 
++#else
++inline void quantize(const float *input, int8_t *output, float scale, Index rows, Index width) {
++  for (size_t index = 0; index < static_cast<size_t>(rows) * width; ++index) {
++    const float rounded = std::nearbyint(input[index] * scale);
++    output[index] = std::isnan(rounded) ? 0 : static_cast<int8_t>(std::max(-128.f, std::min(127.f, rounded)));
++  }
++}
++#endif
++
++#if RUY_PLATFORM_NEON
+ inline void _transpose_16x16(const int8_t *src,
+                              Index i,
+                              Index j,
+@@ -215,6 +225,12 @@ inline void transpose(const int8_t *input, Index rows, Index cols, int8_t *outpu
+   }
+ }
+ 
++#else
++inline void transpose(const int8_t *input, Index rows, Index cols, int8_t *output) {
++  for (Index row = 0; row < rows; ++row)
++    for (Index col = 0; col < cols; ++col)
++      output[col * rows + row] = input[row * cols + col];
++}
+ #endif
+ 
+ /*
+@@ -335,6 +351,7 @@ inline void transpose(const int8_t *input, Index rows, Index cols, int8_t *outpu
+       }  // end of the ruy path
+ 
+       // Unquantise:
++#if RUY_PLATFORM_NEON
+       float32x4_t multiplier = vdupq_n_f32(unquant_multiplier);
+ 
+       if (!bias) {
+@@ -353,6 +370,16 @@ inline void transpose(const int8_t *input, Index rows, Index cols, int8_t *outpu
+           }
+         }
+       }
++#else
++      for (Index row = 0; row < rows_A; ++row) {
++        for (Index col = 0; col < cols_B; ++col) {
++          const auto index = static_cast<size_t>(row) * cols_B + col;
++          int32_t accumulator;
++          std::memcpy(&accumulator, &output[index], sizeof(accumulator));
++          output[index] = static_cast<float>(accumulator) * unquant_multiplier + (bias ? bias[col] : 0.f);
++        }
++      }
++#endif
+     }
+ 
+   static float MaxAbsolute(const float *begin, const float *end) {
+diff --git a/native/jni/CMakeLists.txt b/native/jni/CMakeLists.txt
+index 8461c37..431c041 100644
+--- a/native/jni/CMakeLists.txt
++++ b/native/jni/CMakeLists.txt
+@@ -7,4 +7,4 @@ target_link_libraries(foxlet bergamot-translator-source log)
+ # ANDROID_STL=c++_shared keeps libc++ exception/runtime symbols outside these
+ # static archives. Any STL change requires JNI exception and lifecycle validation.
+ # Scope the option to the Android shared library; host tools are separate targets.
+-target_link_options(foxlet PRIVATE -Wl,--exclude-libs,ALL)
++target_link_options(foxlet PRIVATE -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384)
