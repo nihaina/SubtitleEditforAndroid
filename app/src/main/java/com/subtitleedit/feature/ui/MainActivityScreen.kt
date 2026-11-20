@@ -219,7 +219,7 @@ internal fun MainActivityScreen(
     val previewFile = imagePreviewFile.takeIf { isDirectoryPage && state.pendingOperation == null }
     val isPreviewingImage = previewFile != null
     val directoryTranslation = if (onOpenPageTranslation != null) {
-        rememberDirectoryTranslationPreview(state, !isPreviewingImage, onOpenPageTranslation)
+        rememberDirectoryTranslationPreview(state, !isPreviewingImage)
     } else null
     val previewDirectory = previewFile?.parent
     val previewFiles = remember(previewDirectory, state.files, state.fileMetadata) {
@@ -374,7 +374,8 @@ internal fun MainActivityScreen(
                             appliedScrollGeneration = appliedDirectoryScrollGeneration,
                             isActive = pageActive,
                             onRevealFinished = onDirectoryRevealFinished,
-                            translatedNames = directoryTranslation?.translatedNames.orEmpty(),
+                            translationPreview = directoryTranslation,
+                            onOpenTranslationSettings = { onOpenPageTranslation?.invoke() },
                         )
                     } else {
                         MainTopLevelPages(

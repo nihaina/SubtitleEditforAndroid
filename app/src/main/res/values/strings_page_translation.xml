@@ -30,6 +30,7 @@
     <string name="page_translation_delete_model">删除语言包</string>
     <string name="page_translation_delete_model_confirmation">删除“%1$s”语言包？下次使用时需要重新下载。</string>
     <string name="page_translation_missing_models">需要下载语言包</string>
+    <string name="page_translation_missing_models_hint">语言包缺失</string>
     <string name="page_translation_missing_models_inline">缺少语言包：%1$s</string>
     <string name="page_translation_download_missing">一键下载缺失语言包</string>
     <string name="page_translation_required_models_pending">语言包正在排队、下载或校验，完成后会自动更新。</string>
