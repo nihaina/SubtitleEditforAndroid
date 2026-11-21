@@ -44,6 +44,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.subtitleedit.model.ArchiveConflictDialogFormatter
 import com.subtitleedit.model.ArchiveConflictDialogModel
 import com.subtitleedit.ui.components.AppDialog
+import com.subtitleedit.ui.components.AppInputDialog
 
 @Composable
 internal fun ArchiveActionsDialog(
@@ -211,7 +212,7 @@ internal fun ArchivePasswordDialog(
     onClosePasswordBook: () -> Unit
 ) {
     var passwordVisible by remember { mutableStateOf(false) }
-    AppDialog(
+    AppInputDialog(
         onDismissRequest = onDismiss,
         title = { Text("输入压缩包密码") },
         text = {

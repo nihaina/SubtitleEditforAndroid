@@ -65,7 +65,7 @@ internal fun MediaConvertAudioBitrateDialog(
 
     MediaConvertDialogSurface(onDismiss, withImePadding = true) {
         MediaConvertDialogTitle(stringResource(R.string.media_convert_audio_bitrate_title))
-        LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
+        LazyColumn(modifier = Modifier.weight(1f, fill = false).padding(horizontal = 16.dp)) {
             item {
                 Text(stringResource(R.string.media_convert_bitrate_original), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 20.dp))
                 BitrateChoice(
@@ -133,12 +133,14 @@ internal fun MediaConvertAudioBitrateDialog(
                 )
                 HorizontalDivider()
             }
+            item {
+                Text(
+                    stringResource(R.string.media_convert_audio_bitrate_target_hint),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
         }
-        Text(
-            stringResource(R.string.media_convert_audio_bitrate_target_hint),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(16.dp)
-        )
         MediaConvertDialogActions(
             onDismiss = onDismiss,
             onConfirm = {

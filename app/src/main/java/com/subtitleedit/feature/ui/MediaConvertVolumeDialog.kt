@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -28,9 +30,10 @@ import com.subtitleedit.R
 internal fun MediaConvertVolumeDialog(initialPercent: Int, onDismiss: () -> Unit, onConfirm: (Int) -> Unit) {
     var percent by rememberSaveable { mutableIntStateOf(initialPercent.coerceIn(MediaConvertAudioVolume.MIN, MediaConvertAudioVolume.MAX)) }
     val volumeLabel = stringResource(R.string.media_convert_volume)
-    MediaConvertDialogSurface(onDismiss, heightFraction = null) {
+    MediaConvertDialogSurface(onDismiss) {
         MediaConvertDialogTitle(stringResource(R.string.media_convert_volume_title))
-        Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp)) {
+        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 20.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.media_convert_volume_ratio), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
                 Text("$percent%", style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("volume-value"))

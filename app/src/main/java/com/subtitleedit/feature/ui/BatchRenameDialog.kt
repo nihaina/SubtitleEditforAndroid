@@ -13,10 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -48,9 +46,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.DialogProperties
 import com.subtitleedit.R
-import com.subtitleedit.ui.components.AppDialog
+import com.subtitleedit.ui.components.AppInputDialog
 import com.subtitleedit.util.BatchRename
 import com.subtitleedit.util.BatchRenameHistory
 import java.io.File
@@ -121,9 +118,10 @@ internal fun BatchRenameDialog(
     val controlsEnabled = !state.running
 
     MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = blue)) {
-        AppDialog(
+        AppInputDialog(
             onDismissRequest = { if (controlsEnabled) onDismiss() },
-            properties = DialogProperties(dismissOnBackPress = controlsEnabled, dismissOnClickOutside = controlsEnabled),
+            dismissOnBackPress = controlsEnabled,
+            dismissOnClickOutside = controlsEnabled,
             containerColor = if (isSystemInDarkTheme()) MaterialTheme.colorScheme.surfaceContainerHigh else Color(0xFFEDEDED),
             title = {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -152,7 +150,7 @@ internal fun BatchRenameDialog(
             },
             text = {
                 Column(
-                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     LazyColumn(

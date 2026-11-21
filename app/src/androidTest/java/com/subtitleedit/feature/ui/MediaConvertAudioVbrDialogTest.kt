@@ -5,7 +5,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.subtitleedit.MediaConvertAudioVbr
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
@@ -23,11 +24,13 @@ class MediaConvertAudioVbrDialogTest {
         val saved = mutableListOf<Int>()
         compose.setContent { SubtitleEditComposeTheme { MediaConvertAudioVbrDialog(2, {}, { saved += it }) } }
         compose.onNodeWithTag("audio-vbr-option-2").assertIsSelected()
-        compose.onNodeWithTag("audio-vbr-option-9").performScrollTo().performClick()
+        compose.onNodeWithTag("audio-vbr-options").performScrollToNode(hasTestTag("audio-vbr-option-9"))
+        compose.onNodeWithTag("audio-vbr-option-9").performClick()
         assertTrue(saved.isEmpty())
         compose.onNodeWithTag("audio-vbr-confirm").performClick()
         assertEquals(listOf(9), saved)
-        compose.onNodeWithTag("audio-vbr-option--1").performScrollTo().performClick()
+        compose.onNodeWithTag("audio-vbr-options").performScrollToNode(hasTestTag("audio-vbr-option--1"))
+        compose.onNodeWithTag("audio-vbr-option--1").performClick()
         compose.onNodeWithTag("audio-vbr-confirm").performClick()
         assertEquals(listOf(9, MediaConvertAudioVbr.OFF), saved)
     }

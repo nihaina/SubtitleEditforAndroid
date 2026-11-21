@@ -30,7 +30,7 @@ internal fun MediaConvertAudioVbrDialog(initialQuality: Int, onDismiss: () -> Un
     var selected by rememberSaveable { mutableIntStateOf(initialQuality.takeIf(MediaConvertAudioVbr::isValid) ?: MediaConvertAudioVbr.OFF) }
     MediaConvertDialogSurface(onDismiss) {
         MediaConvertDialogTitle(stringResource(R.string.media_convert_audio_vbr))
-        LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp)) {
+        LazyColumn(Modifier.weight(1f, fill = false).padding(horizontal = 16.dp).testTag("audio-vbr-options")) {
             items(listOf(MediaConvertAudioVbr.OFF) + MediaConvertAudioVbr.qualities, key = { it }) { quality ->
                 Row(
                     modifier = Modifier.fillMaxWidth().testTag("audio-vbr-option-$quality")

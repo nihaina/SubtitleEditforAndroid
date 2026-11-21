@@ -42,6 +42,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppDialog
+import com.subtitleedit.ui.components.AppInputDialog
 import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.settings.SettingsCacheItem
 import com.subtitleedit.util.ArchiveManager
@@ -282,7 +283,7 @@ private fun RenameDialog(
     var name by remember(initialName) {
         mutableStateOf(TextFieldValue(initialName, selection = TextRange(initialName.length)))
     }
-    AppDialog(
+    AppInputDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.file_op_rename)) },
         text = {
@@ -397,15 +398,12 @@ private fun ArchiveCreationDialog(
         selectedFormat.format == ArchiveManager.CreateFormat.SEVEN_Z
     val canSetPassword = selectedFormatOption.encryptionMethods.isNotEmpty()
 
-    AppDialog(
+    AppInputDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.file_op_create_archive_title)) },
+        textModifier = Modifier.heightIn(max = 480.dp),
         text = {
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 480.dp)
-                    .verticalScroll(rememberScrollState())
-            ) {
+            Column {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it; nameError = null },

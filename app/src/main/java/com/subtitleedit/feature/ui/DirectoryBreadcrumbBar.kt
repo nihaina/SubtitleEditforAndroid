@@ -50,7 +50,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
-import com.subtitleedit.ui.components.AppDialog
+import com.subtitleedit.ui.components.AppInputDialog
 import com.subtitleedit.util.FileBrowserNavigation
 import kotlinx.coroutines.launch
 import java.io.File
@@ -172,7 +172,7 @@ private fun DirectoryPathDialog(
         if (onNavigate(File(path.text.trim()))) onDismiss()
     }
 
-    AppDialog(
+    AppInputDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.directory_jump_title)) },
         text = {

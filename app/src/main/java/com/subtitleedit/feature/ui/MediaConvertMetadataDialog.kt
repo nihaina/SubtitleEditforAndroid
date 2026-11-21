@@ -17,7 +17,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import com.subtitleedit.MediaConvertMetadataField
 import com.subtitleedit.R
-import com.subtitleedit.ui.components.AppDialog
+import com.subtitleedit.ui.components.AppInputDialog
 import com.subtitleedit.ui.settings.settingsOutlinedTextFieldColors
 import com.subtitleedit.ui.theme.AppSpacing
 
@@ -32,7 +32,7 @@ internal fun MediaConvertMetadataDialog(
 ) {
     var value by rememberSaveable(field, initialValue) { mutableStateOf(initialValue) }
     val multiline = field == MediaConvertMetadataField.COMMENT
-    AppDialog(
+    AppInputDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(field.labelResource)) },
         text = {

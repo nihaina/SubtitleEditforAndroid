@@ -8,6 +8,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
@@ -100,7 +101,7 @@ class BatchRenameHistoryAndOrderTest {
         compose.onNodeWithContentDescription("排序").performClick()
         compose.onNodeWithContentDescription("排序方式").performClick()
         compose.onNodeWithText("按名称").performClick()
-        confirm()
+        compose.onNodeWithTag("batch-rename-order-confirm").performClick()
         compose.onNodeWithText("a(1).txt").assertExists()
         compose.onNodeWithText("z(2).txt").assertExists()
         confirm()

@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -173,7 +174,10 @@ internal fun BatchRenameOrderDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(ordered) }) { Text(stringResource(android.R.string.ok)) }
+            TextButton(
+                onClick = { onConfirm(ordered) },
+                modifier = Modifier.testTag("batch-rename-order-confirm"),
+            ) { Text(stringResource(android.R.string.ok)) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }

@@ -99,6 +99,7 @@ import com.subtitleedit.player.putPlayerQueueSource
 import com.subtitleedit.player.formatPlaybackTime
 import com.subtitleedit.ui.components.AppAlertDialog
 import com.subtitleedit.ui.components.AppDialog
+import com.subtitleedit.ui.components.AppInputDialog
 import com.subtitleedit.ui.components.MediaInfoComment
 import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.ui.theme.cardContainer
@@ -629,7 +630,7 @@ internal fun MediaLibraryScreen(
 
     if (showCreatePlaylistDialog) {
         var name by remember { mutableStateOf("") }
-        AppDialog(
+        AppInputDialog(
             onDismissRequest = { showCreatePlaylistDialog = false },
             title = { Text(stringResource(R.string.media_lib_create_playlist)) },
             text = {
@@ -662,7 +663,7 @@ internal fun MediaLibraryScreen(
 
     renamingPlaylist?.let { playlist ->
         var newName by remember(playlist.id) { mutableStateOf(playlist.name) }
-        AppDialog(
+        AppInputDialog(
             onDismissRequest = { renamingPlaylist = null },
             title = { Text(stringResource(R.string.media_lib_rename_playlist)) },
             text = {

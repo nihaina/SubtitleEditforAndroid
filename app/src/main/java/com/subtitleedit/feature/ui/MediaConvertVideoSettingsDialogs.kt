@@ -132,9 +132,9 @@ private fun MediaConvertVideoValueDialog(
     val value = if (selected == "custom") custom else selected
     val valid = selected != "custom" || (custom.isNotBlank() &&
         (if (decimals) custom.toDoubleOrNull() else custom.toIntOrNull()?.toDouble())?.let { it.isFinite() && range?.contains(it) == true } == true)
-    MediaConvertDialogSurface(onDismiss, heightFraction = 0.85f) {
+    MediaConvertDialogSurface(onDismiss, withImePadding = range != null) {
         MediaConvertDialogTitle(title)
-        LazyColumn(Modifier.weight(1f).padding(horizontal = 20.dp)) {
+        LazyColumn(Modifier.weight(1f, fill = false).padding(horizontal = 20.dp).testTag("video-setting-options")) {
             items(options, key = { it.id }) { option ->
                 VideoValueChoice(option.label, selected == option.id, Modifier.testTag("video-setting-option-${option.id}"), details[option.id].orEmpty()) { selected = option.id }
                 HorizontalDivider()

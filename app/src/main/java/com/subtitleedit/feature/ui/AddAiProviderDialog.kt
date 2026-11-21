@@ -22,7 +22,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
-import com.subtitleedit.ui.components.AppDialog
+import com.subtitleedit.ui.components.AppInputDialog
 import com.subtitleedit.util.AiProviderConfig
 
 @Composable
@@ -38,7 +38,7 @@ internal fun AddAiProviderDialog(
         error = onAdd(name, templateId)
         if (error == null) onDismiss()
     }
-    AppDialog(
+    AppInputDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.ai_provider_add_title)) },
         text = {

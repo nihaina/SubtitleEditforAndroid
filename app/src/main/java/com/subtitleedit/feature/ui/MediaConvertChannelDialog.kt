@@ -31,7 +31,7 @@ internal fun MediaConvertChannelDialog(
     var selected by rememberSaveable { mutableIntStateOf(initialIndex.takeIf { id -> options.any { it.id == id } } ?: 0) }
     MediaConvertDialogSurface(onDismiss) {
         MediaConvertDialogTitle(stringResource(R.string.media_convert_channel_title))
-        LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
+        LazyColumn(modifier = Modifier.weight(1f, fill = false).padding(horizontal = 16.dp)) {
             item {
                 Text(stringResource(R.string.media_convert_channel_original), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 20.dp))
                 BitrateChoice(
@@ -62,12 +62,14 @@ internal fun MediaConvertChannelDialog(
                 )
                 HorizontalDivider()
             }
+            item {
+                Text(
+                    stringResource(R.string.media_convert_channel_adapt_hint),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
         }
-        Text(
-            stringResource(R.string.media_convert_channel_adapt_hint),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(16.dp)
-        )
         MediaConvertDialogActions(onDismiss, { onConfirm(selected) }, options.any { it.id == selected }, Modifier.testTag("channel-confirm"))
     }
 }

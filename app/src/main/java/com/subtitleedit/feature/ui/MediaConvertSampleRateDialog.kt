@@ -37,7 +37,7 @@ internal fun MediaConvertSampleRateDialog(
     var selected by rememberSaveable { mutableIntStateOf(initialIndex.takeIf { id -> options.any { it.id == id } } ?: 0) }
     MediaConvertDialogSurface(onDismiss) {
         MediaConvertDialogTitle(stringResource(R.string.media_convert_sample_rate_title))
-        LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
+        LazyColumn(modifier = Modifier.weight(1f, fill = false).padding(horizontal = 16.dp)) {
             item {
                 Text(stringResource(R.string.media_convert_sample_rate_original), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 20.dp))
                 SampleRateChoice(
@@ -68,12 +68,14 @@ internal fun MediaConvertSampleRateDialog(
                 )
                 HorizontalDivider()
             }
+            item {
+                Text(
+                    stringResource(R.string.media_convert_sample_rate_adapt_hint),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
         }
-        Text(
-            stringResource(R.string.media_convert_sample_rate_adapt_hint),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(16.dp)
-        )
         MediaConvertDialogActions(onDismiss, { onConfirm(selected) }, options.any { it.id == selected }, Modifier.testTag("sample-rate-confirm"))
     }
 }

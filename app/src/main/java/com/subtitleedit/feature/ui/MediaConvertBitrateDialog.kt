@@ -53,7 +53,7 @@ internal fun MediaConvertBitrateDialog(
 
     MediaConvertDialogSurface(onDismiss, withImePadding = true) {
         MediaConvertDialogTitle(stringResource(R.string.media_convert_bitrate_title))
-        LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
+        LazyColumn(modifier = Modifier.weight(1f, fill = false).padding(horizontal = 16.dp).testTag("bitrate-options")) {
             item {
                 Text(stringResource(R.string.media_convert_bitrate_original), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 20.dp))
                 BitrateChoice(
@@ -132,13 +132,15 @@ internal fun MediaConvertBitrateDialog(
                 )
                 HorizontalDivider()
             }
+            item {
+                Text(
+                    stringResource(R.string.media_convert_bitrate_average_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
         }
-        Text(
-            stringResource(R.string.media_convert_bitrate_average_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(16.dp)
-        )
         MediaConvertDialogActions(onDismiss, { onConfirm(settings) }, canConfirm, Modifier.testTag("bitrate-confirm"))
     }
 }

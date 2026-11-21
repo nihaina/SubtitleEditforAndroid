@@ -56,7 +56,7 @@ import com.subtitleedit.MainTopLevelPages
 import com.subtitleedit.MainTopLevelPagesState
 import com.subtitleedit.ui.MediaCategoryRevealRequest
 import com.subtitleedit.R
-import com.subtitleedit.ui.components.AppDialog
+import com.subtitleedit.ui.components.AppInputDialog
 import com.subtitleedit.util.BatchRename
 import com.subtitleedit.util.FileOperationUiPolicy
 import com.subtitleedit.util.FileTypePolicy
@@ -406,7 +406,7 @@ internal fun MainActivityScreen(
     }
 
     createDialogKind?.let { kind ->
-        AppDialog(
+        AppInputDialog(
             onDismissRequest = { createDialogKind = null },
             title = { Text(stringResource(if (kind == MainCreateItemKind.FOLDER) R.string.directory_create_folder_title else R.string.directory_create_file_title)) },
             text = {

@@ -75,8 +75,16 @@ internal fun MediaConvertResolutionDialog(
     val lockLabel = stringResource(R.string.media_convert_resolution_lock)
 
     MediaConvertDialogSurface(onDismiss, withImePadding = true) {
+        val compact = LocalCompactMediaConvertDialog.current
+        val fitRule: @Composable () -> Unit = {
+            HorizontalDivider()
+            TextButton(onClick = { showFitRules = true }, modifier = Modifier.fillMaxWidth().padding(8.dp).testTag("resolution-fit-rules")) {
+                Text(stringResource(R.string.media_convert_resolution_fit_rule), modifier = Modifier.weight(1f))
+                Text(stringResource(fitModeTitle(settings.fitMode)))
+            }
+        }
         MediaConvertDialogTitle(stringResource(R.string.media_convert_resolution_title))
-        LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
+        LazyColumn(modifier = Modifier.weight(1f, fill = false).padding(horizontal = 16.dp)) {
             item {
                 Text(stringResource(R.string.media_convert_resolution_original), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 20.dp))
                 ResolutionChoice(
@@ -163,12 +171,9 @@ internal fun MediaConvertResolutionDialog(
                 )
                 HorizontalDivider()
             }
+            if (compact) item { fitRule() }
         }
-        HorizontalDivider()
-        TextButton(onClick = { showFitRules = true }, modifier = Modifier.fillMaxWidth().padding(8.dp).testTag("resolution-fit-rules")) {
-            Text(stringResource(R.string.media_convert_resolution_fit_rule), modifier = Modifier.weight(1f))
-            Text(stringResource(fitModeTitle(settings.fitMode)))
-        }
+        if (!compact) fitRule()
         MediaConvertDialogActions(onDismiss, { onConfirm(settings) }, settings.isValid, Modifier.testTag("resolution-confirm"))
     }
     if (showFitRules) FitRuleDialog(

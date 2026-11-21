@@ -59,6 +59,7 @@ import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
 import com.subtitleedit.ui.components.AppConflictDialog
 import com.subtitleedit.ui.components.AppDialog
+import com.subtitleedit.ui.components.AppInputDialog
 import com.subtitleedit.ui.components.AppTopBar
 import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.util.FileOperationUiPolicy
@@ -343,7 +344,7 @@ private fun PickerLocationsDialog(locations: List<FilePickerLocation>, onDismiss
 private fun CreateDirectoryDialog(onDismiss: () -> Unit, onCreate: (String, (String?) -> Unit) -> Unit) {
     var name by rememberSaveable { mutableStateOf("") }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
-    AppDialog(onDismissRequest = onDismiss,
+    AppInputDialog(onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.file_picker_create_directory)) },
         text = {
             OutlinedTextField(value = name, onValueChange = { name = it; error = null }, singleLine = true,

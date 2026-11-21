@@ -5,7 +5,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.subtitleedit.MediaConvertBitrateMode
@@ -33,7 +34,8 @@ class MediaConvertBitrateDialogTest {
         compose.onNodeWithTag("bitrate-confirm").assertIsNotEnabled()
         compose.onNodeWithTag("bitrate-custom-input").performTextReplacement("3000")
         assertTrue(saved.isEmpty())
-        compose.onNodeWithTag("bitrate-preset-5000").performScrollTo().performClick()
+        compose.onNodeWithTag("bitrate-options").performScrollToNode(hasTestTag("bitrate-preset-5000"))
+        compose.onNodeWithTag("bitrate-preset-5000").performClick()
         assertTrue(saved.isEmpty())
         compose.onNodeWithTag("bitrate-confirm").performClick()
         assertEquals(listOf(MediaConvertVideoBitrateSettings(MediaConvertBitrateMode.PRESET, "3000", 5000)), saved)

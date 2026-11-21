@@ -16,6 +16,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isPopup
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.subtitleedit.MediaConvertBitrateMode
@@ -80,7 +81,8 @@ class MediaConvertVideoSettingsDialogTest {
             MediaConvertVideoSettingDialog(MediaConvertVideoSetting.CRF, MediaConvertVideoSettings(), "libx264",
                 listOf("yuv420p"), null, false, {}, { values += it })
         } }
-        compose.onNodeWithTag("video-setting-option-custom").performScrollTo().performClick()
+        compose.onNodeWithTag("video-setting-options").performScrollToNode(hasTestTag("video-setting-option-custom"))
+        compose.onNodeWithTag("video-setting-option-custom").performClick()
         compose.onNodeWithTag("video-setting-custom").performScrollTo().performTextReplacement("52")
         compose.onNodeWithTag("video-setting-confirm").assertIsNotEnabled()
         compose.onNodeWithTag("video-setting-custom").performTextReplacement("0")
