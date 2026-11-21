@@ -1,5 +1,9 @@
 package com.subtitleedit.feature.ui
 
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -25,8 +29,9 @@ class MediaProcessingChooserDialogTest {
         } }
         compose.onNodeWithText("格式转换").assertExists()
         compose.onNodeWithText("混流处理").assertExists()
-        compose.onNodeWithTag("media-processing-choice-mux").assertIsNotEnabled()
-        compose.onNodeWithTag("media-processing-choice-convert").assertIsEnabled().performClick()
+        val button = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button)
+        compose.onNodeWithTag("media-processing-choice-mux").assert(button).assertIsNotEnabled()
+        compose.onNodeWithTag("media-processing-choice-convert").assert(button).assertIsEnabled().performClick()
         compose.runOnIdle { assertEquals(MediaProcessingPage.CONVERT, chosen) }
     }
 

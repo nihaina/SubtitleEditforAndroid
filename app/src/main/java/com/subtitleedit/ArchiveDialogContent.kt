@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -34,8 +35,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,6 +48,7 @@ import com.subtitleedit.model.ArchiveConflictDialogFormatter
 import com.subtitleedit.model.ArchiveConflictDialogModel
 import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.components.AppInputDialog
+import com.subtitleedit.ui.theme.AppSpacing
 
 @Composable
 internal fun ArchiveActionsDialog(
@@ -55,17 +59,23 @@ internal fun ArchiveActionsDialog(
 ) {
     AppDialog(
         onDismissRequest = onDismiss,
-        title = { Text(archiveName) },
+        title = { Text(archiveName, maxLines = 2, overflow = TextOverflow.Ellipsis) },
         text = {
-            Column(Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+            ) {
                 actionLabels.forEachIndexed { index, label ->
-                    TextButton(
-                        onClick = { onAction(index) },
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
-                    ) {
-                        Text(label, modifier = Modifier.fillMaxWidth())
+                    val iconRes = when (index) {
+                        0 -> R.drawable.ic_visibility
+                        1, 2 -> R.drawable.ic_archive_extract
+                        else -> R.drawable.ic_archive_test
                     }
+                    ArchiveOptionCard(
+                        title = label,
+                        icon = iconRes,
+                        onClick = { onAction(index) }
+                    )
                 }
             }
         },
@@ -76,6 +86,43 @@ internal fun ArchiveActionsDialog(
             }
         }
     )
+}
+
+@Composable
+private fun ArchiveOptionCard(
+    title: String,
+    icon: Int,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(role = Role.Button, onClick = onClick),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shape = MaterialTheme.shapes.medium
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Icon(
+                painter = painterResource(icon),
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
 }
 
 /** Plain blocking dialog used while an archive preview/test is running. */
@@ -293,21 +340,18 @@ internal fun ArchivePasswordBookDialog(
         text = {
             Column(
                 Modifier.fillMaxWidth().heightIn(max = 480.dp)
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
             ) {
                 if (passwords.isEmpty()) {
                     Text("密码本为空，可保存当前输入的密码。")
                 } else {
                     passwords.forEachIndexed { index, password ->
-                        TextButton(
-                            onClick = { onSelectPassword(password) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                "密码 ${index + 1}（${"•".repeat(password.length.coerceIn(1, 8))}）",
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
+                        ArchiveOptionCard(
+                            title = "密码 ${index + 1}（${"•".repeat(password.length.coerceIn(1, 8))}）",
+                            icon = R.drawable.ic_password_book,
+                            onClick = { onSelectPassword(password) }
+                        )
                     }
                 }
             }
