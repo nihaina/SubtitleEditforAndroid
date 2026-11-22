@@ -1516,17 +1516,17 @@ class SettingsManager private constructor(context: Context) {
         }
     }
 
-    fun speechTokenTimestampMergeSummary(): String = buildString {
-        if (isSpeechTokenTimestampSmartMergeEnabled()) {
-            append("智能合并 0–${getSpeechTokenTimestampMergeGapMs()}ms，每轮增加 1ms")
-            if (isSpeechTokenTimestampLongSegmentFilterEnabled()) {
-                append("，目标 ${getSpeechTokenTimestampMergeMaxCharacters()} 字")
+    fun speechTokenTimestampMergeSummary(type: String = getAsrModelType()): String = buildString {
+        if (isSpeechTokenTimestampSmartMergeEnabled(type)) {
+            append("智能合并 0–${getSpeechTokenTimestampMergeGapMs(type)}ms，每轮增加 1ms")
+            if (isSpeechTokenTimestampLongSegmentFilterEnabled(type)) {
+                append("，目标 ${getSpeechTokenTimestampMergeMaxCharacters(type)} 字")
             }
-            if (isSpeechTokenTimestampPunctuationSplitEnabled()) {
+            if (isSpeechTokenTimestampPunctuationSplitEnabled(type)) {
                 append("，按标点切分")
             }
         } else {
-            append("最大间隔 ${getSpeechTokenTimestampMergeGapMs()}ms")
+            append("最大间隔 ${getSpeechTokenTimestampMergeGapMs(type)}ms")
         }
     }
 

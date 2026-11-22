@@ -747,7 +747,6 @@
     <string name="cancel_recognition">取消识别</string>
     <string name="continue_recognition">继续识别</string>
     <string name="recognition_in_progress">正在识别中</string>
-    <string name="speech_recognition_back_message">语音识别正在进行，确定要返回吗？返回后识别将被取消。</string>
     <string name="formatting_tool_title">格式化工具</string>
     <string name="subtitle_format_editor_title">字幕格式化</string>
     <string name="subtitle_format_save_title">保存格式化结果</string>

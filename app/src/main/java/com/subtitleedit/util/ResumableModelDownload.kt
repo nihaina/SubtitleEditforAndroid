@@ -8,6 +8,8 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.net.ProtocolException
 import java.util.Properties
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +23,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 
+internal object LocalModelImportOnly : AbstractCoroutineContextElement(Key) {
+    object Key : CoroutineContext.Key<LocalModelImportOnly>
+}
+
 /** The caller must serialize downloads to the same destination, including cancellation cleanup. */
 internal class ResumableModelDownload(private val client: OkHttpClient) {
     suspend fun download(
@@ -30,6 +36,9 @@ internal class ResumableModelDownload(private val client: OkHttpClient) {
         onProgress: (ModelDownloader.Progress) -> Unit,
         minimumSize: Long = 1L
     ) = withContext<Unit>(Dispatchers.IO) {
+        if (currentCoroutineContext()[LocalModelImportOnly.Key] != null) {
+            throw IOException("本地模型已不可用，请重新导入或下载")
+        }
         val part = File(destination.parentFile, "${destination.name}.part")
         val metadataFile = File(destination.parentFile, "${destination.name}.part.properties")
         val backup = File(destination.parentFile, "${destination.name}.backup")

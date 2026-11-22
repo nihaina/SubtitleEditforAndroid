@@ -3,6 +3,7 @@
     <string name="speech_to_subtitle_qwen_aligner_required">请先导入 Qwen3-ASR 和 ForcedAligner 模型</string>
     <string name="speech_to_subtitle_timestamp_experiment_required">实验打轴需要先在模型设置中配置当前非 Whisper ASR 模型</string>
     <string name="speech_to_subtitle_missing_inputs">请先选择文件和模型</string>
+    <string name="speech_to_subtitle_queued">等待语音转字幕任务调度</string>
     <string name="speech_to_subtitle_vad_model_required">请先选择外部 VAD 模型，或在模型设置中勾选使用内置</string>
     <string name="speech_to_subtitle_summary">转录完成：成功 %1$d/%2$d</string>
     <string name="speech_to_subtitle_summary_with_failures">转录完成：成功 %1$d/%2$d，失败 %3$d</string>

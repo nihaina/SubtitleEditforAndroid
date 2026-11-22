@@ -17,6 +17,7 @@ import com.subtitleedit.usecase.DownloadAsrModelUseCase
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
@@ -25,10 +26,13 @@ import kotlinx.coroutines.withContext
 
 internal class TaskWorkScheduler(
     context: Context,
-    private val taskStateStore: TaskStateStore
+    private val taskStateStore: TaskStateStore,
+    private val canImportLocally: (String, String?) -> Boolean,
 ) {
+    private val appContext = context.applicationContext
     private val workManager = WorkManager.getInstance(context)
     private val enqueueMutex = Mutex()
+    private val speechEnqueueMutex = Mutex()
 
     suspend fun enqueueGeneralModelDownload(): UUID = enqueueModelDownload(
         GENERAL_MODEL_WORK, ModelDownloadWorker.KIND_DEMIX_GENERAL
@@ -72,6 +76,36 @@ internal class TaskWorkScheduler(
         workManager.cancelUniqueWork(AI_SUBTITLE_WORK)
     }
 
+    suspend fun enqueueSpeechToSubtitle(task: SpeechToSubtitleRequest): UUID = speechEnqueueMutex.withLock {
+        withContext(Dispatchers.IO + NonCancellable) {
+            val previous = workManager.getWorkInfosForUniqueWork(SPEECH_TO_SUBTITLE_WORK).get()
+            previous.firstOrNull { !it.state.isFinished }?.let { return@withContext it.id }
+            val request = OneTimeWorkRequestBuilder<SpeechToSubtitleWorker>()
+                .setInputData(Data.Builder()
+                    .putStringArray(SpeechToSubtitleWorker.KEY_REPLACED_WORK, previous.map { it.id.toString() }.toTypedArray())
+                    .build())
+                .build()
+            val store = SpeechToSubtitleTaskStore(appContext, request.id)
+            try {
+                store.writeRequest(task)
+                workManager.enqueueUniqueWork(SPEECH_TO_SUBTITLE_WORK, ExistingWorkPolicy.KEEP, request).result.get()
+                request.id
+            } catch (error: Exception) {
+                store.delete()
+                throw error
+            }
+        }
+    }
+
+    suspend fun findSpeechToSubtitleWork(preferredId: UUID? = null): UUID? = withContext(Dispatchers.IO) {
+        val workInfos = workManager.getWorkInfosForUniqueWork(SPEECH_TO_SUBTITLE_WORK).get()
+        workInfos.firstOrNull { !it.state.isFinished }?.id
+            ?: workInfos.firstOrNull { it.id == preferredId }?.id
+            ?: workInfos.firstOrNull { !SpeechToSubtitleTaskStore(appContext, it.id).isAcknowledged() }?.id
+    }
+
+    fun observeSpeechToSubtitle(workId: UUID): Flow<WorkInfo?> = workManager.getWorkInfoByIdFlow(workId)
+
     suspend fun retryModelDownload(workId: UUID): UUID {
         val previous = withContext(Dispatchers.IO) { workManager.getWorkInfoById(workId).get() }
         requireNotNull(previous) { "下载任务不存在，请重新选择模型下载" }
@@ -98,17 +132,25 @@ internal class TaskWorkScheduler(
         optionId: String? = null
     ): UUID = enqueueMutex.withLock {
         withContext(Dispatchers.IO) {
-            findModelDownload(uniqueName)?.let { return@withContext it }
+            val local = canImportLocally(kind, optionId)
+            val active = workManager.getWorkInfosForUniqueWork(uniqueName).get()
+                .firstOrNull { !it.state.isFinished }
+            val replaceWaitingDownload = active != null && local &&
+                active.state == WorkInfo.State.ENQUEUED && active.constraints.requiredNetworkType == NetworkType.CONNECTED &&
+                MODEL_KIND_TAG_PREFIX + kind in active.tags &&
+                active.tags.firstOrNull { it.startsWith(MODEL_OPTION_TAG_PREFIX) }?.removePrefix(MODEL_OPTION_TAG_PREFIX) == optionId
+            if (active != null && !replaceWaitingDownload) return@withContext active.id
             val request = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
                 .setInputData(
                     Data.Builder()
                         .putString(ModelDownloadWorker.KEY_MODEL_KIND, kind)
                         .putString(ModelDownloadWorker.KEY_MODEL_OPTION, optionId)
+                        .putBoolean(ModelDownloadWorker.KEY_LOCAL_ONLY, local)
                         .build()
                 )
                 .setConstraints(
                     Constraints.Builder()
-                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .setRequiredNetworkType(if (local) NetworkType.NOT_REQUIRED else NetworkType.CONNECTED)
                         .build()
                 )
                 .setBackoffCriteria(
@@ -122,7 +164,7 @@ internal class TaskWorkScheduler(
                 .apply { optionId?.let { addTag(MODEL_OPTION_TAG_PREFIX + it) } }
                 .build()
             workManager.enqueueUniqueWork(
-                uniqueName, ExistingWorkPolicy.KEEP, request
+                uniqueName, if (replaceWaitingDownload) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP, request
             ).result.get()
             request.id
         }
@@ -176,10 +218,10 @@ internal class TaskWorkScheduler(
             },
             progress = if (state == WorkInfo.State.ENQUEUED || state == WorkInfo.State.BLOCKED) {
                 TaskProgress(
-                    message = if (runAttemptCount > 0) {
-                        "等待网络连接或自动重试（已尝试 $runAttemptCount 次）"
-                    } else {
-                        "等待网络连接或任务调度"
+                    message = when {
+                        constraints.requiredNetworkType == NetworkType.NOT_REQUIRED -> "等待本地模型导入任务调度"
+                        runAttemptCount > 0 -> "等待网络连接或自动重试（已尝试 $runAttemptCount 次）"
+                        else -> "等待网络连接或任务调度"
                     }
                 )
             } else TaskProgress(
@@ -197,6 +239,7 @@ internal class TaskWorkScheduler(
         private const val ASR_MODEL_WORK = "download-asr-model"
         private const val LLM_MODEL_WORK_PREFIX = "download-llm-model"
         private const val AI_SUBTITLE_WORK = "ai-subtitle-processing"
+        private const val SPEECH_TO_SUBTITLE_WORK = "speech-to-subtitle"
         private const val MODEL_KIND_TAG_PREFIX = "model-kind:"
         private const val MODEL_OPTION_TAG_PREFIX = "model-option:"
         fun progressData(message: String, current: Long, total: Long): Data = Data.Builder()

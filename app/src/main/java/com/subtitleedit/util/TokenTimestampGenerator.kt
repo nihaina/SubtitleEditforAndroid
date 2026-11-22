@@ -66,11 +66,24 @@ class TokenTimestampGenerator(context: Context) {
         language: String = "自动检测",
         progressCallback: (progress: Int, status: String) -> Unit = { _, _ -> },
         isCancelled: () -> Boolean = { false }
+    ): Result<List<Segment>> = generateSegments(
+        pcmFile = pcmFile,
+        language = language,
+        progressCallback = progressCallback,
+        isCancelled = isCancelled,
+        modelConfig = currentModelConfig(settingsManager),
+    )
+
+    internal fun generateSegments(
+        pcmFile: File,
+        language: String,
+        progressCallback: (Int, String) -> Unit,
+        isCancelled: () -> Boolean,
+        modelConfig: ModelConfig
     ): Result<List<Segment>> {
-        if (settingsManager.getAsrModelType() == SettingsManager.ASR_MODEL_QWEN3_ASR) {
-            return generateQwen3Segments(pcmFile, language, progressCallback, isCancelled)
+        if (modelConfig.modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) {
+            return generateQwen3Segments(pcmFile, language, progressCallback, isCancelled, modelConfig)
         }
-        val modelConfig = currentModelConfig(settingsManager)
         if (!isConfigured(appContext, modelConfig)) {
             return Result.failure(
                 Exception("实验打轴需要先配置当前非 Whisper ASR 模型")
@@ -110,9 +123,10 @@ class TokenTimestampGenerator(context: Context) {
         language: String,
         progressCallback: (Int, String) -> Unit,
         isCancelled: () -> Boolean,
+        modelConfig: ModelConfig,
     ): Result<List<Segment>> {
-        val tokenizerPath = settingsManager.getQwen3AsrTokenizerPath()
-        val alignerPath = settingsManager.getQwen3ForcedAlignerPath()
+        val tokenizerPath = modelConfig.tokensPath
+        val alignerPath = modelConfig.forcedAlignerPath
         val tokenizerDirectory = localFile(tokenizerPath)
         val alignerFile = localFile(alignerPath)
         if (tokenizerDirectory == null || !tokenizerDirectory.isDirectory) {
@@ -131,9 +145,9 @@ class TokenTimestampGenerator(context: Context) {
             Qwen3ForcedAlignmentTextEncoder(tokenizerDirectory).use { encoder ->
                 progressCallback(5, "Qwen3-ASR 识别文本")
                 val recognizer = speechRecognitionService.createRecognizer(
-                    encoderPath = settingsManager.getQwen3AsrEncoderPath(),
-                    decoderPath = settingsManager.getQwen3AsrDecoderPath(),
-                    joinerPath = settingsManager.getQwen3AsrConvFrontendPath(),
+                    encoderPath = modelConfig.encoderPath,
+                    decoderPath = modelConfig.decoderPath,
+                    joinerPath = modelConfig.joinerPath,
                     tokensPath = tokenizerPath,
                     vadModelPath = "",
                     useVad = false,
@@ -288,6 +302,15 @@ class TokenTimestampGenerator(context: Context) {
         return merged
     }
 
+    internal data class ModelConfig(
+        val modelType: String,
+        val encoderPath: String = "",
+        val decoderPath: String = "",
+        val joinerPath: String = "",
+        val tokensPath: String = "",
+        val forcedAlignerPath: String = "",
+    )
+
     companion object {
         private const val TAG = "TokenTimestampGenerator"
 
@@ -318,9 +341,10 @@ class TokenTimestampGenerator(context: Context) {
                 currentModelConfig(settingsManager).tokensPath
             }
 
-        fun modelDisplayName(settingsManager: SettingsManager): String = when (
-            settingsManager.getAsrModelType()
-        ) {
+        fun modelDisplayName(settingsManager: SettingsManager): String =
+            modelDisplayName(settingsManager.getAsrModelType())
+
+        internal fun modelDisplayName(modelType: String): String = when (modelType) {
             SettingsManager.ASR_MODEL_SENSEVOICE -> "SenseVoice"
             SettingsManager.ASR_MODEL_PARAKEET_TDT -> "Parakeet TDT"
             SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> "Parakeet CTC 日语"
@@ -392,6 +416,17 @@ class TokenTimestampGenerator(context: Context) {
                     encoderPath = settings.getParakeetCtcModelPath(),
                     tokensPath = settings.getParakeetCtcTokensPath()
                 )
+                SettingsManager.ASR_MODEL_QWEN3_ASR -> {
+                    val variant = settings.getQwen3AsrModelVariant()
+                    ModelConfig(
+                        modelType = modelType,
+                        encoderPath = settings.getQwen3AsrEncoderPath(variant),
+                        decoderPath = settings.getQwen3AsrDecoderPath(variant),
+                        joinerPath = settings.getQwen3AsrConvFrontendPath(variant),
+                        tokensPath = settings.getQwen3AsrTokenizerPath(variant),
+                        forcedAlignerPath = settings.getQwen3ForcedAlignerPath()
+                    )
+                }
                 else -> ModelConfig(modelType = SettingsManager.ASR_MODEL_WHISPER)
             }
 
@@ -422,13 +457,5 @@ class TokenTimestampGenerator(context: Context) {
                 } == true
             }.getOrDefault(false)
         }
-
-        private data class ModelConfig(
-            val modelType: String,
-            val encoderPath: String = "",
-            val decoderPath: String = "",
-            val joinerPath: String = "",
-            val tokensPath: String = ""
-        )
     }
 }

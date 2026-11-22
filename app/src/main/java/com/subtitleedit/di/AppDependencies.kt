@@ -29,7 +29,9 @@ import com.subtitleedit.util.Qwen3ForcedAlignerOnnx
 import com.subtitleedit.util.Qwen3ForcedAlignerModelFiles
 import com.subtitleedit.util.Qwen3ForcedAlignerReleaseDownloader
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.SenseVoiceNpuModelImporter
 import com.subtitleedit.work.TaskWorkScheduler
+import com.subtitleedit.work.canImportModelLocally
 import java.io.File
 
 internal class AppDependencies(application: Application) {
@@ -102,7 +104,11 @@ internal class AppDependencies(application: Application) {
         )
     }
     val taskWorkScheduler: TaskWorkScheduler by lazy {
-        TaskWorkScheduler(appContext, taskStateStore)
+        TaskWorkScheduler(appContext, taskStateStore) { kind, optionId ->
+            canImportModelLocally(modelRepository.modelsDirectory(), kind, optionId) { duration ->
+                SenseVoiceNpuModelImporter(appContext, appContext.contentResolver).findInstalledModel(duration) != null
+            }
+        }
     }
 
     fun mediaRepository(cacheDir: File): MediaRepository = DefaultMediaRepository(

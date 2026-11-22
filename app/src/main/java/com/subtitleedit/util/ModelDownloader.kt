@@ -305,6 +305,48 @@ object ModelDownloader {
 
     internal fun hasQwen3AsrModel(root: File): Boolean = findQwen3AsrFiles(root) != null
 
+    internal fun canImportSenseVoiceLocally(root: File, option: SenseVoiceModelOption): Boolean =
+        canImportArchiveLocally(root, option.directoryName, ".sensevoice_${option.id}_backup") {
+            hasSenseVoiceModel(it, option.architecture)
+        }
+
+    internal fun canImportWhisperLocally(root: File, option: WhisperModelOption): Boolean =
+        canImportArchiveLocally(root, option.directoryName, ".whisper_${option.id}_backup") {
+            hasWhisperModel(it, option.id)
+        }
+
+    internal fun canImportParakeetLocally(root: File, option: ParakeetModelOption): Boolean =
+        canImportArchiveLocally(root, option.directoryName, ".parakeet_${option.modelType}_backup") {
+            hasParakeetModel(it, option.architecture)
+        }
+
+    private fun canImportArchiveLocally(
+        root: File, directoryName: String, backupName: String, isComplete: (File) -> Boolean,
+    ): Boolean = isComplete(File(root, directoryName)) || isComplete(File(root, backupName)) ||
+        modelArchive(root, directoryName).isReadableModel()
+
+    internal fun canImportQwen3AsrLocally(root: File, option: Qwen3AsrModelOption): Boolean =
+        hasQwen3AsrModel(File(root, option.directoryName)) ||
+            hasQwen3AsrModel(File(root, ".qwen3_${option.id}_backup")) ||
+            hasQwen3AsrModel(qwen3DownloadStaging(root, option))
+
+    internal fun canImportDemixLocally(root: File): Boolean =
+        File(File(root, SEPARATION_DIRECTORY_NAME), DEMIX_MODEL_NAME).isReadableModel(MIN_ONNX_SIZE) ||
+            File(root, DEMIX_MODEL_NAME).isReadableModel(MIN_ONNX_SIZE)
+
+    internal fun canImportLlmLocally(root: File, optionId: String): Boolean =
+        LLM_MODELS.firstOrNull { it.id == optionId }?.let { option ->
+            File(File(root, LLM_DIRECTORY_NAME), option.fileName).isReadableModel(option.minimumSizeBytes)
+        } ?: false
+
+    private fun modelArchive(root: File, directoryName: String): File = File(root, "$directoryName.tar.bz2")
+
+    private fun qwen3DownloadStaging(root: File, option: Qwen3AsrModelOption): File =
+        File(root, ".qwen3_${option.id}_modelscope_downloading")
+
+    private fun File.isReadableModel(minimumSize: Long = 1L): Boolean =
+        isFile && canRead() && length() >= minimumSize
+
     suspend fun downloadSenseVoice(
         option: SenseVoiceModelOption = SENSEVOICE_CPU_MODEL,
         onProgress: (Progress) -> Unit
@@ -318,8 +360,8 @@ object ModelDownloader {
                 return@withContext it
             }
 
-            val archive = File(modelsDir, "${option.directoryName}.tar.bz2")
-            if (!archive.isFile || archive.length() == 0L) {
+            val archive = modelArchive(modelsDir, option.directoryName)
+            if (!archive.isReadableModel()) {
                 downloadFile(
                     option.url,
                     archive,
@@ -385,8 +427,8 @@ object ModelDownloader {
                 return@withContext it
             }
 
-            val archive = File(modelsDir, "${option.directoryName}.tar.bz2")
-            if (!archive.isFile || archive.length() == 0L) {
+            val archive = modelArchive(modelsDir, option.directoryName)
+            if (!archive.isReadableModel()) {
                 downloadFile(
                     option.url,
                     archive,
@@ -450,8 +492,8 @@ object ModelDownloader {
                 return@withContext it
             }
 
-            val archive = File(modelsDir, "${option.directoryName}.tar.bz2")
-            if (!archive.isFile || archive.length() == 0L) {
+            val archive = modelArchive(modelsDir, option.directoryName)
+            if (!archive.isReadableModel()) {
                 downloadFile(option.url, archive, "正在下载 ${option.displayName} 模型", onProgress)
             }
 
@@ -507,7 +549,7 @@ object ModelDownloader {
             require(option in QWEN3_ASR_MODELS) { "不支持的 Qwen3-ASR 模型规格" }
             val modelsDir = requireModelsDirectory()
             val targetDir = File(modelsDir, option.directoryName)
-            val stagingDir = File(modelsDir, ".qwen3_${option.id}_modelscope_downloading")
+            val stagingDir = qwen3DownloadStaging(modelsDir, option)
             val legacyStagingDir = File(modelsDir, ".qwen3_${option.id}_downloading")
             val legacyArchive = File(modelsDir, "${option.directoryName}.tar.bz2")
             recoverQwen3AsrBackup(targetDir, option)
@@ -520,40 +562,16 @@ object ModelDownloader {
             }
 
             try {
-                val baseUrl = "$QWEN3_ASR_MODELSCOPE_URL/resolve/master"
-                val modelDir = File(stagingDir, option.remoteModelDirectory)
-                val tokenizerDir = File(stagingDir, "tokenizer")
-                if ((!modelDir.exists() && !modelDir.mkdirs()) ||
-                    (!tokenizerDir.exists() && !tokenizerDir.mkdirs())
-                ) {
-                    throw IOException("无法创建 Qwen3-ASR 文件目录")
-                }
-                val modelPath = option.remoteModelDirectory
-                val files = listOf(
-                    Triple("$modelPath/conv_frontend.onnx", modelDir, "conv_frontend.onnx"),
-                    Triple("$modelPath/encoder.int8.onnx", modelDir, "encoder.int8.onnx"),
-                    Triple("$modelPath/decoder.int8.onnx", modelDir, "decoder.int8.onnx")
-                ) + qwen3TokenizerFiles.map { name -> Triple("tokenizer/$name", tokenizerDir, name) }
-                files.forEach { (path, parent, name) ->
-                    val destination = File(parent, name)
-                    if (!destination.isFile || destination.length() == 0L) {
-                        downloadFile(
-                            "$baseUrl/$path",
-                            destination,
-                            "正在下载 Qwen3-ASR ${option.displayName}：$name",
-                            onProgress
-                        )
-                    }
+                if (!hasQwen3AsrModel(stagingDir)) {
+                    downloadMissingQwen3AsrFiles(stagingDir, option, onProgress)
                 }
 
-                val stagedFiles = findQwen3AsrFiles(stagingDir)
-                    ?: throw IOException("Qwen3-ASR 模型文件不完整或损坏")
                 installQwen3AsrDirectory(stagingDir, targetDir, option)
                 val installedFiles = findQwen3AsrFiles(targetDir)
                     ?: throw IOException("Qwen3-ASR 模型安装后校验失败")
                 legacyStagingDir.deleteRecursively()
                 legacyArchive.delete()
-                onProgress(Progress("Qwen3-ASR ${option.displayName} 模型已下载并导入"))
+                onProgress(Progress("Qwen3-ASR ${option.displayName} 模型已准备好并导入"))
                 installedFiles
             } catch (e: CancellationException) {
                 throw e
@@ -566,22 +584,57 @@ object ModelDownloader {
         }
     }
 
+    private suspend fun downloadMissingQwen3AsrFiles(
+        stagingDir: File,
+        option: Qwen3AsrModelOption,
+        onProgress: (Progress) -> Unit,
+    ) {
+        val baseUrl = "$QWEN3_ASR_MODELSCOPE_URL/resolve/master"
+        val modelPath = option.remoteModelDirectory
+        val modelDir = File(stagingDir, modelPath)
+        val tokenizerDir = File(stagingDir, "tokenizer")
+        if ((!modelDir.exists() && !modelDir.mkdirs()) ||
+            (!tokenizerDir.exists() && !tokenizerDir.mkdirs())
+        ) {
+            throw IOException("无法创建 Qwen3-ASR 文件目录")
+        }
+        val files = listOf(
+            Triple("$modelPath/conv_frontend.onnx", modelDir, "conv_frontend.onnx"),
+            Triple("$modelPath/encoder.int8.onnx", modelDir, "encoder.int8.onnx"),
+            Triple("$modelPath/decoder.int8.onnx", modelDir, "decoder.int8.onnx")
+        ) + qwen3TokenizerFiles.map { name -> Triple("tokenizer/$name", tokenizerDir, name) }
+        files.forEach { (path, parent, name) ->
+            val destination = File(parent, name)
+            if (!destination.isReadableModel()) {
+                downloadFile(
+                    "$baseUrl/$path",
+                    destination,
+                    "正在下载 Qwen3-ASR ${option.displayName}：$name",
+                    onProgress
+                )
+            }
+        }
+
+        if (!hasQwen3AsrModel(stagingDir)) throw IOException("Qwen3-ASR 模型文件不完整或损坏")
+    }
+
     suspend fun downloadDemixGeneralModel(
         onProgress: (Progress) -> Unit
     ): File = demixMutex.withLock {
         withContext(kotlinx.coroutines.Dispatchers.IO) {
-            val modelsDir = requireModelsDirectory()
+            val modelsDir = modelsDirectory()
             val separationDir = File(modelsDir, SEPARATION_DIRECTORY_NAME)
-            if ((!separationDir.exists() && !separationDir.mkdirs()) || !separationDir.isDirectory) {
-                throw IOException("无法创建人声分离模型目录：${separationDir.absolutePath}")
-            }
             val target = File(separationDir, DEMIX_MODEL_NAME)
-            if (target.isFile && target.length() >= MIN_ONNX_SIZE) {
+            if (target.isReadableModel(MIN_ONNX_SIZE)) {
                 onProgress(Progress("检测到本地人声分离模型，跳过下载并直接导入"))
                 return@withContext target
             }
+            requireModelsDirectory(modelsDir)
+            if ((!separationDir.exists() && !separationDir.mkdirs()) || !separationDir.isDirectory) {
+                throw IOException("无法创建人声分离模型目录：${separationDir.absolutePath}")
+            }
             val legacyTarget = File(modelsDir, DEMIX_MODEL_NAME)
-            if (legacyTarget.isFile && legacyTarget.length() >= MIN_ONNX_SIZE) {
+            if (legacyTarget.isReadableModel(MIN_ONNX_SIZE)) {
                 if (!legacyTarget.renameTo(target)) {
                     legacyTarget.copyTo(target, overwrite = true)
                     legacyTarget.delete()
@@ -612,18 +665,19 @@ object ModelDownloader {
         withContext(kotlinx.coroutines.Dispatchers.IO) {
             val option = LLM_MODELS.firstOrNull { it.id == optionId }
                 ?: throw IllegalArgumentException("不支持的 LLM 模型规格")
-            val directory = File(requireModelsDirectory(), LLM_DIRECTORY_NAME)
+            val modelsDir = modelsDirectory()
+            val directory = File(modelsDir, LLM_DIRECTORY_NAME)
+            val destination = File(directory, option.fileName)
+            if (destination.isReadableModel(option.minimumSizeBytes)) {
+                onProgress(Progress("检测到本地 ${option.displayName} 模型，跳过下载并直接导入"))
+                return@withContext destination
+            }
+            requireModelsDirectory(modelsDir)
             if (!directory.exists() && !directory.mkdirs()) {
                 throw IOException("无法创建 ${directory.absolutePath}")
             }
             if (!directory.isDirectory || !directory.canWrite()) {
                 throw IOException("模型目录不可写：${directory.absolutePath}")
-            }
-
-            val destination = File(directory, option.fileName)
-            if (destination.isFile && destination.length() >= option.minimumSizeBytes) {
-                onProgress(Progress("检测到本地 ${option.displayName} 模型，跳过下载并直接导入"))
-                return@withContext destination
             }
 
             downloadFile(
@@ -640,14 +694,13 @@ object ModelDownloader {
         }
     }
 
-    private fun requireModelsDirectory(): File {
+    private fun requireModelsDirectory(directory: File = modelsDirectory()): File {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
             throw IOException("请先授予应用“所有文件访问权限”，再下载模型")
         }
         if (Environment.getExternalStorageState() != Environment.MEDIA_MOUNTED) {
             throw IOException("外部存储当前不可写")
         }
-        val directory = modelsDirectory()
         if (!directory.exists() && !directory.mkdirs()) {
             throw IOException("无法创建 ${directory.absolutePath}")
         }
@@ -823,7 +876,7 @@ object ModelDownloader {
         architecture: SenseVoiceArchitecture
     ): SenseVoiceFiles? {
         if (!root.isDirectory) return null
-        val files = runCatching { root.walkTopDown().filter { it.isFile }.toList() }.getOrNull()
+        val files = runCatching { root.walkTopDown().filter { it.isFile && it.canRead() }.toList() }.getOrNull()
             ?: return null
         val model = files
             .filter {
@@ -855,7 +908,7 @@ object ModelDownloader {
 
     internal fun findQwen3AsrFiles(root: File): Qwen3AsrFiles? {
         if (!root.isDirectory) return null
-        val files = runCatching { root.walkTopDown().filter { it.isFile }.toList() }.getOrNull()
+        val files = runCatching { root.walkTopDown().filter { it.isFile && it.canRead() }.toList() }.getOrNull()
             ?: return null
         fun modelFile(name: String): File? = files.firstOrNull {
             it.name.equals(name, ignoreCase = true) && it.length() >= MIN_ONNX_SIZE
@@ -917,7 +970,7 @@ object ModelDownloader {
 
     private fun findWhisperFiles(root: File, expectedStem: String): WhisperFiles? {
         if (!root.isDirectory) return null
-        val files = runCatching { root.walkTopDown().filter { it.isFile }.toList() }.getOrNull()
+        val files = runCatching { root.walkTopDown().filter { it.isFile && it.canRead() }.toList() }.getOrNull()
             ?: return null
         data class OnnxCandidate(val file: File, val stem: String, val int8: Boolean)
         data class TokenCandidate(val file: File, val stem: String)
@@ -999,7 +1052,7 @@ object ModelDownloader {
         architecture: ParakeetArchitecture
     ): ParakeetFiles? {
         if (!root.isDirectory) return null
-        val files = runCatching { root.walkTopDown().filter { it.isFile }.toList() }.getOrNull()
+        val files = runCatching { root.walkTopDown().filter { it.isFile && it.canRead() }.toList() }.getOrNull()
             ?: return null
 
         fun requiredOnnx(name: String): File? = files.firstOrNull {

@@ -2,43 +2,38 @@ package com.subtitleedit
 
 import android.app.Application
 import android.content.Intent
-import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
-import android.os.Environment
 import android.provider.OpenableColumns
 import android.util.Log
 import android.widget.Toast
-import androidx.documentfile.provider.DocumentFile
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
 import com.subtitleedit.feature.ui.SpeechToSubtitleDialogUi
 import com.subtitleedit.feature.ui.SpeechToSubtitleFileUi
 import com.subtitleedit.feature.ui.SpeechToSubtitleUiState
-import com.subtitleedit.model.SubtitleEntry
-import com.subtitleedit.nativebridge.NativeMediaOperation
-import com.subtitleedit.nativebridge.PcmFormat
-import com.subtitleedit.task.LongTaskController
 import com.subtitleedit.ui.components.AppOption
-import com.subtitleedit.util.ByteSizeFormat
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.PickedUriAccess
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SourceOutputDirectory
 import com.subtitleedit.util.SubtitleOutputWriter
-import com.subtitleedit.util.SubtitleParser
-import com.subtitleedit.util.TaskLogBuffer
 import com.subtitleedit.util.TokenTimestampGenerator
 import com.subtitleedit.util.UriDisplayName
-import com.subtitleedit.util.WhisperRecognizer
+import com.subtitleedit.work.SpeechToSubtitleFile
+import com.subtitleedit.work.SpeechToSubtitleRequest
+import com.subtitleedit.work.SpeechToSubtitleTaskStore
+import com.subtitleedit.work.SpeechToSubtitleWorker
+import java.io.File
+import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.util.Locale
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicReference
 
 internal sealed interface SpeechToSubtitleEvent {
     data object OpenAsrSettings : SpeechToSubtitleEvent
@@ -56,7 +51,8 @@ private val formatOptions = listOf("SRT", "LRC", "TXT").map { AppOption(it, it) 
  * 使用 sherpa-onnx + Whisper 进行离线语音识别
  */
 internal class SpeechToSubtitleViewModel(
-    application: Application
+    application: Application,
+    private val savedStateHandle: SavedStateHandle,
 ) : AppViewModel<SpeechToSubtitleUiState, SpeechToSubtitleEvent>(
     application,
     SpeechToSubtitleUiState(
@@ -68,7 +64,7 @@ internal class SpeechToSubtitleViewModel(
 ) {
     private companion object {
         const val OUTPUT_DIRECTORY_KEY = "speech_to_subtitle"
-        const val LOG_RENDER_INTERVAL_MS = 100L
+        const val KEY_WORK_ID = "speech_to_subtitle_work_id"
     }
 
     private data class SelectedMediaFile(
@@ -78,9 +74,7 @@ internal class SpeechToSubtitleViewModel(
     )
 
     private val settingsManager = SettingsManager.getInstance(application)
-    private val speechRecognitionService get() = dependencies.speechRecognitionService
-    private val taskController = LongTaskController(dependencies.taskStateStore, "speech-to-subtitle")
-    private val isCancelled: Boolean get() = taskController.isCancellationRequested
+    private val scheduler get() = dependencies.taskWorkScheduler
 
     private var selectedMediaFiles: List<SelectedMediaFile> = emptyList()
     private var encoderPath: String = ""
@@ -89,17 +83,24 @@ internal class SpeechToSubtitleViewModel(
     private var tokensPath: String = ""
     private var modelType: String = SettingsManager.ASR_MODEL_WHISPER
     private var vadModelPath: String = ""
-    @Volatile private var mediaOperation: NativeMediaOperation? = null
-    private var conversionJob: Job? = null
+    private var workId: UUID? = null
+    private var workObserver: Job? = null
+    private var restoringWork = true
+    private var cancelWhenEnqueued = false
+    private var resumed = false
+    private var pendingResult: CompletedTask? = null
 
     /** Current output directory, used as the picker's initial location. */
     var outputDirUri: Uri? = null
         private set
 
-    private val realtimeResults = TaskLogBuffer()
-    private val lastProgressLog = AtomicReference("")
-    private val logRenderScheduled = AtomicBoolean(false)
-    private var logRenderJob: Job? = null
+    private data class CompletedTask(
+        val store: SpeechToSubtitleTaskStore,
+        val status: WorkInfo.State,
+        val summary: String?,
+        val error: String?,
+        val translationFiles: List<Uri>,
+    )
 
     private val isConverting: Boolean get() = currentState.isConverting
 
@@ -110,12 +111,19 @@ internal class SpeechToSubtitleViewModel(
         get() = currentState.selectedLanguage.ifBlank { languageOptions.first().id }
 
     init {
+        setState { copy(saveToSourceDirectory = settingsManager.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)) }
         loadSavedModel()
+        restoreWork()
     }
 
-    /** Reloads model configuration; called on every resume while idle. */
-    fun refresh() {
+    fun onResume() {
+        resumed = true
         if (!isConverting) loadSavedModel(resetOutputDirectory = false)
+        deliverResult()
+    }
+
+    fun onPause() {
+        resumed = false
     }
 
     fun openSettings() {
@@ -139,21 +147,6 @@ internal class SpeechToSubtitleViewModel(
     }
 
     fun dismissDialog() = setState { copy(dialog = null) }
-
-    /** Returns true when the page may close immediately. */
-    fun requestBack(): Boolean {
-        if (isConverting) {
-            setState { copy(dialog = SpeechToSubtitleDialogUi.BackConfirmation) }
-            return false
-        }
-        dismissDialog()
-        return true
-    }
-
-    fun confirmBack() {
-        dismissDialog()
-        cancelConversion()
-    }
 
     /**
      * 加载已保存的模型路径
@@ -298,8 +291,7 @@ internal class SpeechToSubtitleViewModel(
         setState {
             copy(
                 asrModelReady = hasAsrModel,
-                startEnabled = selectedMediaFiles.isNotEmpty() && hasAsrModel,
-                saveToSourceDirectory = settingsManager.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)
+                startEnabled = !restoringWork && !isConverting && selectedMediaFiles.isNotEmpty() && hasAsrModel,
             )
         }
     }
@@ -308,6 +300,7 @@ internal class SpeechToSubtitleViewModel(
      * 开始转换
      */
     fun start() {
+        if (restoringWork || isConverting) return
         if (
             shouldUseTokenTimestampExperiment() &&
             !isTokenTimestampExperimentConfigured()
@@ -358,587 +351,246 @@ internal class SpeechToSubtitleViewModel(
     }
 
     private fun startConversion(overwriteOutput: Boolean) {
-        if (taskController.isRunning) return
-        mediaOperation?.cancel()
-        mediaOperation = dependencies.nativeMediaEngine.openOperation()
-        val files = selectedMediaFiles
-        realtimeResults.clear()
-        lastProgressLog.set("")
-        logRenderJob?.cancel()
-        logRenderScheduled.set(false)
+        if (restoringWork || isConverting) return
+        val outputDirectory = outputDirUri ?: return
+        val saveToSource = currentState.saveToSourceDirectory
+        val files = try {
+            selectedMediaFiles.map { file ->
+                SpeechToSubtitleFile(file.uri, file.fileName, file.fileSize, outputDirectoryFor(file.uri, outputDirectory))
+            }
+        } catch (error: Exception) {
+            toast(R.string.save_to_source_folder_failed, error.message.orEmpty(), duration = Toast.LENGTH_LONG)
+            return
+        }
+        val request = SpeechToSubtitleRequest(
+            files = files,
+            language = selectedLanguage,
+            format = selectedFormat,
+            modelType = modelType,
+            encoderPath = encoderPath,
+            decoderPath = decoderPath,
+            joinerPath = joinerPath,
+            tokensPath = tokensPath,
+            vadModelPath = if (settingsManager.isVadUseBuiltInModel()) "" else vadModelPath,
+            forcedAlignerPath = settingsManager.getQwen3ForcedAlignerPath(),
+            useVad = shouldUseVad(),
+            useTokenTimeline = shouldUseTokenTimestampExperiment(),
+            saveToSourceDirectory = saveToSource,
+            outputDirectory = outputDirectory,
+            overwriteOutput = overwriteOutput,
+            addToAutoTranslate = currentState.addToAutoTranslate,
+            disableVadForTxt = currentState.disableVadForTxt,
+        )
+        pendingResult = null
+        workId = null
+        cancelWhenEnqueued = false
         setState {
             copy(
                 isConverting = true,
                 showProcessingPanel = true,
                 progressVisible = true,
                 progress = 0,
-                progressStatus = string(R.string.task_preparing),
+                progressStatus = string(R.string.speech_to_subtitle_queued),
                 logText = "",
-                startEnabled = false
+                startEnabled = false,
             )
         }
-        conversionJob = taskController.launch(viewModelScope) { task ->
-            task.onCancel { mediaOperation?.cancel() }
+        viewModelScope.launch {
             try {
-                showProgress(string(R.string.task_preparing), 0)
-                appendRuntimeLog(string(R.string.speech_to_subtitle_log_start))
-                appendRuntimeLog(string(R.string.task_pending_files, files.size))
-                appendRuntimeLog(string(R.string.task_output_format, selectedFormat))
-                appendRuntimeLog(string(R.string.speech_to_subtitle_log_source_language, selectedLanguage))
-                appendRuntimeLog(
-                    string(
-                        R.string.task_output_directory,
-                        if (settingsManager.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)) {
-                            string(R.string.save_to_source_folder_active)
-                        } else {
-                            currentState.outputDirectory ?: string(R.string.activity_tool_default_output_directory)
+                val id = withContext(NonCancellable) {
+                    withContext(Dispatchers.IO) {
+                        files.forEach { file ->
+                            PickedUriAccess.retainPermission(app, file.uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         }
-                    )
-                )
-                appendSpeechModelConfig()
-
-                var successCount = 0
-                val failedFiles = mutableListOf<String>()
-                val writtenOutputBaseNames = mutableSetOf<String>()
-                val autoTranslateFiles = mutableListOf<Uri>()
-
-                for ((index, file) in files.withIndex()) {
-                    if (isCancelled) break
-
-                    val fallbackOutput = outputDirUri ?: throw IllegalStateException(string(R.string.output_directory_not_set))
-                    val outputDirectory = outputDirectoryFor(file.uri, fallbackOutput)
-                    val outputBaseName = "${outputDirectory}::${file.fileName.substringBeforeLast(".").lowercase()}"
-                    val shouldOverwrite = overwriteOutput && writtenOutputBaseNames.add(outputBaseName)
-                    val result = convertFile(file, index + 1, files.size, shouldOverwrite)
-                    if (isCancelled) break
-
-                    result.onSuccess { outputUri ->
-                        successCount++
-                        autoTranslateFiles += outputUri
                     }
-                        .onFailure { error ->
-                            failedFiles.add(file.fileName)
-                            appendRuntimeLog(
-                                string(
-                                    R.string.task_file_failed_with_reason,
-                                    error.message ?: string(R.string.error_unknown)
-                                )
-                            )
-                        }
+                    val enqueuedId = scheduler.enqueueSpeechToSubtitle(request)
+                    if (cancelWhenEnqueued) scheduler.cancel(enqueuedId)
+                    enqueuedId
                 }
+                observeWork(id)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                showError(error.message)
+                finishWork()
+            }
+        }
+    }
 
-                if (!isCancelled) {
-                    showProgress(string(R.string.task_all_done), 100)
-                    val summary = if (failedFiles.isEmpty()) {
-                        string(R.string.speech_to_subtitle_summary, successCount, files.size)
-                    } else {
-                        string(R.string.speech_to_subtitle_summary_with_failures, successCount, files.size, failedFiles.size)
-                    }
-                    appendRuntimeLog(summary)
-                    toast(summary, Toast.LENGTH_LONG)
-                    if (currentState.addToAutoTranslate && autoTranslateFiles.isNotEmpty()) {
-                        sendEvent(SpeechToSubtitleEvent.OpenAutoTranslate(autoTranslateFiles.toList()))
-                    }
-                }
-            } catch (e: Exception) {
-                if (!isCancelled) {
-                    task.recordFailure(e)
-                    showError(e.message)
-                }
+    private fun restoreWork() {
+        viewModelScope.launch {
+            try {
+                val preferredId = savedStateHandle.get<String>(KEY_WORK_ID)?.let(UUID::fromString)
+                scheduler.findSpeechToSubtitleWork(preferredId)?.let(::observeWork)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                showError(error.message)
             } finally {
-                mediaOperation?.cancel()
-                mediaOperation = null
-                setState { copy(isConverting = false, progressVisible = false) }
+                restoringWork = false
                 updateStartButtonState()
             }
         }
     }
 
-    /**
-     * 取消转换：先弹出确认框
-     */
+    private fun observeWork(id: UUID) {
+        workObserver?.cancel()
+        workId = id
+        savedStateHandle[KEY_WORK_ID] = id.toString()
+        setState { copy(isConverting = true, startEnabled = false) }
+        workObserver = viewModelScope.launch {
+            val store = SpeechToSubtitleTaskStore(app, id)
+            try {
+                val request = withContext(Dispatchers.IO) { store.readRequest() }
+                restoreSelection(request)
+                scheduler.observeSpeechToSubtitle(id).first { info ->
+                    if (info == null) return@first true
+                    updateWorkProgress(info, store)
+                    if (info.state.isFinished) prepareResult(info, request, store)
+                    info.state.isFinished
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                showError(error.message)
+            } finally {
+                if (workId == id) finishWork()
+            }
+        }
+    }
+
+    private fun restoreSelection(request: SpeechToSubtitleRequest) {
+        outputDirUri = request.outputDirectory
+        selectedMediaFiles = request.files.map { SelectedMediaFile(it.uri, it.fileName, it.fileSize) }
+        setState {
+            copy(
+                outputDirectory = DirectoryDisplayPath.fromUri(app, request.outputDirectory),
+                saveToSourceDirectory = request.saveToSourceDirectory,
+                selectedLanguage = request.language,
+                selectedFormat = request.format,
+                isTxtSelected = request.format == "TXT",
+                disableVadForTxt = request.disableVadForTxt,
+                addToAutoTranslate = request.addToAutoTranslate,
+            )
+        }
+        publishSelectedFiles()
+    }
+
+    private suspend fun updateWorkProgress(info: WorkInfo, store: SpeechToSubtitleTaskStore) {
+        val data = if (info.state.isFinished) info.outputData else info.progress
+        val status = when (info.state) {
+            WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> string(R.string.speech_to_subtitle_queued)
+            WorkInfo.State.RUNNING -> data.getString(SpeechToSubtitleWorker.KEY_MESSAGE) ?: string(R.string.task_preparing)
+            WorkInfo.State.SUCCEEDED -> string(R.string.task_all_done)
+            WorkInfo.State.FAILED -> data.getString(SpeechToSubtitleWorker.KEY_ERROR)
+                ?: data.getString(SpeechToSubtitleWorker.KEY_SUMMARY)
+                ?: string(R.string.error_unknown)
+            WorkInfo.State.CANCELLED -> string(R.string.task_cancelled)
+        }
+        val log = withContext(Dispatchers.IO) { store.readLog() }
+        setState {
+            copy(
+                showProcessingPanel = true,
+                progressVisible = !info.state.isFinished,
+                progress = data.getInt(SpeechToSubtitleWorker.KEY_PROGRESS, 0),
+                progressStatus = status,
+                logText = log,
+            )
+        }
+    }
+
+    private suspend fun prepareResult(
+        info: WorkInfo,
+        request: SpeechToSubtitleRequest,
+        store: SpeechToSubtitleTaskStore,
+    ) {
+        pendingResult = withContext(Dispatchers.IO) {
+            if (store.isAcknowledged()) return@withContext null
+            val outputs = if (info.state == WorkInfo.State.SUCCEEDED && request.addToAutoTranslate) {
+                request.files.indices.mapNotNull { store.readOutcome(it)?.output?.uri }
+            } else emptyList()
+            CompletedTask(
+                store,
+                info.state,
+                info.outputData.getString(SpeechToSubtitleWorker.KEY_SUMMARY),
+                info.outputData.getString(SpeechToSubtitleWorker.KEY_ERROR),
+                outputs,
+            )
+        }
+        deliverResult()
+    }
+
+    private fun deliverResult() {
+        if (!resumed) return
+        val result = pendingResult ?: return
+        pendingResult = null
+        when {
+            result.status == WorkInfo.State.CANCELLED -> toast(R.string.task_cancelled)
+            result.error != null -> showError(result.error)
+            result.summary != null -> toast(result.summary, Toast.LENGTH_LONG)
+            result.status == WorkInfo.State.FAILED -> showError(null)
+        }
+        if (result.translationFiles.isNotEmpty()) {
+            sendEvent(SpeechToSubtitleEvent.OpenAutoTranslate(result.translationFiles))
+        }
+        viewModelScope.launch {
+            withContext(NonCancellable + Dispatchers.IO) {
+                runCatching { result.store.acknowledge() }
+                    .onFailure { Log.e("SpeechToSubtitle", "Failed to acknowledge completed work", it) }
+            }
+        }
+    }
+
+    private fun finishWork() {
+        setState {
+            copy(
+                isConverting = false,
+                progressVisible = false,
+                dialog = dialog.takeUnless { it == SpeechToSubtitleDialogUi.CancelConfirmation },
+            )
+        }
+        updateStartButtonState()
+    }
+
     fun confirmCancelConversion() {
-        if (!isConverting) return
-        setState { copy(dialog = SpeechToSubtitleDialogUi.CancelConfirmation) }
+        if (isConverting) setState { copy(dialog = SpeechToSubtitleDialogUi.CancelConfirmation) }
     }
 
     fun onConfirmCancel() {
         dismissDialog()
-        cancelConversion()
-    }
-
-    private fun cancelConversion() {
         if (!isConverting) return
-        taskController.cancel()
-        mediaOperation?.cancel()
-        toast(R.string.task_cancelled)
-    }
-
-    /**
-     * 复制 URI 到缓存目录
-     */
-    private fun copyUriToCache(uri: Uri, fileName: String, taskCacheDir: File): File? {
-        return try {
-            val cacheFile = File(taskCacheDir, "input_$fileName")
-            app.contentResolver.openInputStream(uri)?.use { input ->
-                cacheFile.outputStream().use { output ->
-                    input.copyTo(output)
-                }
-            }
-            cacheFile
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
-    }
-
-    /**
-     * 转换为 16kHz PCM WAV
-     */
-    private suspend fun convertToPcm(inputFile: File, taskCacheDir: File): File? {
-        return try {
-            val outputFile = File(taskCacheDir, "${inputFile.nameWithoutExtension}_16k.wav")
-            if (outputFile.exists()) outputFile.delete()
-
-            if (mediaOperation?.convertToPcm(inputFile, outputFile, PcmFormat.SPEECH_WAV_16K_MONO) == true && outputFile.exists()) {
-                outputFile
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
-    }
-
-    /**
-     * 生成字幕内容
-     */
-    private fun generateSubtitle(segments: List<WhisperRecognizer.SubtitleSegment>): String {
-        val entries = segments.mapIndexed { index, segment ->
-            SubtitleEntry(
-                index = index + 1,
-                startTime = segment.startTime,
-                endTime = segment.endTime,
-                text = segment.text
-            )
-        }
-
-        return when (selectedFormat) {
-            "SRT" -> SubtitleParser.toSRT(entries)
-            "LRC" -> SubtitleParser.toLRC(entries)
-            "TXT" -> SubtitleParser.toTXT(entries)
-            else -> SubtitleParser.toSRT(entries)
-        }
-    }
-
-    private fun shouldUseVad(): Boolean {
-        return !shouldUseTokenTimestampExperiment() &&
-            settingsManager.isAsrVadTimestampEnabled(modelType) &&
-            shouldPrepareTimeline()
-    }
-
-    private fun shouldPrepareTimeline(): Boolean {
-        if (selectedFormat != "TXT") {
-            return true
-        }
-        return !currentState.disableVadForTxt
-    }
-
-    private fun outputDirectoryFor(sourceUri: Uri, fallback: Uri): Uri =
-        if (settingsManager.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)) {
-            SourceOutputDirectory.resolve(app, sourceUri)
-        } else fallback
-
-    private fun updateVadOptionState() {
-        val isTxt = selectedFormat == "TXT"
-        setState { copy(isTxtSelected = isTxt) }
-    }
-
-    /**
-     * 保存字幕文件
-     */
-    private fun saveSubtitleFile(
-        sourceUri: Uri,
-        sourceFileName: String,
-        content: String,
-        overwrite: Boolean,
-        segmentCount: Int
-    ): Pair<String, Uri> {
-        val fallbackOutputDir = outputDirUri ?: throw IllegalStateException(string(R.string.output_directory_not_set))
-        val outputDir = outputDirectoryFor(sourceUri, fallbackOutputDir)
-        val baseFileName = sourceFileName.substringBeforeLast(".")
-        val extension = selectedFormat.lowercase()
-        val fileName = SubtitleOutputWriter.writeText(app, outputDir, baseFileName, extension, content, overwrite)
-        toast(R.string.speech_to_subtitle_toast_saved, fileName, segmentCount, duration = Toast.LENGTH_LONG)
-        return fileName to resolveOutputFileUri(fileName, outputDir)
-    }
-
-    private suspend fun convertFile(
-        file: SelectedMediaFile,
-        fileIndex: Int,
-        fileCount: Int,
-        overwriteOutput: Boolean
-    ): Result<Uri> {
-        val taskCacheDir = File(
-            app.cacheDir,
-            "speech_to_subtitle_${System.currentTimeMillis()}_${System.nanoTime()}"
-        ).apply { mkdirs() }
-        val progressPrefix = string(R.string.task_file_progress_prefix, fileIndex, fileCount)
-
-        return try {
-            showProgress(string(R.string.speech_to_subtitle_progress_preparing, progressPrefix), 0)
-            appendRuntimeLog(string(R.string.speech_to_subtitle_log_file_start, progressPrefix, file.fileName))
-            appendRuntimeLog(string(R.string.speech_to_subtitle_log_copy_to_cache))
-            val cachedFile = withContext(Dispatchers.IO) {
-                copyUriToCache(file.uri, file.fileName, taskCacheDir)
-            } ?: return Result.failure(Exception(string(R.string.speech_to_subtitle_error_copy_failed)))
-            appendRuntimeLog(
-                string(R.string.speech_to_subtitle_log_cache_file, cachedFile.name, ByteSizeFormat.format(cachedFile.length()))
-            )
-
-            if (isCancelled) return userCancelled()
-
-            showProgress(string(R.string.speech_to_subtitle_progress_extract, progressPrefix), 5)
-            appendRuntimeLog(string(R.string.speech_to_subtitle_log_extract_pcm))
-            val pcmFile = withContext(Dispatchers.IO) {
-                convertToPcm(cachedFile, taskCacheDir)
-            } ?: return Result.failure(Exception(string(R.string.speech_to_subtitle_error_audio_convert_failed)))
-            appendRuntimeLog(
-                string(R.string.speech_to_subtitle_log_pcm_file, pcmFile.name, ByteSizeFormat.format(pcmFile.length()))
-            )
-
-            if (isCancelled) return userCancelled()
-
-            showProgress(string(R.string.speech_to_subtitle_progress_recognize, progressPrefix), 10)
-            val selectedLanguage = this.selectedLanguage
-            val timestampExperiment = isTokenTimestampExperimentConfigured()
-            val recognitionResult = if (timestampExperiment) {
-                recognizeWithTokenTimestampTimeline(
-                    pcmFile = pcmFile,
-                    selectedLanguage = selectedLanguage,
-                    progressPrefix = progressPrefix
-                )
-            } else {
-                appendRuntimeLog(string(R.string.speech_to_subtitle_log_init_recognizer, currentAsrModelDisplayName()))
-                if (modelType == SettingsManager.ASR_MODEL_SENSEVOICE) {
-                    appendSenseVoiceLanguage(selectedLanguage)
-                }
-                val recognizer = speechRecognitionService.createRecognizer(
-                    encoderPath = encoderPath,
-                    decoderPath = decoderPath,
-                    joinerPath = joinerPath,
-                    tokensPath = tokensPath,
-                    vadModelPath = getActiveVadModelPath(),
-                    useVad = shouldUseVad(),
-                    language = selectedLanguage,
-                    contentResolver = app.contentResolver,
-                    context = app,
-                    modelType = modelType
-                )
-                withContext(Dispatchers.IO) {
-                    recognizer.recognize(
-                        audioFile = pcmFile,
-                        progressCallback = { progress, status, segmentResult ->
-                            showProgress(
-                                string(R.string.speech_to_subtitle_progress_status, progressPrefix, status),
-                                10 + (progress * 0.8).toInt()
-                            )
-                            segmentResult?.let(::appendRecognizedSegment)
-                        },
-                        isCancelled = { isCancelled }
-                    )
-                }
-            }
-
-            if (isCancelled) return userCancelled()
-            val segments = recognitionResult.getOrElse { return Result.failure(it) }
-            if (segments.isEmpty()) {
-                return Result.failure(Exception(string(R.string.speech_to_subtitle_error_no_speech)))
-            }
-
-            showProgress(string(R.string.speech_to_subtitle_progress_generate, progressPrefix), 95)
-            appendRuntimeLog(string(R.string.speech_to_subtitle_log_recognized, segments.size))
-            val subtitleContent = generateSubtitle(segments)
-            val (outputFileName, outputUri) = saveSubtitleFile(file.uri, file.fileName, subtitleContent, overwriteOutput, segments.size)
-            appendRuntimeLog(string(R.string.speech_to_subtitle_log_saved, outputFileName))
-            showProgress(string(R.string.speech_to_subtitle_progress_done, progressPrefix), 100)
-            Result.success(outputUri)
-        } catch (e: Exception) {
-            Result.failure(e)
-        } finally {
-            withContext(NonCancellable + Dispatchers.IO) {
-                taskCacheDir.deleteRecursively()
-            }
-        }
-    }
-
-    private fun <T> userCancelled(): Result<T> =
-        Result.failure(Exception(string(R.string.speech_to_subtitle_error_user_cancelled)))
-
-    private suspend fun recognizeWithTokenTimestampTimeline(
-        pcmFile: File,
-        selectedLanguage: String,
-        progressPrefix: String
-    ): Result<List<WhisperRecognizer.SubtitleSegment>> {
-        val timelineName = string(
-            if (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) {
-                R.string.speech_to_subtitle_timeline_forced_alignment
-            } else {
-                R.string.speech_to_subtitle_timeline_experiment
-            }
-        )
-        appendRuntimeLog(string(R.string.speech_to_subtitle_log_timeline_init, timelineName, currentAsrModelDisplayName()))
-        if (modelType == SettingsManager.ASR_MODEL_SENSEVOICE) {
-            appendSenseVoiceLanguage(selectedLanguage)
-        }
-        val timelineResult = withContext(Dispatchers.IO) {
-            TokenTimestampGenerator(app).generateSegments(
-                pcmFile = pcmFile,
-                language = selectedLanguage,
-                progressCallback = { progress, status ->
-                    showProgress(
-                        string(R.string.speech_to_subtitle_progress_timeline, progressPrefix, timelineName, status),
-                        10 + (progress * 0.4).toInt()
-                    )
-                },
-                isCancelled = { isCancelled }
-            )
-        }
-        if (isCancelled) return userCancelled()
-
-        val timelineSegments = timelineResult.getOrElse { return Result.failure(it) }
-        appendRuntimeLog(string(R.string.speech_to_subtitle_log_timeline_done, timelineName, timelineSegments.size))
-        return Result.success(
-            timelineSegments.map { segment ->
-                WhisperRecognizer.SubtitleSegment(
-                    startTime = segment.startTime,
-                    endTime = segment.endTime,
-                    text = segment.text
-                )
-            }.also { segments ->
-                segments.forEach(::appendRecognizedSegment)
-            }
-        )
-    }
-
-    private fun appendSenseVoiceLanguage(language: String) {
-        appendRuntimeLog(
-            string(R.string.speech_to_subtitle_log_sensevoice_language, language, senseVoiceLanguageCode(language))
-        )
-    }
-
-    /**
-     * 显示进度（任意线程）
-     */
-    private fun showProgress(status: String, progress: Int) {
-        setState {
-            copy(
-                showProcessingPanel = true,
-                progressVisible = true,
-                progress = progress.coerceIn(0, 100),
-                progressStatus = status
-            )
-        }
-        if (lastProgressLog.getAndSet(status) != status) {
-            appendRuntimeLog(status)
-        }
-    }
-
-    /**
-     * 显示错误
-     */
-    private fun showError(message: String?) {
-        setState {
-            copy(dialog = SpeechToSubtitleDialogUi.Error(message ?: string(R.string.error_unknown)))
-        }
-    }
-
-    private fun appendRuntimeLog(message: String) {
-        realtimeResults.append(message)
-        scheduleLogRender()
-    }
-
-    private fun appendRecognizedSegment(segment: WhisperRecognizer.SubtitleSegment) {
-        realtimeResults.appendRaw(
-            "\n[${formatSubtitleTime(segment.startTime)} --> ${formatSubtitleTime(segment.endTime)}]\n${segment.text}"
-        )
-        scheduleLogRender()
-    }
-
-    /** Throttles log rendering to one state update per [LOG_RENDER_INTERVAL_MS]; thread-safe. */
-    private fun scheduleLogRender() {
-        if (!logRenderScheduled.compareAndSet(false, true)) return
-        logRenderJob = viewModelScope.launch {
-            delay(LOG_RENDER_INTERVAL_MS)
-            logRenderScheduled.set(false)
-            val text = realtimeResults.text()
-            setState { copy(logText = text) }
-        }
-    }
-
-    private fun appendConfigLog(message: String) = appendRuntimeLog("  $message")
-
-    private fun appendConfigLog(name: String, value: String) =
-        appendConfigLog(string(R.string.speech_to_subtitle_config_named_path, name, value))
-
-    private fun enabledText(enabled: Boolean, detail: () -> String): String =
-        if (enabled) detail() else string(R.string.speech_to_subtitle_disabled)
-
-    private fun dynamicPaddingText(): String =
-        enabledText(settingsManager.isSpeechVadDynamicPaddingEnabled()) {
-            string(R.string.speech_to_subtitle_config_dynamic_padding_enabled)
-        }
-
-    private fun hotwordsText(): String =
-        if (settingsManager.isSpeechHotwordsEnabled()) {
-            string(R.string.speech_to_subtitle_config_hotwords_enabled, settingsManager.getSpeechHotwordsScore().toString())
-        } else {
-            string(R.string.speech_to_subtitle_not_enabled)
-        }
-
-    private fun appendSpeechModelConfig() {
-        appendRuntimeLog(string(R.string.speech_to_subtitle_config_header))
-        appendConfigLog(string(R.string.speech_to_subtitle_config_type, currentAsrModelDisplayName()))
-        val singleFileModel = modelType == SettingsManager.ASR_MODEL_SENSEVOICE ||
-            modelType == SettingsManager.ASR_MODEL_PARAKEET_CTC_JA
-        if (singleFileModel) {
-            appendConfigLog(string(R.string.speech_to_subtitle_config_model, displayModelPath(encoderPath)))
-        } else {
-            appendConfigLog("Encoder", displayModelPath(encoderPath))
-            appendConfigLog("Decoder", displayModelPath(decoderPath))
-        }
-        if (modelType == SettingsManager.ASR_MODEL_PARAKEET_TDT) {
-            appendConfigLog("Joiner", displayModelPath(joinerPath))
-        }
-        if (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) {
-            appendConfigLog("Conv Frontend", displayModelPath(joinerPath))
-            appendConfigLog(string(R.string.speech_to_subtitle_config_qwen_chunking))
-        }
-        appendConfigLog(
-            if (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) "Tokenizer" else "Tokens",
-            displayModelPath(tokensPath)
-        )
-        if (modelType != SettingsManager.ASR_MODEL_SENSEVOICE) {
-            appendConfigLog(string(R.string.speech_to_subtitle_config_threads, settingsManager.getSpeechWhisperThreads()))
-        }
-        if (isTokenTimestampExperimentConfigured()) {
-            val qwenForcedAlignment = modelType == SettingsManager.ASR_MODEL_QWEN3_ASR
-            val timelineName = string(
-                if (qwenForcedAlignment) R.string.speech_to_subtitle_forced_alignment
-                else R.string.speech_to_subtitle_timeline_experiment
-            )
-            appendConfigLog(string(R.string.speech_to_subtitle_config_vad_disabled_by_timeline, timelineName))
-            if (settingsManager.isSpeechFixedVadSegmentationEnabled(modelType)) {
-                appendConfigLog(string(R.string.speech_to_subtitle_config_fixed_vad_cut))
-            }
-            appendConfigLog(
-                string(
-                    R.string.speech_to_subtitle_config_timeline_model,
-                    timelineName,
-                    TokenTimestampGenerator.modelDisplayName(settingsManager),
-                    displayModelPath(tokenTimestampModelPath())
-                )
-            )
-            val tokensText = displayModelPath(tokenTimestampTokensPath())
-            appendConfigLog(
-                if (qwenForcedAlignment) string(R.string.speech_to_subtitle_config_named_path, "Tokenizer", tokensText)
-                else string(R.string.speech_to_subtitle_config_experiment_tokens, tokensText)
-            )
-            appendConfigLog(
-                string(
-                    R.string.speech_to_subtitle_config_merge_segments,
-                    enabledText(settingsManager.isSpeechTokenTimestampMergeEnabled()) {
-                        string(R.string.speech_to_subtitle_enabled_with, settingsManager.speechTokenTimestampMergeSummary())
-                    }
-                )
-            )
-            appendConfigLog(string(R.string.speech_to_subtitle_config_dynamic_padding, dynamicPaddingText()))
-            if (
-                modelType == SettingsManager.ASR_MODEL_WHISPER ||
-                modelType == SettingsManager.ASR_MODEL_PARAKEET_TDT
-            ) {
-                appendConfigLog(string(R.string.speech_to_subtitle_config_hotwords, hotwordsText()))
-            }
+        val id = workId
+        if (id == null) {
+            cancelWhenEnqueued = true
             return
         }
-        val useVad = shouldUseVad()
-        val fixedSegmentText = if (
-            modelType == SettingsManager.ASR_MODEL_SENSEVOICE &&
-            settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU
-        ) {
-            string(R.string.speech_to_subtitle_config_fixed_segment_npu, settingsManager.getSenseVoiceNpuDurationSeconds())
-        } else if (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) {
-            string(R.string.speech_to_subtitle_config_fixed_segment_qwen)
-        } else {
-            string(R.string.speech_to_subtitle_config_fixed_segment, settingsManager.getSpeechFixedSegmentSeconds())
-        }
-        appendConfigLog(
-            string(
-                R.string.speech_to_subtitle_config_vad,
-                if (useVad) string(R.string.speech_to_subtitle_enabled)
-                else string(R.string.speech_to_subtitle_config_vad_disabled_with, fixedSegmentText)
-            )
-        )
-        if (!useVad && settingsManager.isSpeechFixedVadSegmentationEnabled(modelType)) {
-            appendConfigLog(string(R.string.speech_to_subtitle_config_fixed_vad_cut))
-        }
-        if (useVad) {
-            appendConfigLog(
-                string(
-                    R.string.speech_to_subtitle_config_vad_model,
-                    if (settingsManager.isVadUseBuiltInModel()) string(R.string.speech_to_subtitle_config_vad_builtin)
-                    else displayModelPath(vadModelPath)
-                )
-            )
-            appendConfigLog(
-                string(
-                    R.string.speech_to_subtitle_config_vad_params,
-                    settingsManager.getVadThreshold().toString(),
-                    settingsManager.getVadMinSilenceDuration().toString(),
-                    settingsManager.getVadMinSpeechDuration().toString(),
-                    settingsManager.getVadMaxSpeechDuration().toString()
-                )
-            )
-            appendConfigLog(string(R.string.speech_to_subtitle_config_dynamic_padding, dynamicPaddingText()))
-            appendConfigLog(
-                string(
-                    R.string.speech_to_subtitle_config_vad_merge,
-                    enabledText(settingsManager.isSpeechVadMergeEnabled()) {
-                        string(R.string.speech_to_subtitle_config_merge_gap, settingsManager.getSpeechVadMergeGapMs())
-                    }
-                )
-            )
-            val secondaryVadMode = settingsManager.getSpeechSecondaryVadMode()
-            val secondaryVadText = when (secondaryVadMode) {
-                SettingsManager.SECONDARY_VAD_MODE_UNCOVERED -> string(R.string.speech_to_subtitle_config_secondary_vad_uncovered)
-                SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS -> string(R.string.speech_to_subtitle_config_secondary_vad_within)
-                else -> string(R.string.speech_to_subtitle_disabled)
-            }
-            appendConfigLog(string(R.string.speech_to_subtitle_config_secondary_vad, secondaryVadText))
-            if (secondaryVadMode != SettingsManager.SECONDARY_VAD_MODE_NONE) {
-                appendConfigLog(
-                    string(
-                        R.string.speech_to_subtitle_config_secondary_vad_params,
-                        settingsManager.getSpeechSecondaryVadThreshold().toString(),
-                        settingsManager.getSpeechSecondaryVadMinSilenceDuration().toString(),
-                        settingsManager.getSpeechSecondaryVadMinSpeechDuration().toString(),
-                        settingsManager.getSpeechSecondaryVadMaxSpeechDuration().toString()
-                    )
-                )
-                appendConfigLog(
-                    string(
-                        R.string.speech_to_subtitle_config_secondary_vad_merge,
-                        enabledText(settingsManager.isSpeechSecondaryVadMergeEnabled()) {
-                            string(R.string.speech_to_subtitle_config_merge_gap, settingsManager.getSpeechSecondaryVadMergeGapMs())
-                        }
-                    )
-                )
+        viewModelScope.launch {
+            try {
+                withContext(NonCancellable) { scheduler.cancel(id) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                showError(error.message)
             }
         }
-        if (modelType == SettingsManager.ASR_MODEL_WHISPER || modelType == SettingsManager.ASR_MODEL_PARAKEET_TDT) {
-            appendConfigLog(string(R.string.speech_to_subtitle_config_hotwords, hotwordsText()))
-        }
+    }
+
+    private fun shouldUseVad(): Boolean =
+        !shouldUseTokenTimestampExperiment() &&
+            settingsManager.isAsrVadTimestampEnabled(modelType) &&
+            shouldPrepareTimeline()
+
+    private fun shouldPrepareTimeline(): Boolean = selectedFormat != "TXT" || !currentState.disableVadForTxt
+
+    private fun outputDirectoryFor(sourceUri: Uri, fallback: Uri): Uri =
+        if (currentState.saveToSourceDirectory) SourceOutputDirectory.resolve(app, sourceUri) else fallback
+
+    private fun updateVadOptionState() {
+        setState { copy(isTxtSelected = selectedFormat == "TXT") }
+    }
+
+    private fun showError(message: String?) {
+        setState { copy(dialog = SpeechToSubtitleDialogUi.Error(message ?: string(R.string.error_unknown))) }
     }
 
     private fun isCurrentAsrModelComplete(): Boolean {
@@ -953,29 +605,9 @@ internal class SpeechToSubtitleViewModel(
         }
     }
 
-    private fun currentAsrModelDisplayName(): String = when (modelType) {
-        SettingsManager.ASR_MODEL_SENSEVOICE -> "SenseVoice"
-        SettingsManager.ASR_MODEL_PARAKEET_TDT -> "Parakeet TDT 0.6B v3"
-        SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> string(R.string.speech_to_subtitle_model_parakeet_ctc_ja)
-        SettingsManager.ASR_MODEL_QWEN3_ASR -> "Qwen3-ASR"
-        else -> "Whisper"
-    }
-
     private fun isTokenTimestampExperimentConfigured(): Boolean {
         return shouldUseTokenTimestampExperiment() &&
             TokenTimestampGenerator.isConfigured(app)
-    }
-
-    private fun resolveOutputFileUri(fileName: String, directoryUri: Uri): Uri {
-        if (directoryUri.scheme == "file") {
-            val path = directoryUri.path
-                ?: throw IllegalStateException(string(R.string.speech_to_subtitle_error_output_dir_invalid))
-            return Uri.fromFile(File(path, fileName))
-        }
-        return DocumentFile.fromTreeUri(app, directoryUri)
-            ?.findFile(fileName)
-            ?.uri
-            ?: throw IllegalStateException(string(R.string.speech_to_subtitle_error_output_file_not_found))
     }
 
     private fun shouldUseTokenTimestampExperiment(): Boolean =
@@ -985,44 +617,4 @@ internal class SpeechToSubtitleViewModel(
                 TokenTimestampGenerator.isQwen3ForcedAlignerConfigured(app, settingsManager)) &&
             shouldPrepareTimeline()
 
-    private fun tokenTimestampModelPath(): String =
-        TokenTimestampGenerator.modelPath(settingsManager)
-
-    private fun tokenTimestampTokensPath(): String =
-        TokenTimestampGenerator.tokensPath(settingsManager)
-
-    private fun getActiveVadModelPath(): String {
-        return if (settingsManager.isVadUseBuiltInModel()) "" else vadModelPath
-    }
-
-    private fun displayModelPath(path: String): String {
-        return if (path.isBlank()) string(R.string.speech_to_subtitle_path_not_set) else Uri.parse(path).lastPathSegment ?: path
-    }
-
-    // 与 SettingsManager.TRANSCRIPTION_LANGUAGE_OPTIONS 的取值对应，非展示文本
-    private fun senseVoiceLanguageCode(language: String): String = when (language) {
-        "中文" -> "zh"
-        "英语" -> "en"
-        "日语" -> "ja"
-        "韩语" -> "ko"
-        else -> "auto"
-    }
-
-    private fun formatSubtitleTime(timeMs: Long): String {
-        val totalSeconds = timeMs / 1000
-        val hours = totalSeconds / 3600
-        val minutes = (totalSeconds % 3600) / 60
-        val seconds = totalSeconds % 60
-        val millis = timeMs % 1000
-        return String.format(Locale.US, "%02d:%02d:%02d.%03d", hours, minutes, seconds, millis)
-    }
-
-    override fun onCleared() {
-        // Page is finishing for real (not a configuration change): stop native work.
-        taskController.cancel()
-        mediaOperation?.cancel()
-        conversionJob?.cancel()
-        logRenderJob?.cancel()
-        super.onCleared()
-    }
 }

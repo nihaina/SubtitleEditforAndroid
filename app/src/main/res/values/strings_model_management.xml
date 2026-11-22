@@ -73,8 +73,8 @@
     <string name="model_mgmt_asr_aligner_reset_message">清除 ForcedAligner 模型选择？模型文件不会被删除，可再次选择使用。</string>
     <string name="model_mgmt_asr_npu_arm64_only">SenseVoice NPU 模型仅支持 arm64-v8a 骁龙设备</string>
     <string name="model_mgmt_asr_download_progress_title">下载模型</string>
-    <string name="model_mgmt_asr_aligner_downloaded">Qwen3 ForcedAligner 已下载并导入</string>
-    <string name="model_mgmt_asr_model_downloaded">语音识别模型已下载、导入并自动选择</string>
+    <string name="model_mgmt_asr_aligner_downloaded">Qwen3 ForcedAligner 已导入</string>
+    <string name="model_mgmt_asr_model_downloaded">语音识别模型已导入并自动选择</string>
     <string name="model_mgmt_asr_download_failed_title">模型下载或导入失败</string>
     <string name="model_mgmt_asr_reset_message">确定清除当前 %1$s 模型选择吗？\n\n模型文件不会被删除，重置后需要重新选择或导入。</string>
     <string name="model_mgmt_asr_reset_done">已清除当前模型选择，请重新选择</string>
@@ -163,7 +163,7 @@
     <string name="model_mgmt_llm_model_empty">LLM 模型文件为空</string>
     <string name="model_mgmt_llm_model_unreadable">无法读取 LLM 模型文件</string>
     <string name="model_mgmt_llm_model_selected">LLM 模型已选择</string>
-    <string name="model_mgmt_llm_downloaded">LLM 模型已下载并自动选择</string>
+    <string name="model_mgmt_llm_downloaded">LLM 模型已导入并自动选择</string>
     <string name="model_mgmt_llm_download_failed">LLM 模型下载失败</string>
     <string name="model_mgmt_llm_reset_message">确定清除当前 LLM 模型选择吗？
 
@@ -177,7 +177,7 @@
     <string name="model_mgmt_demucs_reset_message">确定清除当前人声分离通用模型选择吗？\n\n模型文件不会被删除，重置后需要重新选择或导入。</string>
     <string name="model_mgmt_demucs_reset_done">已清除通用模型选择，请重新选择</string>
     <string name="model_mgmt_demucs_download_progress_title">下载人声分离模型</string>
-    <string name="model_mgmt_demucs_downloaded">人声分离模型已下载并自动选择</string>
+    <string name="model_mgmt_demucs_downloaded">人声分离模型已导入并自动选择</string>
     <string name="model_mgmt_demucs_pick_specialist">请选择 %1$s specialist ONNX 模型（文件名应包含 %2$s）</string>
     <string name="model_mgmt_demucs_stem_selected">已选择 %1$s 模型</string>
     <string name="model_mgmt_demucs_stem_select_failed">选择 %1$s 模型失败：%2$s</string>

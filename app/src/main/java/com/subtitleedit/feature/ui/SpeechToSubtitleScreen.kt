@@ -51,7 +51,6 @@ import com.subtitleedit.ui.theme.AppSpacing
 sealed interface SpeechToSubtitleDialogUi {
     data object OutputConflict : SpeechToSubtitleDialogUi
     data object CancelConfirmation : SpeechToSubtitleDialogUi
-    data object BackConfirmation : SpeechToSubtitleDialogUi
     data class Error(val message: String) : SpeechToSubtitleDialogUi
 }
 
@@ -102,7 +101,6 @@ fun SpeechToSubtitleScreen(
     onOverwriteOutput: () -> Unit,
     onRenameOutput: () -> Unit,
     onConfirmCancel: () -> Unit,
-    onConfirmBack: () -> Unit
 ) {
     val pageBackground = settingsPageBackground()
     val canModifyFiles = !state.isConverting && state.dialog != SpeechToSubtitleDialogUi.OutputConflict
@@ -158,6 +156,7 @@ fun SpeechToSubtitleScreen(
                 iconRes = R.drawable.ic_mic,
                 value = state.languageOptions.firstOrNull { it.id == state.selectedLanguage }?.label.orEmpty(),
                 options = state.languageOptions,
+                enabled = canModifyFiles,
                 onSelected = onLanguageSelected
             )
         }
@@ -202,11 +201,13 @@ fun SpeechToSubtitleScreen(
                 iconRes = R.drawable.ic_subtitle_format,
                 value = state.formatOptions.firstOrNull { it.id == state.selectedFormat }?.label.orEmpty(),
                 options = state.formatOptions,
+                enabled = canModifyFiles,
                 onSelected = onFormatSelected
             )
             SettingsTileSwitchRow(
                 title = stringResource(R.string.activity_speech_to_subtitle_text_10),
                 checked = state.addToAutoTranslate,
+                enabled = canModifyFiles,
                 onCheckedChange = onAddToAutoTranslateChange
             )
             SettingsTileSwitchRow(
@@ -214,7 +215,7 @@ fun SpeechToSubtitleScreen(
                 description = stringResource(R.string.activity_speech_to_subtitle_text_05),
                 checked = state.disableVadForTxt,
                 onCheckedChange = onDisableVadForTxtChange,
-                enabled = state.isTxtSelected
+                enabled = canModifyFiles && state.isTxtSelected
             )
         }
 
@@ -293,14 +294,6 @@ fun SpeechToSubtitleScreen(
             onConfirm = onConfirmCancel,
             onDismiss = onDismissDialog
         )
-        SpeechToSubtitleDialogUi.BackConfirmation -> AppAlertDialog(
-            title = stringResource(R.string.recognition_in_progress),
-            message = stringResource(R.string.speech_recognition_back_message),
-            confirmText = stringResource(R.string.back_and_cancel),
-            dismissText = stringResource(R.string.continue_recognition),
-            onConfirm = onConfirmBack,
-            onDismiss = onDismissDialog
-        )
         is SpeechToSubtitleDialogUi.Error -> AppAlertDialog(
             title = stringResource(R.string.error),
             message = dialog.message,
@@ -318,6 +311,7 @@ private fun <T> SpeechToSubtitleOptionRow(
     iconRes: Int,
     value: String,
     options: List<AppOption<T>>,
+    enabled: Boolean,
     onSelected: (T) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -326,9 +320,10 @@ private fun <T> SpeechToSubtitleOptionRow(
             title = label,
             iconRes = iconRes,
             value = value,
+            enabled = enabled,
             onClick = { expanded = true }
         )
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenu(expanded = expanded && enabled, onDismissRequest = { expanded = false }) {
             options.forEach { option ->
                 DropdownMenuItem(
                     text = { Text(option.label) },

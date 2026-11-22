@@ -19,7 +19,9 @@ import com.subtitleedit.SubtitleEditApplication
 import com.subtitleedit.ModelManagementActivity
 import com.subtitleedit.task.TaskProgress
 import com.subtitleedit.usecase.DownloadAsrModelUseCase
+import com.subtitleedit.util.LocalModelImportOnly
 import com.subtitleedit.util.ModelDownloader
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -31,8 +33,11 @@ internal class ModelDownloadWorker(
     workerParams: WorkerParameters
 ) : CoroutineWorker(appContext, workerParams) {
     override suspend fun getForegroundInfo(): ForegroundInfo = createForegroundInfo(
-        "正在准备模型下载"
+        preparingMessage()
     )
+
+    private fun preparingMessage(): String =
+        if (inputData.getBoolean(KEY_LOCAL_ONLY, false)) "正在导入本地模型" else "正在准备模型下载"
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val application = applicationContext as? SubtitleEditApplication
@@ -43,8 +48,9 @@ internal class ModelDownloadWorker(
             require(kind == KIND_DEMIX_GENERAL || kind == KIND_QWEN3_FORCED_ALIGNER ||
                 kind == KIND_LLM ||
                 kind in DownloadAsrModelUseCase.KINDS) { "不支持的模型任务" }
+            val localOnly = inputData.getBoolean(KEY_LOCAL_ONLY, false)
             setForeground(getForegroundInfo())
-            setProgress(TaskWorkScheduler.progressData("正在准备模型下载", 0L, -1L))
+            setProgress(TaskWorkScheduler.progressData(preparingMessage(), 0L, -1L))
             val workerContext = currentCoroutineContext()
             var lastProgressAt = 0L
             val onProgress: (ModelDownloader.Progress) -> Unit = { progress ->
@@ -62,23 +68,25 @@ internal class ModelDownloadWorker(
                     setForegroundAsync(createForegroundInfo(lastProgress.message, lastProgress))
                 }
             }
-            val modelFile = when (kind) {
-                KIND_DEMIX_GENERAL -> application.dependencies.downloadGeneralModel(onProgress)
-                KIND_QWEN3_FORCED_ALIGNER -> application.dependencies.downloadQwen3ForcedAligner(onProgress)
-                KIND_LLM -> application.dependencies.downloadLlmModel(
-                    requireNotNull(inputData.getString(KEY_MODEL_OPTION)) { "未指定 LLM 模型版本" },
-                    onProgress
-                )
-                else -> application.dependencies.downloadAsrModel(
-                    requireNotNull(kind),
-                    requireNotNull(inputData.getString(KEY_MODEL_OPTION)) { "未指定模型版本" },
-                    onProgress
-                )
+            val modelFile = withContext(if (localOnly) LocalModelImportOnly else EmptyCoroutineContext) {
+                when (kind) {
+                    KIND_DEMIX_GENERAL -> application.dependencies.downloadGeneralModel(onProgress)
+                    KIND_QWEN3_FORCED_ALIGNER -> application.dependencies.downloadQwen3ForcedAligner(onProgress)
+                    KIND_LLM -> application.dependencies.downloadLlmModel(
+                        requireNotNull(inputData.getString(KEY_MODEL_OPTION)) { "未指定 LLM 模型版本" },
+                        onProgress
+                    )
+                    else -> application.dependencies.downloadAsrModel(
+                        requireNotNull(kind),
+                        requireNotNull(inputData.getString(KEY_MODEL_OPTION)) { "未指定模型版本" },
+                        onProgress
+                    )
+                }
             }
             Result.success(
                 workDataOf(
                     KEY_MODEL_FILE to modelFile.absolutePath,
-                    KEY_MESSAGE to "下载完成",
+                    KEY_MESSAGE to if (localOnly) "本地模型已导入" else "下载完成",
                     KEY_CURRENT to lastProgress.current,
                     KEY_TOTAL to lastProgress.total
                 )
@@ -153,6 +161,7 @@ internal class ModelDownloadWorker(
         const val KIND_LLM = "llm"
         const val KEY_MODEL_KIND = "model_kind"
         const val KEY_MODEL_OPTION = "model_option"
+        const val KEY_LOCAL_ONLY = "local_only"
         const val KEY_MESSAGE = "message"
         const val KEY_CURRENT = "current"
         const val KEY_TOTAL = "total"

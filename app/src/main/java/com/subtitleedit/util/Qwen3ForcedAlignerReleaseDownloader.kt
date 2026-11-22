@@ -48,6 +48,13 @@ internal object Qwen3ForcedAlignerReleaseDownloader {
         onProgress: (ModelDownloader.Progress) -> Unit,
     ): File = withContext(Dispatchers.IO) {
         mutex.withLock {
+            Qwen3ForcedAlignerModelFiles.findCompleteGraph(modelDirectory)?.let { graph ->
+                onProgress(ModelDownloader.Progress("检测到本地 ForcedAligner 模型，跳过下载并直接导入"))
+                validate(graph)
+                currentCoroutineContext().ensureActive()
+                publish(graph)
+                return@withLock graph
+            }
             val parent = requireNotNull(modelDirectory.parentFile)
             check(parent.isDirectory || parent.mkdirs()) { "无法创建 ForcedAligner 模型目录" }
             val cache = File(parent, ".forced-aligner-v1.0.0-download")

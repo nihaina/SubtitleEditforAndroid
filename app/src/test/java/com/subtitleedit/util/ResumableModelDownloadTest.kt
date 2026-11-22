@@ -10,6 +10,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -53,6 +54,21 @@ class ResumableModelDownloadTest {
     @After
     fun stopServer() {
         server.close()
+    }
+
+    @Test
+    fun localImportNeverFallsBackToHttpIfTheModelDisappears() = runBlocking {
+        server.enqueue(MockResponse().setBody("remote model"))
+        try {
+            withContext(LocalModelImportOnly) {
+                downloader().download(url, destination, "下载模型", {})
+            }
+            fail("A local-only import should stop before issuing an HTTP request")
+        } catch (expected: IOException) {
+            assertEquals("本地模型已不可用，请重新导入或下载", expected.message)
+        }
+        assertEquals(0, server.requestCount)
+        assertFalse(destination.exists())
     }
 
     @Test

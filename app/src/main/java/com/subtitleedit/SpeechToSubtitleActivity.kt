@@ -2,7 +2,6 @@ package com.subtitleedit
 
 import android.content.Intent
 import android.os.Bundle
-import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import com.subtitleedit.filepicker.AppFilePickerContracts
 import androidx.activity.viewModels
@@ -18,7 +17,6 @@ import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
  */
 class SpeechToSubtitleActivity : AppComposeActivity() {
     private val viewModel: SpeechToSubtitleViewModel by viewModels()
-    private lateinit var backPressedCallback: OnBackPressedCallback
 
     // 文件选择器
     private val filePickerLauncher = registerForActivityResult(
@@ -53,10 +51,6 @@ class SpeechToSubtitleActivity : AppComposeActivity() {
                     onOverwriteOutput = { viewModel.resolveOutputConflict(overwriteOutput = true) },
                     onRenameOutput = { viewModel.resolveOutputConflict(overwriteOutput = false) },
                     onConfirmCancel = viewModel::onConfirmCancel,
-                    onConfirmBack = {
-                        viewModel.confirmBack()
-                        leavePage()
-                    }
                 )
             }
         }
@@ -67,23 +61,16 @@ class SpeechToSubtitleActivity : AppComposeActivity() {
                 is SpeechToSubtitleEvent.OpenAutoTranslate -> openAutoTranslate(event)
             }
         }
-
-        backPressedCallback = object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                if (viewModel.requestBack()) leavePage()
-            }
-        }
-        onBackPressedDispatcher.addCallback(this, backPressedCallback)
     }
 
     override fun onResume() {
         super.onResume()
-        viewModel.refresh()
+        viewModel.onResume()
     }
 
-    private fun leavePage() {
-        backPressedCallback.isEnabled = false
-        onBackPressedDispatcher.onBackPressed()
+    override fun onPause() {
+        viewModel.onPause()
+        super.onPause()
     }
 
     private fun openAutoTranslate(event: SpeechToSubtitleEvent.OpenAutoTranslate) {

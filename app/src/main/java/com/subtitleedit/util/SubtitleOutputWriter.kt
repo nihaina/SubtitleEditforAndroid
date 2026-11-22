@@ -19,7 +19,8 @@ object SubtitleOutputWriter {
         baseName: String,
         extension: String,
         content: String,
-        overwrite: Boolean = false
+        overwrite: Boolean = false,
+        onBeforeWrite: (String) -> Unit = {}
     ): String {
         val fileName = buildFileName(baseName, extension)
 
@@ -29,6 +30,7 @@ object SubtitleOutputWriter {
                 throw IOException("无法创建输出目录")
             }
             val outputFile = File(dir, if (overwrite) fileName else uniqueFileName(dir, fileName))
+            onBeforeWrite(outputFile.name)
             writeFileAtomically(outputFile, content, overwrite)
             return outputFile.name
         }
@@ -37,6 +39,7 @@ object SubtitleOutputWriter {
             ?: throw IllegalArgumentException("无法访问输出目录")
         val existing = dir.findFile(fileName)
         if (overwrite && existing != null) {
+            onBeforeWrite(fileName)
             writeExistingDocumentAtomically(context, dir, existing, fileName, content, extension)
             return fileName
         }
@@ -45,6 +48,7 @@ object SubtitleOutputWriter {
         val outputFile = dir.createFile(mimeTypeForExtension(extension), finalName)
             ?: throw IllegalStateException("创建文件失败")
         try {
+            onBeforeWrite(outputFile.name ?: finalName)
             writeDocument(context, outputFile, content)
         } catch (error: Throwable) {
             outputFile.delete()

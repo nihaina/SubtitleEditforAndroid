@@ -905,10 +905,10 @@ class WhisperRecognizer(
                 }
                 val settings = settingsManager()
                 val smart = settings.isSpeechTokenTimestampSmartMergeEnabled(modelType)
-                val mergedSegments = if (settings.isSpeechTokenTimestampMergeEnabled()) {
+                val mergedSegments = if (settings.isSpeechTokenTimestampMergeEnabled(modelType)) {
                     TokenTimestampSegmenter.mergeSegments(
                         segments = tokenSegments,
-                        maxGapMs = settings.getSpeechTokenTimestampMergeGapMs(),
+                        maxGapMs = settings.getSpeechTokenTimestampMergeGapMs(modelType),
                         smart = smart,
                         maxCharacters = settings.getSpeechTokenTimestampMergeMaxCharacters(modelType)
                             .takeIf { smart && settings.isSpeechTokenTimestampLongSegmentFilterEnabled(modelType) },
@@ -920,7 +920,7 @@ class WhisperRecognizer(
                         Log.d(
                             TAG,
                             "实验打轴合并语音段：${tokenSegments.size} -> ${it.size}，" +
-                                settings.speechTokenTimestampMergeSummary()
+                                settings.speechTokenTimestampMergeSummary(modelType)
                         )
                     }
                 } else {
@@ -1431,7 +1431,7 @@ class WhisperRecognizer(
     private fun fixedSegmentDurationSeconds(): Int = if (isSenseVoiceNpu()) {
         settingsManager().getSenseVoiceNpuDurationSeconds()
     } else {
-        settingsManager().getSpeechFixedSegmentSeconds()
+        settingsManager().getSpeechFixedSegmentSeconds(modelType)
     }
 
     private fun senseVoiceNpuMaxSamples(): Int? = if (isSenseVoiceNpu()) {
