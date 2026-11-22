@@ -348,6 +348,11 @@
             android:exported="false"
             android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
+        <activity
+            android:name=".player.PlayerStatusBarLyricsSettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
+
     </application>
 
 </manifest>

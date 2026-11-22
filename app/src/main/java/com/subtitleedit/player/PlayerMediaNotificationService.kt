@@ -51,15 +51,17 @@ class PlayerMediaNotificationService : Service() {
     private var lastNotificationAtMs = 0L
     private var foreground = false
     private lateinit var floatingSubtitleWindow: PlayerFloatingSubtitleWindow
+    private lateinit var statusBarLyricsWindow: PlayerStatusBarLyricsWindow
     private lateinit var appOps: AppOpsManager
     private val overlayPermissionListener = AppOpsManager.OnOpChangedListener { _, _ ->
-        scope.launch { refreshFloatingSubtitle() }
+        scope.launch { refreshSubtitleWindows() }
     }
     private val preferences by lazy { PlayerPreferences.getInstance(this) }
     private var floatingSubtitleObserver: Job? = null
+    private var statusBarLyricsObserver: Job? = null
     private val floatingTrackTitle = MutableStateFlow<Pair<String, String>?>(null)
 
-    private data class FloatingCaption(val text: String?, val playback: PlayerFloatingSubtitlePlayback)
+    private data class FloatingCaption(val sessionId: Long, val text: String?, val playback: PlayerFloatingSubtitlePlayback)
 
     override fun onCreate() {
         super.onCreate()
@@ -76,6 +78,7 @@ class PlayerMediaNotificationService : Service() {
                 preferences.floatingSubtitleStyle = style.copy(fontSize = style.fontSize + delta)
             },
         )
+        statusBarLyricsWindow = PlayerStatusBarLyricsWindow(this)
         appOps = getSystemService(AppOpsManager::class.java)
         try {
             appOps.startWatchingMode(AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW, packageName, overlayPermissionListener)
@@ -136,20 +139,30 @@ class PlayerMediaNotificationService : Service() {
         if (floatingSubtitleObserver == null) floatingSubtitleObserver = scope.launch {
             val captions = combine(PlayerMediaNotifications.state, floatingTrackTitle, ::floatingCaption)
                 .distinctUntilChanged()
-            combine(
+            val appearances = combine(
                 captions,
                 preferences.floatingSubtitleEnabledChanges,
                 preferences.floatingSubtitleStyleChanges,
                 preferences.floatingSubtitleLockedChanges,
             ) { caption, enabled, style, locked -> Triple(caption.takeIf { enabled }, style, locked) }
-                .collect { (caption, style, locked) -> updateFloatingSubtitle(caption, style, locked) }
+            combine(appearances, PlayerMediaNotifications.subtitleCue, ::Pair)
+                .collect { (appearance, cue) ->
+                    val (caption, style, locked) = appearance
+                    updateFloatingSubtitle(caption, style, locked, cue)
+                }
+        }
+        if (statusBarLyricsObserver == null) statusBarLyricsObserver = scope.launch {
+            combine(PlayerMediaNotifications.subtitleCue, preferences.statusBarLyricsChanges, ::Pair)
+                .collect { (cue, settings) ->
+                    statusBarLyricsWindow.render(cue.takeIf { foreground }, settings)
+                }
         }
         return START_NOT_STICKY
     }
 
     private fun floatingCaption(state: PlayerMediaNotificationState?, title: Pair<String, String>?): FloatingCaption? {
         if (state == null || !state.floatingSubtitleAvailable) return null
-        return FloatingCaption(state.floatingSubtitleText, PlayerFloatingSubtitlePlayback(
+        return FloatingCaption(state.sessionId, state.floatingSubtitleText, PlayerFloatingSubtitlePlayback(
             title = title?.takeIf { it.first == state.track.path }?.second ?: state.track.name,
             playing = state.playing,
             hasPrevious = state.hasPrevious,
@@ -157,17 +170,23 @@ class PlayerMediaNotificationService : Service() {
         ))
     }
 
-    private fun refreshFloatingSubtitle() {
+    private fun refreshSubtitleWindows() {
         if (!foreground) return
+        val cue = PlayerMediaNotifications.subtitleCue.value
         val caption = floatingCaption(PlayerMediaNotifications.state.value, floatingTrackTitle.value)
         updateFloatingSubtitle(
             caption.takeIf { preferences.floatingSubtitleEnabled }, preferences.floatingSubtitleStyle, preferences.floatingSubtitleLocked,
+            cue,
         )
+        statusBarLyricsWindow.render(cue, preferences.statusBarLyrics)
     }
 
-    private fun updateFloatingSubtitle(caption: FloatingCaption?, style: PlayerFloatingSubtitleStyle, locked: Boolean) {
+    private fun updateFloatingSubtitle(
+        caption: FloatingCaption?, style: PlayerFloatingSubtitleStyle, locked: Boolean, cue: PlayerOverlaySubtitleCue?,
+    ) {
         if (foreground && caption != null) {
-            floatingSubtitleWindow.render(caption.text, style, caption.playback, locked)
+            val activeCue = cue?.takeIf { it.sessionId == caption.sessionId && it.text == caption.text }
+            floatingSubtitleWindow.render(caption.text, style, caption.playback, locked, activeCue)
         } else {
             floatingSubtitleWindow.hide()
         }
@@ -191,7 +210,8 @@ class PlayerMediaNotificationService : Service() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        refreshFloatingSubtitle()
+        refreshSubtitleWindows()
+        statusBarLyricsWindow.refreshLayout()
     }
 
     private fun dispatch(action: String) {
@@ -344,6 +364,7 @@ class PlayerMediaNotificationService : Service() {
 
     private fun clearNotification() {
         floatingSubtitleWindow.hide()
+        statusBarLyricsWindow.hide()
         notificationJob?.cancel()
         metadataJob?.cancel()
         mediaSession.isActive = false

@@ -61,6 +61,7 @@ internal data class PlayerUiState(
     val subtitleOptions: List<PlayerSubtitleOption> = emptyList(),
     val selectedSubtitleId: String = "none",
     val subtitleText: String = "",
+    val subtitleCueTiming: PlayerSubtitleCueTiming? = null,
     val lyricsVisible: Boolean = false,
     val lyricLines: List<PlayerLyricLine> = emptyList(),
     val lyricsLoading: Boolean = false,
@@ -219,6 +220,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         configureQueue(playlist, startIndex, initialMode ?: preferences.defaultPlayMode, queueSource, allowDuplicates)
         _state.value = _state.value.copy(positionMs = 0L, durationMs = 0L, ready = false,
             playing = false, seekPreviewMs = null, panel = PlayerPanel.NONE,
+            subtitleCueTiming = null,
             controlsLocked = false, controlsVisible = true, lyricsVisible = false,
             showTrackInfoDialog = false, showPlaylistPickerDialog = false, showEndBehaviorDialog = false)
         loadCurrent(resume = _state.value.resumePlayback, autoplay = true)
@@ -261,7 +263,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         _state.value = _state.value.copy(playlist = emptyList(), queueVersion = 0L, currentIndex = -1, queueSource = null,
             ready = false, playing = false, positionMs = 0L, durationMs = 0L, error = null,
             controlsLocked = false, lyricsVisible = false, lyricLines = emptyList(),
-            subtitleOptions = emptyList(), subtitleText = "", gestureHint = null)
+            subtitleOptions = emptyList(), subtitleText = "", subtitleCueTiming = null, gestureHint = null)
     }
 
     /** Release the global mpv context before an editor Activity claims it. */
@@ -335,6 +337,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
                     loudness = if (snapshot.showLoudnessWaveform && !volumeController.snapshot.muted) sample.loudness else 0f,
                     loudnessSampleId = sample.loudnessSampleId,
                     subtitleText = sample.subtitleText,
+                    subtitleCueTiming = sample.subtitleCueTiming,
                     selectedSubtitleId = sample.selectedSubtitleId.ifBlank { "none" },
                     subtitleOptions = listOf(SUBTITLE_OFF) + sample.subtitleTracks + externalSubtitles.filter { external ->
                         sample.subtitleTracks.none { it.id == external.id }
@@ -390,7 +393,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         host = null
         audioFocus.abandon()
         _state.value = _state.value.copy(ready = false, playing = false, loudness = 0f, seekPreviewMs = null,
-            volumeGestureActive = false)
+            volumeGestureActive = false, subtitleCueTiming = null)
     }
 
     fun togglePlay() { if (_state.value.playing) pause() else play() }
@@ -447,7 +450,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
         trackEnded = false
         handledEndId = -1L
         engine?.seekTo(target)
-        _state.value = current.copy(positionMs = target, seekPreviewMs = null, loudness = 0f)
+        _state.value = current.copy(positionMs = target, seekPreviewMs = null, loudness = 0f,
+            subtitleCueTiming = current.subtitleCueTiming?.takeIf { target in it })
     }
 
     fun clearSeekPreview() { _state.value = _state.value.copy(seekPreviewMs = null) }
@@ -654,7 +658,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
             isVideo = replacement?.isVideo == true, bookmarks = emptyList(), isFavorite = false,
             seekPreviewMs = null, loudness = 0f, loudnessSampleId = 0L,
             lyricLines = emptyList(), lyricsLoading = false, subtitleOptions = emptyList(),
-            subtitleText = "", selectedSubtitleId = "none", showEndBehaviorDialog = false
+            subtitleText = "", subtitleCueTiming = null, selectedSubtitleId = "none", showEndBehaviorDialog = false
         )
         playOnAttach = replacement != null && autoplay
         if (replacement == null) {
@@ -721,7 +725,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         lyricRequest = null
         _state.value = current.copy(
             positionMs = 0L, durationMs = 0L, ready = false, playing = false, error = null,
-            isVideo = track.isVideo, subtitleText = "", selectedSubtitleId = "none",
+            isVideo = track.isVideo, subtitleText = "", subtitleCueTiming = null, selectedSubtitleId = "none",
             controlsLocked = current.controlsLocked && track.isVideo,
             controlsVisible = if (current.controlsLocked && !track.isVideo) true else current.controlsVisible,
             subtitleOptions = listOf(SUBTITLE_OFF) + externalSubtitles,

@@ -26,6 +26,7 @@ import com.subtitleedit.player.PlayerFloatingSubtitleWeight
 import com.subtitleedit.player.PlayerPlayMode
 import com.subtitleedit.player.PlayerPreferences
 import com.subtitleedit.player.PlayerQueueEndAction
+import com.subtitleedit.player.PlayerStatusBarLyricsSettings
 import com.subtitleedit.player.PlayerSubtitleAlignment
 import com.subtitleedit.player.PlayerTrackEndAction
 import com.subtitleedit.player.PlayerViewModel
@@ -103,7 +104,7 @@ class AudioModeSettingsBackupTest {
 
         val backup = exportAudioSettings()
         assertEquals(setOf("player", "albums", "singers", "artists", "composers", "genres"), backup.keySet())
-        assertEquals(23, backup.getJSONObject("player").length())
+        assertEquals(34, backup.getJSONObject("player").length())
         listOf("albums", "singers", "artists", "composers", "genres").forEach {
             assertEquals(9, backup.getJSONObject(it).length())
         }
@@ -140,6 +141,14 @@ class AudioModeSettingsBackupTest {
         assertEquals("NORMAL", defaults.value("player", "floating_subtitle_weight"))
         assertEquals(android.graphics.Color.WHITE, defaults.value("player", "floating_subtitle_color"))
         assertEquals(0xCCFFFFFF.toInt(), defaults.value("player", "floating_subtitle_background_color"))
+        assertEquals(android.graphics.Color.TRANSPARENT, defaults.value("player", "floating_subtitle_outline_color"))
+        assertEquals(false, defaults.value("player", "floating_subtitle_scroll"))
+        assertEquals(false, defaults.value("player", "status_bar_lyrics_enabled"))
+        assertEquals(14, defaults.value("player", "status_bar_lyrics_size"))
+        assertEquals(android.graphics.Color.BLACK, defaults.value("player", "status_bar_lyrics_outline_color"))
+        assertEquals(false, defaults.value("player", "status_bar_lyrics_scroll"))
+        assertEquals(0, defaults.value("player", "status_bar_lyrics_position"))
+        assertEquals(100, defaults.value("player", "status_bar_lyrics_width"))
         assertEquals(false, defaults.value("player", "notification_lyrics"))
         assertEquals("GRID", defaults.value("albums", "view_mode"))
         assertEquals(true, defaults.value("albums", "group_tracks"))
@@ -155,6 +164,7 @@ class AudioModeSettingsBackupTest {
         assertEquals(1f, player.defaultSpeed, 0f)
         assertEquals(PlayerEqualizerState(), player.equalizer)
         assertEquals(PlayerFloatingSubtitleStyle(), player.floatingSubtitleStyle)
+        assertEquals(PlayerStatusBarLyricsSettings(), player.statusBarLyrics)
         assertFalse(player.floatingSubtitleEnabled)
         assertFalse(player.floatingSubtitleLocked)
         assertFalse(player.notificationsShowLyrics)
@@ -198,6 +208,10 @@ class AudioModeSettingsBackupTest {
             .put("player", JSONObject()
                 .put("default_speed", typed("float", 1.25))
                 .put("subtitle_font_size", typed("string", "wrong type"))
+                .put("status_bar_lyrics_position", typed("int", 150))
+                .put("status_bar_lyrics_width", typed("int", 3))
+                .put("status_bar_lyrics_scroll", typed("boolean", false))
+                .put("status_bar_lyrics_background_color", typed("int", android.graphics.Color.WHITE))
                 .put("resume_playback", typed("int", 1))
                 .put("last_position_/kept.wav", typed("long", 0L))
                 .put("unknown_setting", typed("boolean", true)))
@@ -206,6 +220,13 @@ class AudioModeSettingsBackupTest {
 
         assertEquals(1.25f, player.defaultSpeed, 0f)
         assertEquals(32, player.subtitleFontSize)
+        assertEquals(customizedStatusBarLyrics.copy(
+            style = customizedStatusBarLyrics.style.copy(scrollEnabled = false),
+            verticalPositionPercent = 100,
+            widthPercent = 10,
+        ), player.statusBarLyrics)
+        assertEquals(customizedFloatingSubtitle, player.floatingSubtitleStyle)
+        assertFalse(prefs("player_settings").contains("status_bar_lyrics_background_color"))
         assertFalse(player.resumePlayback)
         assertTrue(player.playerModeEnabled)
         assertFalse(prefs("player_settings").contains("unknown_setting"))
@@ -316,6 +337,7 @@ class AudioModeSettingsBackupTest {
         player.floatingSubtitleEnabled = true
         player.floatingSubtitleLocked = true
         player.floatingSubtitleStyle = customizedFloatingSubtitle
+        player.statusBarLyrics = customizedStatusBarLyrics
         player.notificationsShowLyrics = true
         player.resumePlayback = false
         player.showLoudnessWaveform = false
@@ -334,6 +356,7 @@ class AudioModeSettingsBackupTest {
         assertTrue(player.floatingSubtitleEnabled)
         assertTrue(player.floatingSubtitleLocked)
         assertEquals(customizedFloatingSubtitle, player.floatingSubtitleStyle)
+        assertEquals(customizedStatusBarLyrics, player.statusBarLyrics)
         assertTrue(player.notificationsShowLyrics)
         assertFalse(player.resumePlayback)
         assertFalse(player.showLoudnessWaveform)
@@ -345,6 +368,23 @@ class AudioModeSettingsBackupTest {
         weight = PlayerFloatingSubtitleWeight.BOLD,
         colorArgb = android.graphics.Color.CYAN,
         backgroundColorArgb = 0x80441199.toInt(),
+        outlineColorArgb = android.graphics.Color.MAGENTA,
+        scrollEnabled = true,
+    )
+
+    private val customizedStatusBarLyrics = PlayerStatusBarLyricsSettings(
+        enabled = true,
+        style = PlayerFloatingSubtitleStyle(
+            fontSize = 18,
+            leftMarginPercent = 25,
+            weight = PlayerFloatingSubtitleWeight.MEDIUM,
+            colorArgb = android.graphics.Color.YELLOW,
+            backgroundColorArgb = android.graphics.Color.TRANSPARENT,
+            outlineColorArgb = android.graphics.Color.BLUE,
+            scrollEnabled = true,
+        ),
+        verticalPositionPercent = 54,
+        widthPercent = 62,
     )
 
     private fun prefs(name: String): SharedPreferences = app.getSharedPreferences(name, Context.MODE_PRIVATE)

@@ -59,10 +59,20 @@
     <string name="player_floating_subtitle_weight_medium">中等</string>
     <string name="player_floating_subtitle_weight_bold">粗体</string>
     <string name="player_floating_subtitle_font_color">字体颜色</string>
+    <string name="player_floating_subtitle_outline_color">字体描边颜色</string>
+    <string name="player_floating_subtitle_scroll">滚动显示</string>
+    <string name="player_floating_subtitle_scroll_description">字幕换行时在一行高度内滚动，首行和末行保留停留时间</string>
     <string name="player_floating_subtitle_left_margin">左边距</string>
     <string name="player_floating_subtitle_background_color">悬浮窗底色</string>
     <string name="player_floating_subtitle_background_opacity">底色不透明度</string>
     <string name="player_floating_subtitle_percent">%1$d%%</string>
+    <string name="player_status_bar_lyrics_title">状态栏字幕</string>
+    <string name="player_status_bar_lyrics_enabled">显示状态栏字幕</string>
+    <string name="player_status_bar_lyrics_description">授予悬浮窗权限后，在屏幕顶部显示当前字幕</string>
+    <string name="player_status_bar_lyrics_preview">状态栏字幕预览</string>
+    <string name="player_status_bar_lyrics_vertical_position">上下位置</string>
+    <string name="player_status_bar_lyrics_vertical_position_description">从状态栏附近向下调整，最多移动到屏幕上方三分之一处</string>
+    <string name="player_status_bar_lyrics_width">宽度</string>
     <string name="player_notification_lyrics_title">通知栏字幕</string>
     <string name="player_notification_lyrics_description">播放音频时向系统媒体控件推送当前歌词</string>
 

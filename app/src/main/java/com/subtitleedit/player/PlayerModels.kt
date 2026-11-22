@@ -49,6 +49,11 @@ internal data class PlayerSubtitleOption(
 /** Immutable display data, independent of the editor's mutable subtitle entries. */
 internal data class PlayerLyricLine(val startMs: Long, val endMs: Long, val text: String)
 
+/** Active native subtitle bounds on the playback-position clock. */
+internal data class PlayerSubtitleCueTiming(val startMs: Long, val endMs: Long) {
+    operator fun contains(positionMs: Long): Boolean = positionMs >= startMs && positionMs < endMs
+}
+
 internal data class PlayerEqualizerState(
     val enabled: Boolean = false,
     val gains: List<Float> = PlayerEqualizer.FLAT
@@ -77,6 +82,7 @@ internal data class PlayerEngineState(
     val loudnessSampleId: Long = 0L,
     val error: String? = null,
     val subtitleText: String = "",
+    val subtitleCueTiming: PlayerSubtitleCueTiming? = null,
     val subtitleTracks: List<PlayerSubtitleOption> = emptyList(),
     val selectedSubtitleId: String = ""
 )

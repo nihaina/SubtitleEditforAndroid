@@ -143,6 +143,39 @@ class PlayerSmokeTest {
         }
     }
 
+    @Test fun nativeCueTimingFollowsRepeatedLyricsAndClearsInAGap() {
+        val root = File(app.cacheDir, "player-cue-timing-${System.nanoTime()}").apply { mkdirs() }
+        val track = File(root, "timed.wav").apply { writeBytes(sineWav(440.0, 15.0)) }
+        File(root, "timed.srt").writeText(
+            "1\n00:00:00,700 --> 00:00:04,333\nRepeated lyric\n\n" +
+                "2\n00:00:04,333 --> 00:00:08,721\nRepeated lyric\n"
+        )
+        try {
+            openPlayer(listOf(track)).use { session ->
+                val model = session.model
+                awaitState(model, "player ready") { it.ready }
+                onMain { model.pause(); model.seekTo(1_500L) }
+                awaitState(model, "first subtitle duration retains milliseconds") {
+                    !it.playing && it.subtitleText.contains("Repeated lyric") &&
+                        it.subtitleCueTiming == PlayerSubtitleCueTiming(700L, 4_333L)
+                }
+                onMain { model.seekTo(4_000L); model.play() }
+                awaitState(model, "playback updates the duration across identical adjacent subtitle text") {
+                    it.playing && it.subtitleText.contains("Repeated lyric") &&
+                        it.subtitleCueTiming == PlayerSubtitleCueTiming(4_333L, 8_721L)
+                }
+                onMain { model.pause(); model.seekTo(9_500L) }
+                awaitState(model, "subtitle gap clears text and duration") {
+                    it.subtitleText.isEmpty() && it.subtitleCueTiming == null
+                }
+                onMain { model.seekTo(1_500L) }
+                awaitState(model, "backward seek recovers the original bounds") {
+                    it.subtitleCueTiming == PlayerSubtitleCueTiming(700L, 4_333L)
+                }
+            }
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun videoFramesAndEmbeddedSubtitlesReachThePlayerSurface() {
         val root = File(app.cacheDir, "player-video-${System.nanoTime()}").apply { mkdirs() }
         val video = File(root, "video.mkv")

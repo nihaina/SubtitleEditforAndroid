@@ -11,7 +11,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -36,14 +40,29 @@ internal fun PlayerFloatingSubtitle(
             IntOffset(floatingSubtitleLeftOffset(space.width - size.width, style.leftMarginPercent), 0)
         },
     ) {
-        Text(
-            text = text,
-            modifier = Modifier.testTag("player-floating-subtitle-text"),
-            color = Color(style.colorArgb),
-            fontWeight = FontWeight(style.weight.value),
-            style = playerAudioSubtitleTextStyle(style.fontSize, lineSpacing = 4, alignment = style.multilineAlignment),
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-        )
+        val textStyle = playerAudioSubtitleTextStyle(style.fontSize, lineSpacing = 4, alignment = style.multilineAlignment)
+        val weight = FontWeight(style.weight.value)
+        Box {
+            if (style.outlineColorArgb ushr 24 != 0) {
+                Text(
+                    text = text,
+                    modifier = Modifier.clearAndSetSemantics {},
+                    color = Color(style.outlineColorArgb),
+                    fontWeight = weight,
+                    style = textStyle.copy(drawStyle = Stroke(with(LocalDensity.current) { 2.dp.toPx() }, join = StrokeJoin.Round)),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = text,
+                modifier = Modifier.testTag("player-floating-subtitle-text"),
+                color = Color(style.colorArgb),
+                fontWeight = weight,
+                style = textStyle,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }

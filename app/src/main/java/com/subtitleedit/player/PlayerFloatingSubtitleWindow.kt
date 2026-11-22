@@ -5,15 +5,11 @@ import android.content.Context
 import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Point
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.hardware.display.DisplayManager
 import android.hardware.input.InputManager
 import android.os.Build
 import android.provider.Settings
-import android.text.TextUtils
 import android.util.Log
-import android.util.TypedValue
 import android.view.ContextThemeWrapper
 import android.view.Display
 import android.view.Gravity
@@ -22,9 +18,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowInsets
 import android.view.WindowManager
-import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.TextView
 import com.subtitleedit.R
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -57,11 +51,18 @@ internal class PlayerFloatingSubtitleWindow(
     private var position = initialPosition
     private var controlsOpen = false
     private var captionText = ""
+    private var cue: PlayerOverlaySubtitleCue? = null
     private var style = PlayerFloatingSubtitleStyle()
     private var playback: PlayerFloatingSubtitlePlayback? = null
     private var locked = false
 
-    fun render(text: String?, style: PlayerFloatingSubtitleStyle, playback: PlayerFloatingSubtitlePlayback?, locked: Boolean) {
+    fun render(
+        text: String?,
+        style: PlayerFloatingSubtitleStyle,
+        playback: PlayerFloatingSubtitlePlayback?,
+        locked: Boolean,
+        cue: PlayerOverlaySubtitleCue?,
+    ) {
         if (playback == null || !Settings.canDrawOverlays(app)) {
             hide()
             return
@@ -75,9 +76,11 @@ internal class PlayerFloatingSubtitleWindow(
             return
         }
         val current = overlay
-        val measureAgain = captionText != text.orEmpty() || this.style != style || this.locked != locked
+        val measureAgain = captionText != text.orEmpty() || this.style != style ||
+            this.locked != locked || (this.cue?.timing == null) != (cue?.timing == null)
         captionText = text.orEmpty()
         this.style = style
+        this.cue = cue
         this.playback = playback
         this.locked = locked
         if (current != null && current.root.parent != null) {
@@ -118,6 +121,7 @@ internal class PlayerFloatingSubtitleWindow(
         dismissColorPicker()
         controlsOpen = false
         playback = null
+        cue = null
         val current = overlay ?: return
         overlay = null
         try {
@@ -160,7 +164,7 @@ internal class PlayerFloatingSubtitleWindow(
     private fun updateContent(current: Overlay, measureAgain: Boolean) {
         val root = current.root
         root.caption.applyStyle(style)
-        if (root.caption.label.text.toString() != captionText) root.caption.label.text = captionText
+        root.caption.setCaption(captionText, cue)
         root.caption.visibility = if (captionText.isEmpty()) View.GONE else View.VISIBLE
         root.caption.isClickable = !locked
         root.controls.visibility = if (controlsOpen) View.VISIBLE else View.GONE
@@ -249,7 +253,7 @@ internal class PlayerFloatingSubtitleWindow(
     }
 
     private inner class CaptionWindowLayout(context: Context) : LinearLayout(context) {
-        val caption = CaptionCard(context)
+        val caption = PlayerOverlayCaptionView(context)
         val controls = PlayerFloatingSubtitleControls(context, ::onControlAction, onFontSizeDelta)
         private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
         private var drag: CaptionDrag? = null
@@ -299,57 +303,6 @@ internal class PlayerFloatingSubtitleWindow(
                 val current = this@PlayerFloatingSubtitleWindow.overlay ?: return@post
                 if (current.root === this && parent != null) updatePlacement(current)
             }
-        }
-    }
-
-    private class CaptionCard(context: Context) : FrameLayout(context) {
-        val label = TextView(context).apply {
-            includeFontPadding = false
-            maxLines = 3
-            ellipsize = TextUtils.TruncateAt.END
-            textAlignment = TEXT_ALIGNMENT_GRAVITY
-        }
-        private var style: PlayerFloatingSubtitleStyle? = null
-
-        init {
-            addView(label, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
-        }
-
-        override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
-            val freeWidth = right - left - paddingLeft - paddingRight - label.measuredWidth
-            val x = paddingLeft + floatingSubtitleLeftOffset(freeWidth, style?.leftMarginPercent ?: 50)
-            label.layout(x, paddingTop, x + label.measuredWidth, paddingTop + label.measuredHeight)
-        }
-
-        fun applyStyle(style: PlayerFloatingSubtitleStyle, force: Boolean = false) {
-            if (!force && this.style == style) return
-            this.style = style
-            val horizontal = context.pixels(16)
-            val vertical = context.pixels(10)
-            setPadding(horizontal, vertical, horizontal, vertical)
-            label.setLineSpacing(context.pixels(4).toFloat(), 1f)
-            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, style.fontSize.toFloat())
-            label.setTextColor(style.colorArgb)
-            label.gravity = Gravity.CENTER_VERTICAL or when (style.multilineAlignment) {
-                PlayerSubtitleAlignment.LEFT -> @Suppress("RtlHardcoded") Gravity.LEFT
-                PlayerSubtitleAlignment.CENTER -> Gravity.CENTER_HORIZONTAL
-                PlayerSubtitleAlignment.RIGHT -> @Suppress("RtlHardcoded") Gravity.RIGHT
-            }
-            label.typeface = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                Typeface.create(Typeface.DEFAULT, style.weight.value, false)
-            } else {
-                when (style.weight) {
-                    PlayerFloatingSubtitleWeight.LIGHT -> Typeface.create("sans-serif-light", Typeface.NORMAL)
-                    PlayerFloatingSubtitleWeight.NORMAL -> Typeface.DEFAULT
-                    PlayerFloatingSubtitleWeight.MEDIUM -> Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                    PlayerFloatingSubtitleWeight.BOLD -> Typeface.DEFAULT_BOLD
-                }
-            }
-            background = GradientDrawable().apply {
-                cornerRadius = context.pixels(16).toFloat()
-                setColor(style.backgroundColorArgb)
-            }
-            requestLayout()
         }
     }
 

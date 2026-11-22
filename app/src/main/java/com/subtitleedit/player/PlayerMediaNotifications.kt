@@ -10,7 +10,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 internal data class PlayerMediaNotificationState(
@@ -42,6 +41,8 @@ internal object PlayerMediaNotifications {
 
     private val mutableState = MutableStateFlow<PlayerMediaNotificationState?>(null)
     val state = mutableState.asStateFlow()
+    private val mutableSubtitleCue = MutableStateFlow<PlayerOverlaySubtitleCue?>(null)
+    val subtitleCue = mutableSubtitleCue.asStateFlow()
     private var owner: PlayerMediaNotificationConnection? = null
     private var model: PlayerViewModel? = null
     private var serviceRequested = false
@@ -51,8 +52,14 @@ internal object PlayerMediaNotifications {
 
     fun newSessionId(): Long = ++nextSessionId
 
-    fun publish(connection: PlayerMediaNotificationConnection, viewModel: PlayerViewModel,
-        snapshot: PlayerMediaNotificationState?, context: Context) {
+    fun publish(
+        connection: PlayerMediaNotificationConnection,
+        viewModel: PlayerViewModel,
+        snapshot: PlayerMediaNotificationState?,
+        subtitle: String?,
+        timing: PlayerSubtitleCueTiming?,
+        context: Context,
+    ) {
         if (snapshot == null) {
             remove(connection)
             return
@@ -60,7 +67,19 @@ internal object PlayerMediaNotifications {
         owner = connection
         model = viewModel
         serviceContext = context.applicationContext
-        mutableState.value = snapshot
+        mutableSubtitleCue.value = subtitle?.let {
+            val sample = PlayerOverlaySubtitleCue(
+                snapshot.sessionId, it, timing, snapshot.positionMs, SystemClock.elapsedRealtime(),
+                snapshot.playing, snapshot.speed,
+            )
+            val previous = mutableSubtitleCue.value
+            previous?.takeIf { it == sample.copy(sampledAtMs = it.sampledAtMs) } ?: sample
+        }
+        val previous = mutableState.value
+        if (previous == null || previous.positionMs / 1_000L != snapshot.positionMs / 1_000L ||
+            previous.copy(positionMs = snapshot.positionMs) != snapshot) {
+            mutableState.value = snapshot
+        }
         ensureService()
     }
 
@@ -83,6 +102,7 @@ internal object PlayerMediaNotifications {
         if (owner !== connection) return
         owner = null
         model = null
+        mutableSubtitleCue.value = null
         mutableState.value = null
     }
 
@@ -121,20 +141,20 @@ internal class PlayerMediaNotificationConnection(
     private val job: Job = scope.launch {
         combine(
             model.state, model.outputSuspended, preferences.notificationLyricsChanges, model.detailedLyricsInForeground,
-        ) { _, _, showLyrics, _ ->
+        ) { _, _, showLyrics, _ -> showLyrics }.collect { showLyrics ->
             val state = model.state.value
             val suspended = model.outputSuspended.value
             val track = state.currentTrack
-            if (suspended || track == null || !preferences.playerModeEnabled) {
+            val subtitle = state.subtitleText.takeIf {
+                track?.isVideo == false && state.ready && state.error == null &&
+                    state.selectedSubtitleId != "none" && it.isNotBlank()
+            }
+            val snapshot = if (suspended || track == null || !preferences.playerModeEnabled) {
                 active = false
                 null
             } else {
                 if (!active) sessionId = PlayerMediaNotifications.newSessionId()
                 active = true
-                val subtitle = state.subtitleText.takeIf {
-                    !track.isVideo && state.ready && state.error == null &&
-                        state.selectedSubtitleId != "none" && it.isNotBlank()
-                }
                 val floatingSubtitleAvailable = !track.isVideo && state.error == null &&
                     !(state.lyricsVisible && model.detailedLyricsInForeground.value)
                 PlayerMediaNotificationState(sessionId, track, state.positionMs,
@@ -145,11 +165,9 @@ internal class PlayerMediaNotificationConnection(
                     floatingSubtitleAvailable = floatingSubtitleAvailable,
                 )
             }
-        }.distinctUntilChanged { old, new ->
-            old != null && new != null && old.copy(positionMs = 0L) == new.copy(positionMs = 0L) &&
-                old.positionMs / 1_000L == new.positionMs / 1_000L || old == new
-        }.collect { snapshot ->
-            PlayerMediaNotifications.publish(this@PlayerMediaNotificationConnection, model, snapshot, app)
+            PlayerMediaNotifications.publish(
+                this@PlayerMediaNotificationConnection, model, snapshot, subtitle, state.subtitleCueTiming, app,
+            )
         }
     }
 

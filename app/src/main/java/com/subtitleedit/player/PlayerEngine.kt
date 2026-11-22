@@ -15,6 +15,7 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.UUID
+import kotlin.math.roundToLong
 
 /** Owns one player session. Commands and native callbacks are serialized on the access thread. */
 internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val resources: Resources) :
@@ -38,6 +39,8 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
     private var completed = false
     private var pendingSeekMs: Long? = null
     private var pendingSubtitle: PlayerSubtitleOption? = null
+    private var subtitleRefreshQueued = false
+    private var activeSubtitleTiming: PlayerSubtitleCueTiming? = null
     private var fallbackSubtitle: PlayerSubtitleOption? = null
     private var embeddedSubtitles: List<PlayerSubtitleOption> = emptyList()
     private var embeddedSubtitleDir: File? = null
@@ -85,6 +88,8 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
             durationMs = 0L
             pendingSeekMs = null
             pendingSubtitle = null
+            subtitleRefreshQueued = false
+            activeSubtitleTiming = null
             this.fallbackSubtitle = fallbackSubtitle
             clearEmbeddedSubtitles()
             cacheDirectory = cacheDir
@@ -130,18 +135,24 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
         completed = false
         pendingSeekMs = null
         pendingSubtitle = null
+        activeSubtitleTiming = null
         fallbackSubtitle = null
         clearEmbeddedSubtitles()
         accessHandler.removeCallbacks(loudnessPoll)
         if (initialized) MPVLib.command(arrayOf("stop"))
-        publish { copy(ready = false, playing = false, ended = false, loudness = 0f) }
+        publish { copy(ready = false, playing = false, ended = false, loudness = 0f, subtitleCueTiming = null) }
     }
 
     fun seekTo(position: Long) = post {
         val target = clampPosition(position)
         completed = !playRequested && durationMs > 0L && target >= durationMs
         if (ready) seek(target) else pendingSeekMs = target
-        publish { copy(positionMs = target, ended = false, loudness = 0f) }
+        val timing = activeSubtitleTiming?.takeIf { target in it }
+        activeSubtitleTiming = timing
+        publish {
+            copy(positionMs = target, ended = false, loudness = 0f,
+                subtitleCueTiming = timing)
+        }
     }
 
     fun setSpeed(value: Float) = post {
@@ -235,7 +246,7 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
                     if (initialized) runCatching { MPVLib.setPropertyBoolean("pause", true) }
                     if (!initialized) removeObservers()
                     publish(request) {
-                        copy(ready = false, playing = false, ended = false, loudness = 0f,
+                        copy(ready = false, playing = false, ended = false, loudness = 0f, subtitleCueTiming = null,
                             error = "播放失败：${error.message ?: error.javaClass.simpleName}")
                     }
                 }
@@ -265,12 +276,17 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
 
     override fun eventProperty(property: String, value: Double) = post {
         if (!ready || !value.isFinite()) return@post
-        val milliseconds = (value * 1000.0).toLong().coerceAtLeast(0L)
         when (property) {
-            "time-pos" -> publish { copy(positionMs = milliseconds) }
+            "time-pos" -> {
+                val position = secondsToMs(value)
+                publish { copy(positionMs = position) }
+                // Consecutive equal-text cues may cross the old end with no sub-text event.
+                if (activeSubtitleTiming?.let { position >= it.endMs } == true) queueSubtitleRefresh()
+            }
             "duration/full" -> {
-                durationMs = milliseconds
-                publish { copy(durationMs = milliseconds) }
+                durationMs = secondsToMs(value)
+                val duration = durationMs
+                publish { copy(durationMs = duration) }
             }
         }
     }
@@ -294,13 +310,20 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
     override fun eventProperty(property: String, value: String) = post {
         if (!ready) return@post
         when (property) {
-            "sub-text" -> publish { copy(subtitleText = value) }
-            "sid" -> refreshSubtitleTracks()
+            "sub-text" -> queueSubtitleRefresh()
+            "sid" -> {
+                refreshSubtitleTracks()
+                queueSubtitleRefresh()
+            }
         }
     }
 
     override fun eventProperty(property: String) = post {
-        if (ready && property == "track-list") refreshSubtitleTracks()
+        if (!ready) return@post
+        when (property) {
+            "track-list" -> refreshSubtitleTracks()
+            "sub-text" -> queueSubtitleRefresh()
+        }
     }
 
     override fun event(eventId: Int) = post {
@@ -340,11 +363,15 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
                 refreshSubtitleTracks()
                 resetLoudnessPolling()
             }
-            MPVLib.MpvEvent.PLAYBACK_RESTART -> if (ready) refreshPlaybackState()
+            MPVLib.MpvEvent.PLAYBACK_RESTART -> if (ready) {
+                refreshPlaybackState()
+                queueSubtitleRefresh()
+            }
             MPVLib.MpvEvent.SHUTDOWN -> {
                 ready = false
                 accessHandler.removeCallbacks(loudnessPoll)
-                publish { copy(ready = false, playing = false, ended = false, loudness = 0f, error = "播放器已停止") }
+                publish { copy(ready = false, playing = false, ended = false, loudness = 0f,
+                    subtitleCueTiming = null, error = "播放器已停止") }
             }
         }
     }
@@ -361,7 +388,8 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
         ready = false
         playRequested = false
         accessHandler.removeCallbacks(loudnessPoll)
-        publish { copy(ready = false, playing = false, ended = false, loudness = 0f, error = "加载失败：$message（$error）") }
+        publish { copy(ready = false, playing = false, ended = false, loudness = 0f, subtitleCueTiming = null,
+            error = "加载失败：$message（$error）") }
     }
 
     override fun logMessage(prefix: String, level: Int, text: String) {
@@ -389,7 +417,41 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
             }
         }
         val selectedId = if (option.kind == PlayerSubtitleKind.NONE) "none" else option.id
-        publish { copy(selectedSubtitleId = selectedId, subtitleText = "") }
+        activeSubtitleTiming = null
+        publish { copy(selectedSubtitleId = selectedId, subtitleText = "", subtitleCueTiming = null) }
+        queueSubtitleRefresh()
+    }
+
+    /** Property changes can arrive together. Read the active cue rather than pairing separate event values. */
+    private fun queueSubtitleRefresh() {
+        if (subtitleRefreshQueued) return
+        subtitleRefreshQueued = true
+        post(mediaGeneration) {
+            subtitleRefreshQueued = false
+            if (ready) refreshSubtitle()
+        }
+    }
+
+    private fun refreshSubtitle() {
+        val text = MPVLib.getPropertyString("sub-text").orEmpty()
+        val timing = if (text.isBlank()) null else {
+            val start = readSubtitleTime("sub-start")
+            val end = readSubtitleTime("sub-end")
+            // A boundary between the native reads can mix times from two equal-text cues.
+            if (readSubtitleTime("sub-start") != start || MPVLib.getPropertyString("sub-text") != text) {
+                queueSubtitleRefresh()
+                return
+            }
+            val startMs = start?.coerceAtLeast(0L)
+            if (startMs != null && end != null && end > startMs) PlayerSubtitleCueTiming(startMs, end) else null
+        }
+        activeSubtitleTiming = timing
+        publish { copy(subtitleText = text, subtitleCueTiming = timing) }
+    }
+
+    private fun readSubtitleTime(property: String): Long? {
+        // This player disables mpv config loading and keeps subtitle delay, FPS and speed at defaults.
+        return MPVLib.getPropertyDouble(property)?.takeIf { it.isFinite() }?.let { (it * 1000.0).roundToLong() }
     }
 
     /** Tag lyrics are prepared off the UI thread, without changing the source audio. */
@@ -440,7 +502,10 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
         }
         val options = tracks + embeddedSubtitles
         val selected = selectedId
-        publish { copy(subtitleTracks = options, selectedSubtitleId = selected) }
+        publish {
+            if (selectedSubtitleId == selected) copy(subtitleTracks = options)
+            else copy(subtitleTracks = options, selectedSubtitleId = selected, subtitleCueTiming = null)
+        }
         return options
     }
 

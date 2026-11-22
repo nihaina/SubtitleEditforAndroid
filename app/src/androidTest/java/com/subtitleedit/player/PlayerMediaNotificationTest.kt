@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Point
 import android.graphics.Rect
 import android.media.MediaMetadata
 import android.media.session.MediaController
@@ -20,6 +21,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.annotation.StringRes
 import androidx.lifecycle.Lifecycle
@@ -281,6 +283,63 @@ class PlayerMediaNotificationTest {
                 await("re-enabling brings back the caption") { isFloatingLyricOnScreen() }
             }
             await("closing playback removes the overlay") { !isFloatingLyricOnScreen() }
+        }
+    }
+
+    @Test fun statusBarSubtitlesResizeAcrossThePhysicalScreenAndStayInTheUpperThird() {
+        assumeTrue("Grant Display over other apps to the test build", Settings.canDrawOverlays(app))
+        val preferences = PlayerPreferences.getInstance(app)
+        val original = preferences.statusBarLyrics
+        try {
+            Fixture().use { f ->
+                val track = f.wav("status-lyric.wav")
+                File(track.parentFile, "status-lyric.srt").writeText(
+                    "1\n00:00:00,000 --> 00:00:25,000\nStatus bar lyric\n",
+                )
+                onMain { preferences.statusBarLyrics = PlayerStatusBarLyricsSettings() }
+                f.openMain(listOf(track)).use { session ->
+                    awaitState(session.model, "the current cue has timed boundaries") {
+                        it.subtitleText == "Status bar lyric" && it.subtitleCueTiming == PlayerSubtitleCueTiming(0L, 25_000L)
+                    }
+                    val controller = awaitController()
+                    assertNull(captionWindow("PlayerStatusBarLyrics"))
+                    @Suppress("DEPRECATION")
+                    val screenSize = Point().also(app.getSystemService(WindowManager::class.java).defaultDisplay::getRealSize)
+                    onMain { preferences.statusBarLyrics = PlayerStatusBarLyricsSettings(enabled = true) }
+                    shell("input keyevent KEYCODE_HOME")
+                    var nearTop: Rect? = null
+                    await("the status bar window is visible and passes touches through") {
+                        val window = captionWindow("PlayerStatusBarLyrics")
+                        nearTop = window?.let(::windowFrame)
+                        window?.contains("NOT_TOUCHABLE") == true && nearTop != null
+                    }
+                    assertEquals("Full width reaches the physical left edge", 0, requireNotNull(nearTop).left)
+                    assertEquals("Full width reaches the physical right edge", screenSize.x, requireNotNull(nearTop).right)
+                    assertFalse(isFloatingLyricOnScreen())
+                    assertNull(controller.metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE))
+
+                    onMain { preferences.statusBarLyrics = preferences.statusBarLyrics.copy(widthPercent = 60) }
+                    await("the width slider resizes the window around the center of the physical display") {
+                        captionWindow("PlayerStatusBarLyrics")?.let(::windowFrame)?.let { frame ->
+                            abs(frame.width() - screenSize.x * .6) <= 1 && abs(frame.left + frame.right - screenSize.x) <= 1
+                        } == true
+                    }
+                    onMain { preferences.statusBarLyrics = preferences.statusBarLyrics.copy(verticalPositionPercent = 100) }
+                    val upperThird = screenSize.y / 3
+                    var lowered: Rect? = null
+                    await("the slider moves the status bar window downward from $nearTop") {
+                        lowered = captionWindow("PlayerStatusBarLyrics")?.let(::windowFrame)
+                        lowered?.top?.let { it > requireNotNull(nearTop).top } == true
+                    }
+                    assertTrue("Frame $lowered must end within the upper third of $screenSize",
+                        requireNotNull(lowered).bottom <= upperThird + 2)
+                    onMain { preferences.statusBarLyrics = preferences.statusBarLyrics.copy(enabled = false) }
+                    await("disabling status bar lyrics removes only that window") { captionWindow("PlayerStatusBarLyrics") == null }
+                    assertEquals(controller.sessionToken, sessionToken())
+                }
+            }
+        } finally {
+            onMain { preferences.statusBarLyrics = original }
         }
     }
 
@@ -662,15 +721,23 @@ class PlayerMediaNotificationTest {
         }
     }
 
-    private fun floatingLyricWindow(): String? {
+    private fun captionWindow(title: String): String? {
         val dump = instrumentation.uiAutomation.executeShellCommand("dumpsys window windows").use { descriptor ->
             java.io.FileInputStream(descriptor.fileDescriptor).bufferedReader().use { it.readText() }
         }
         return dump.split(Regex("(?m)^\\s*Window #\\d+ ")).firstOrNull { window ->
-            window.lineSequence().first().contains("PlayerFloatingSubtitle") &&
+            window.lineSequence().first().contains(title) &&
                 "package=${app.packageName} " in window && "isOnScreen=true" in window &&
                 ("ty=APPLICATION_OVERLAY" in window || "ty=2038" in window)
         }
+    }
+
+    private fun floatingLyricWindow(): String? = captionWindow("PlayerFloatingSubtitle")
+
+    private fun windowFrame(dump: String): Rect? {
+        val frame = Regex("\\bframe=\\[(-?\\d+),(-?\\d+)]\\[(-?\\d+),(-?\\d+)]").find(dump) ?: return null
+        val (left, top, right, bottom) = frame.destructured
+        return Rect(left.toInt(), top.toInt(), right.toInt(), bottom.toInt())
     }
 
     private fun isFloatingLyricOnScreen(): Boolean = floatingLyricWindow() != null

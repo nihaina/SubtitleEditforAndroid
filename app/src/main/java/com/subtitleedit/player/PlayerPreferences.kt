@@ -16,6 +16,7 @@ internal enum class PlayerFloatingSubtitleWeight(val value: Int) {
 }
 
 private const val DEFAULT_FLOATING_SUBTITLE_BACKGROUND = 0xCCFFFFFF.toInt()
+private const val DEFAULT_STATUS_BAR_LYRICS_FONT_SIZE = 14
 
 internal data class PlayerFloatingSubtitleStyle(
     val fontSize: Int = PlayerPreferences.DEFAULT_SUBTITLE_FONT_SIZE,
@@ -23,7 +24,24 @@ internal data class PlayerFloatingSubtitleStyle(
     val weight: PlayerFloatingSubtitleWeight = PlayerFloatingSubtitleWeight.NORMAL,
     val colorArgb: Int = Color.WHITE,
     val backgroundColorArgb: Int = DEFAULT_FLOATING_SUBTITLE_BACKGROUND,
+    val outlineColorArgb: Int = Color.TRANSPARENT,
+    val scrollEnabled: Boolean = false,
 )
+
+internal data class PlayerStatusBarLyricsSettings(
+    val enabled: Boolean = false,
+    val style: PlayerFloatingSubtitleStyle = PlayerFloatingSubtitleStyle(
+        fontSize = DEFAULT_STATUS_BAR_LYRICS_FONT_SIZE,
+        backgroundColorArgb = Color.TRANSPARENT,
+        outlineColorArgb = Color.BLACK,
+    ),
+    val verticalPositionPercent: Int = 0,
+    val widthPercent: Int = 100,
+) {
+    companion object {
+        const val MIN_WIDTH_PERCENT = 10
+    }
+}
 
 internal val PlayerFloatingSubtitleStyle.backgroundOpacityPercent: Int
     get() = ((backgroundColorArgb ushr 24) * 100f / 255).roundToInt()
@@ -33,17 +51,19 @@ internal fun PlayerFloatingSubtitleStyle.withBackgroundOpacity(percent: Int): Pl
     return copy(backgroundColorArgb = (backgroundColorArgb and 0x00FFFFFF) or (alpha shl 24))
 }
 
-internal enum class PlayerFloatingSubtitleColor { TEXT, BACKGROUND }
+internal enum class PlayerFloatingSubtitleColor { TEXT, BACKGROUND, OUTLINE }
 
 internal fun PlayerFloatingSubtitleStyle.colorFor(target: PlayerFloatingSubtitleColor): Int = when (target) {
     PlayerFloatingSubtitleColor.TEXT -> colorArgb
     PlayerFloatingSubtitleColor.BACKGROUND -> backgroundColorArgb
+    PlayerFloatingSubtitleColor.OUTLINE -> outlineColorArgb
 }
 
 internal fun PlayerFloatingSubtitleStyle.withColor(target: PlayerFloatingSubtitleColor, argb: Int): PlayerFloatingSubtitleStyle =
     when (target) {
         PlayerFloatingSubtitleColor.TEXT -> copy(colorArgb = argb)
         PlayerFloatingSubtitleColor.BACKGROUND -> copy(backgroundColorArgb = argb)
+        PlayerFloatingSubtitleColor.OUTLINE -> copy(outlineColorArgb = argb)
     }
 
 internal fun floatingSubtitleLeftOffset(freeSpace: Int, percent: Int): Int =
@@ -140,6 +160,8 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) : Setting
             } ?: PlayerFloatingSubtitleWeight.NORMAL,
             colorArgb = prefs.getInt(KEY_FLOATING_SUB_COLOR, Color.WHITE),
             backgroundColorArgb = prefs.getInt(KEY_FLOATING_SUB_BACKGROUND, DEFAULT_FLOATING_SUBTITLE_BACKGROUND),
+            outlineColorArgb = prefs.getInt(KEY_FLOATING_SUB_OUTLINE_COLOR, Color.TRANSPARENT),
+            scrollEnabled = prefs.getBoolean(KEY_FLOATING_SUB_SCROLL, false),
         )
         set(value) = prefs.edit()
             .putInt(KEY_FLOATING_SUB_SIZE, value.fontSize.coerceIn(MIN_SUBTITLE_FONT_SIZE, MAX_SUBTITLE_FONT_SIZE))
@@ -147,12 +169,16 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) : Setting
             .putString(KEY_FLOATING_SUB_WEIGHT, value.weight.name)
             .putInt(KEY_FLOATING_SUB_COLOR, value.colorArgb)
             .putInt(KEY_FLOATING_SUB_BACKGROUND, value.backgroundColorArgb)
+            .putInt(KEY_FLOATING_SUB_OUTLINE_COLOR, value.outlineColorArgb)
+            .putBoolean(KEY_FLOATING_SUB_SCROLL, value.scrollEnabled)
             .remove(KEY_FLOATING_SUB_ALIGNMENT)
             .apply()
 
     val floatingSubtitleStyleChanges: Flow<PlayerFloatingSubtitleStyle> = observe(
-        setOf(KEY_FLOATING_SUB_SIZE, KEY_FLOATING_SUB_LEFT_MARGIN, KEY_FLOATING_SUB_ALIGNMENT,
-            KEY_FLOATING_SUB_WEIGHT, KEY_FLOATING_SUB_COLOR, KEY_FLOATING_SUB_BACKGROUND)
+        setOf(
+            KEY_FLOATING_SUB_SIZE, KEY_FLOATING_SUB_LEFT_MARGIN, KEY_FLOATING_SUB_ALIGNMENT, KEY_FLOATING_SUB_WEIGHT,
+            KEY_FLOATING_SUB_COLOR, KEY_FLOATING_SUB_BACKGROUND, KEY_FLOATING_SUB_OUTLINE_COLOR, KEY_FLOATING_SUB_SCROLL,
+        )
     ) { floatingSubtitleStyle }
 
     var floatingSubtitleEnabled: Boolean
@@ -189,6 +215,45 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) : Setting
 
     val notificationLyricsChanges: Flow<Boolean> = observe(setOf(KEY_NOTIFICATION_LYRICS)) { notificationsShowLyrics }
 
+    var statusBarLyrics: PlayerStatusBarLyricsSettings
+        get() = PlayerStatusBarLyricsSettings(
+            enabled = prefs.getBoolean(KEY_STATUS_LYRICS_ENABLED, false),
+            style = PlayerFloatingSubtitleStyle(
+                fontSize = prefs.getInt(KEY_STATUS_LYRICS_SIZE, DEFAULT_STATUS_BAR_LYRICS_FONT_SIZE)
+                    .coerceIn(MIN_SUBTITLE_FONT_SIZE, MAX_SUBTITLE_FONT_SIZE),
+                leftMarginPercent = prefs.getInt(KEY_STATUS_LYRICS_LEFT_MARGIN, 50).coerceIn(0, 100),
+                weight = PlayerFloatingSubtitleWeight.entries.firstOrNull {
+                    it.name == prefs.getString(KEY_STATUS_LYRICS_WEIGHT, null)
+                } ?: PlayerFloatingSubtitleWeight.NORMAL,
+                colorArgb = prefs.getInt(KEY_STATUS_LYRICS_COLOR, Color.WHITE),
+                backgroundColorArgb = Color.TRANSPARENT,
+                outlineColorArgb = prefs.getInt(KEY_STATUS_LYRICS_OUTLINE_COLOR, Color.BLACK),
+                scrollEnabled = prefs.getBoolean(KEY_STATUS_LYRICS_SCROLL, false),
+            ),
+            verticalPositionPercent = prefs.getInt(KEY_STATUS_LYRICS_POSITION, 0).coerceIn(0, 100),
+            widthPercent = prefs.getInt(KEY_STATUS_LYRICS_WIDTH, 100)
+                .coerceIn(PlayerStatusBarLyricsSettings.MIN_WIDTH_PERCENT, 100),
+        )
+        set(value) = prefs.edit()
+            .putBoolean(KEY_STATUS_LYRICS_ENABLED, value.enabled)
+            .putInt(KEY_STATUS_LYRICS_SIZE, value.style.fontSize.coerceIn(MIN_SUBTITLE_FONT_SIZE, MAX_SUBTITLE_FONT_SIZE))
+            .putInt(KEY_STATUS_LYRICS_LEFT_MARGIN, value.style.leftMarginPercent.coerceIn(0, 100))
+            .putString(KEY_STATUS_LYRICS_WEIGHT, value.style.weight.name)
+            .putInt(KEY_STATUS_LYRICS_COLOR, value.style.colorArgb)
+            .putInt(KEY_STATUS_LYRICS_OUTLINE_COLOR, value.style.outlineColorArgb)
+            .putBoolean(KEY_STATUS_LYRICS_SCROLL, value.style.scrollEnabled)
+            .putInt(KEY_STATUS_LYRICS_POSITION, value.verticalPositionPercent.coerceIn(0, 100))
+            .putInt(KEY_STATUS_LYRICS_WIDTH, value.widthPercent.coerceIn(PlayerStatusBarLyricsSettings.MIN_WIDTH_PERCENT, 100))
+            .apply()
+
+    val statusBarLyricsChanges: Flow<PlayerStatusBarLyricsSettings> = observe(
+        setOf(
+            KEY_STATUS_LYRICS_ENABLED, KEY_STATUS_LYRICS_SIZE, KEY_STATUS_LYRICS_LEFT_MARGIN, KEY_STATUS_LYRICS_WEIGHT,
+            KEY_STATUS_LYRICS_COLOR, KEY_STATUS_LYRICS_OUTLINE_COLOR, KEY_STATUS_LYRICS_SCROLL, KEY_STATUS_LYRICS_POSITION,
+            KEY_STATUS_LYRICS_WIDTH,
+        )
+    ) { statusBarLyrics }
+
     private fun <T> observe(keys: Set<String>, read: () -> T): Flow<T> = callbackFlow {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == null || key in keys) trySend(read())
@@ -216,6 +281,7 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) : Setting
         val behavior = endBehavior
         val eq = equalizer
         val floating = floatingSubtitleStyle
+        val statusLyrics = statusBarLyrics
         return linkedMapOf(
             KEY_PLAYER_MODE to playerModeEnabled,
             KEY_MODE to defaultPlayMode.name,
@@ -237,6 +303,17 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) : Setting
             KEY_FLOATING_SUB_WEIGHT to floating.weight.name,
             KEY_FLOATING_SUB_COLOR to floating.colorArgb,
             KEY_FLOATING_SUB_BACKGROUND to floating.backgroundColorArgb,
+            KEY_FLOATING_SUB_OUTLINE_COLOR to floating.outlineColorArgb,
+            KEY_FLOATING_SUB_SCROLL to floating.scrollEnabled,
+            KEY_STATUS_LYRICS_ENABLED to statusLyrics.enabled,
+            KEY_STATUS_LYRICS_SIZE to statusLyrics.style.fontSize,
+            KEY_STATUS_LYRICS_LEFT_MARGIN to statusLyrics.style.leftMarginPercent,
+            KEY_STATUS_LYRICS_WEIGHT to statusLyrics.style.weight.name,
+            KEY_STATUS_LYRICS_COLOR to statusLyrics.style.colorArgb,
+            KEY_STATUS_LYRICS_OUTLINE_COLOR to statusLyrics.style.outlineColorArgb,
+            KEY_STATUS_LYRICS_SCROLL to statusLyrics.style.scrollEnabled,
+            KEY_STATUS_LYRICS_POSITION to statusLyrics.verticalPositionPercent,
+            KEY_STATUS_LYRICS_WIDTH to statusLyrics.widthPercent,
             KEY_NOTIFICATION_LYRICS to notificationsShowLyrics,
             KEY_RESUME to resumePlayback,
             KEY_LOUDNESS_WAVEFORM to showLoudnessWaveform
@@ -280,6 +357,17 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) : Setting
         private const val KEY_FLOATING_SUB_WEIGHT = "floating_subtitle_weight"
         private const val KEY_FLOATING_SUB_COLOR = "floating_subtitle_color"
         private const val KEY_FLOATING_SUB_BACKGROUND = "floating_subtitle_background_color"
+        private const val KEY_FLOATING_SUB_OUTLINE_COLOR = "floating_subtitle_outline_color"
+        private const val KEY_FLOATING_SUB_SCROLL = "floating_subtitle_scroll"
+        private const val KEY_STATUS_LYRICS_ENABLED = "status_bar_lyrics_enabled"
+        private const val KEY_STATUS_LYRICS_SIZE = "status_bar_lyrics_size"
+        private const val KEY_STATUS_LYRICS_LEFT_MARGIN = "status_bar_lyrics_left_margin"
+        private const val KEY_STATUS_LYRICS_WEIGHT = "status_bar_lyrics_weight"
+        private const val KEY_STATUS_LYRICS_COLOR = "status_bar_lyrics_color"
+        private const val KEY_STATUS_LYRICS_OUTLINE_COLOR = "status_bar_lyrics_outline_color"
+        private const val KEY_STATUS_LYRICS_SCROLL = "status_bar_lyrics_scroll"
+        private const val KEY_STATUS_LYRICS_POSITION = "status_bar_lyrics_position"
+        private const val KEY_STATUS_LYRICS_WIDTH = "status_bar_lyrics_width"
         private const val KEY_NOTIFICATION_LYRICS = "notification_lyrics"
         private const val KEY_RESUME = "resume_playback"
         private const val KEY_LOUDNESS_WAVEFORM = "show_loudness_waveform"
