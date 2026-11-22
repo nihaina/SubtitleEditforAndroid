@@ -3,7 +3,6 @@ package com.subtitleedit.ui
 import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -494,120 +493,126 @@ internal fun MediaAlbumPageContent(
             }
         }
     }
-    Column(Modifier.fillMaxSize().background(settingsPageBackground()).testTag("media-categories-page")) {
-        when {
-            category == MediaCategory.FOLDERS -> browseStateHolder.SaveableStateProvider(category.name) {
-                folderContent(categoryTabs)
-            }
-            settingsOpen && creditRole != null -> MediaSingerSettings(
-                options = activeCreditOptions,
-                onChange = changeCreditOptions,
-                onBack = { settingsOpen = false },
-                role = creditRole
-            )
-            settingsOpen -> MediaAlbumSettings(
-                options = options,
-                onChange = onOptionsChanged,
-                onBack = { settingsOpen = false }
-            )
-            openedCredit != null && creditRole != null -> MediaSingerDetailContent(
-                metadataRefreshKey = metadataRefreshKey,
-                singer = openedCredit,
-                options = activeCreditOptions,
-                onOptionsChanged = changeCreditOptions,
-                isActive = isActive,
-                onBack = { cancelReveal(); openedCreditKey = null },
-                revealRequest = revealRequest?.takeIf { handledRevealToken == it.token && category == it.category },
-                onRevealFinished = onRevealFinished,
-                onPlay = { displayed, path ->
-                    val album = MediaAlbum(openedCredit.name, displayed)
-                    val source = PlayerQueueSource(creditRole.queueSourceKind, openedCredit.key)
-                    onPlayFromSource?.invoke(album, path, source) ?: onPlay(album, path)
-                },
-                onShuffle = { displayed ->
-                    val album = MediaAlbum(openedCredit.name, displayed)
-                    val source = PlayerQueueSource(creditRole.queueSourceKind, openedCredit.key)
-                    onShuffleFromSource?.invoke(album, source) ?: onShuffle(album)
-                },
-                onFavoriteSelection = onFavoriteSelection,
-                onAddSelectionToPlaylist = onAddSelectionToPlaylist,
-                onShowInfo = onShowInfo,
-                role = creditRole
-            )
-            openedAlbum != null -> MediaAlbumDetailContent(
-                metadataRefreshKey = metadataRefreshKey,
-                album = openedAlbum,
-                groupTracks = options.groupTracks,
-                sortField = options.sortField,
-                ascending = options.ascending,
-                trackSort = options.trackSort,
-                onTrackSortChanged = { onOptionsChanged(options.copy(trackSort = it)) },
-                isActive = isActive,
-                onBack = { cancelReveal(); openedAlbumKey = null },
-                revealRequest = revealRequest?.takeIf { handledRevealToken == it.token && category == it.category },
-                onRevealFinished = onRevealFinished,
-                onPlay = { displayed, path ->
-                    val album = openedAlbum.copy(tracks = displayed)
-                    val source = PlayerQueueSource(PlayerQueueSourceKind.ALBUM, openedAlbum.key)
-                    onPlayFromSource?.invoke(album, path, source) ?: onPlay(album, path)
-                },
-                onShuffle = { displayed ->
-                    val album = openedAlbum.copy(tracks = displayed)
-                    val source = PlayerQueueSource(PlayerQueueSourceKind.ALBUM, openedAlbum.key)
-                    onShuffleFromSource?.invoke(album, source) ?: onShuffle(album)
-                },
-                onFavoriteSelection = onFavoriteSelection,
-                onAddSelectionToPlaylist = onAddSelectionToPlaylist,
-                onShowInfo = onShowInfo
-            )
-            else -> {
-                categoryTabs()
-                // Browse content leaves composition while a detail or settings page is open.
-                browseStateHolder.SaveableStateProvider(category.name) {
-                    if (category == MediaCategory.ALBUMS) {
-                        if (loading && albums.isEmpty()) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(32.dp),
-                                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+    Surface(
+        modifier = Modifier.fillMaxSize().testTag("media-categories-page"),
+        color = settingsPageBackground(),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            when {
+                category == MediaCategory.FOLDERS -> browseStateHolder.SaveableStateProvider(category.name) {
+                    folderContent(categoryTabs)
+                }
+                settingsOpen && creditRole != null -> MediaSingerSettings(
+                    options = activeCreditOptions,
+                    onChange = changeCreditOptions,
+                    onBack = { settingsOpen = false },
+                    role = creditRole
+                )
+                settingsOpen -> MediaAlbumSettings(
+                    options = options,
+                    onChange = onOptionsChanged,
+                    onBack = { settingsOpen = false }
+                )
+                openedCredit != null && creditRole != null -> MediaSingerDetailContent(
+                    metadataRefreshKey = metadataRefreshKey,
+                    singer = openedCredit,
+                    options = activeCreditOptions,
+                    onOptionsChanged = changeCreditOptions,
+                    isActive = isActive,
+                    onBack = { cancelReveal(); openedCreditKey = null },
+                    revealRequest = revealRequest?.takeIf { handledRevealToken == it.token && category == it.category },
+                    onRevealFinished = onRevealFinished,
+                    onPlay = { displayed, path ->
+                        val album = MediaAlbum(openedCredit.name, displayed)
+                        val source = PlayerQueueSource(creditRole.queueSourceKind, openedCredit.key)
+                        onPlayFromSource?.invoke(album, path, source) ?: onPlay(album, path)
+                    },
+                    onShuffle = { displayed ->
+                        val album = MediaAlbum(openedCredit.name, displayed)
+                        val source = PlayerQueueSource(creditRole.queueSourceKind, openedCredit.key)
+                        onShuffleFromSource?.invoke(album, source) ?: onShuffle(album)
+                    },
+                    onFavoriteSelection = onFavoriteSelection,
+                    onAddSelectionToPlaylist = onAddSelectionToPlaylist,
+                    onShowInfo = onShowInfo,
+                    role = creditRole
+                )
+                openedAlbum != null -> MediaAlbumDetailContent(
+                    metadataRefreshKey = metadataRefreshKey,
+                    album = openedAlbum,
+                    groupTracks = options.groupTracks,
+                    sortField = options.sortField,
+                    ascending = options.ascending,
+                    trackSort = options.trackSort,
+                    onTrackSortChanged = { onOptionsChanged(options.copy(trackSort = it)) },
+                    isActive = isActive,
+                    onBack = { cancelReveal(); openedAlbumKey = null },
+                    revealRequest = revealRequest?.takeIf { handledRevealToken == it.token && category == it.category },
+                    onRevealFinished = onRevealFinished,
+                    onPlay = { displayed, path ->
+                        val album = openedAlbum.copy(tracks = displayed)
+                        val source = PlayerQueueSource(PlayerQueueSourceKind.ALBUM, openedAlbum.key)
+                        onPlayFromSource?.invoke(album, path, source) ?: onPlay(album, path)
+                    },
+                    onShuffle = { displayed ->
+                        val album = openedAlbum.copy(tracks = displayed)
+                        val source = PlayerQueueSource(PlayerQueueSourceKind.ALBUM, openedAlbum.key)
+                        onShuffleFromSource?.invoke(album, source) ?: onShuffle(album)
+                    },
+                    onFavoriteSelection = onFavoriteSelection,
+                    onAddSelectionToPlaylist = onAddSelectionToPlaylist,
+                    onShowInfo = onShowInfo
+                )
+                else -> {
+                    categoryTabs()
+                    // Browse content leaves composition while a detail or settings page is open.
+                    browseStateHolder.SaveableStateProvider(category.name) {
+                        if (category == MediaCategory.ALBUMS) {
+                            if (loading && albums.isEmpty()) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(32.dp),
+                                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                                    )
+                                }
+                            } else {
+                                MediaAlbumBrowseContent(
+                                    albums = visibleAlbums,
+                                    options = options,
+                                    query = query,
+                                    onQueryChanged = { query = it },
+                                    onSort = { sortOpen = true },
+                                    onSettings = { settingsOpen = true },
+                                    onOpenAlbum = { cancelReveal(); openedAlbumKey = it.key },
+                                    modifier = Modifier.weight(1f)
                                 )
                             }
-                        } else {
-                            MediaAlbumBrowseContent(
-                                albums = visibleAlbums,
-                                options = options,
-                                query = query,
-                                onQueryChanged = { query = it },
-                                onSort = { sortOpen = true },
-                                onSettings = { settingsOpen = true },
-                                onOpenAlbum = { cancelReveal(); openedAlbumKey = it.key },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    } else if (creditRole != null) {
-                        if (loading && credits.isEmpty()) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                        } else if (creditRole != null) {
+                            if (loading && credits.isEmpty()) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                                }
+                            } else {
+                                MediaSingerBrowseContent(
+                                    singers = visibleCredits,
+                                    options = activeCreditOptions,
+                                    query = creditQuery,
+                                    onQueryChanged = {
+                                        when (creditRole) {
+                                            MediaCreditRole.SINGER -> singerQuery = it
+                                            MediaCreditRole.ARTIST -> artistQuery = it
+                                            MediaCreditRole.COMPOSER -> composerQuery = it
+                                            MediaCreditRole.GENRE -> genreQuery = it
+                                        }
+                                    },
+                                    onSort = { sortOpen = true },
+                                    onSettings = { settingsOpen = true },
+                                    onOpenSinger = { cancelReveal(); openedCreditKey = it.key },
+                                    modifier = Modifier.weight(1f),
+                                    role = creditRole
+                                )
                             }
-                        } else {
-                            MediaSingerBrowseContent(
-                                singers = visibleCredits,
-                                options = activeCreditOptions,
-                                query = creditQuery,
-                                onQueryChanged = {
-                                    when (creditRole) {
-                                        MediaCreditRole.SINGER -> singerQuery = it
-                                        MediaCreditRole.ARTIST -> artistQuery = it
-                                        MediaCreditRole.COMPOSER -> composerQuery = it
-                                        MediaCreditRole.GENRE -> genreQuery = it
-                                    }
-                                },
-                                onSort = { sortOpen = true },
-                                onSettings = { settingsOpen = true },
-                                onOpenSinger = { cancelReveal(); openedCreditKey = it.key },
-                                modifier = Modifier.weight(1f),
-                                role = creditRole
-                            )
                         }
                     }
                 }
