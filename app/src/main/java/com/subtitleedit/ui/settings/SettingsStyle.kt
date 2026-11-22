@@ -163,17 +163,18 @@ internal fun settingsTileShape(source: MutableInteractionSource): RoundedCornerS
     return RoundedCornerShape(corner.coerceAtLeast(0.dp))
 }
 
-/** A standalone tile with the same colour and corner language as the settings page groups. */
+/** A settings tile that can stand alone or follow the inner corners of a tile group. */
 @Composable
 fun SettingsTileCard(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(16.dp),
+    grouped: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(MaterialTheme.shapes.extraLarge)
+            .clip(if (grouped) RoundedCornerShape(SettingsTileRestingCorner) else MaterialTheme.shapes.extraLarge)
             .background(settingsTileColor())
             .padding(contentPadding),
         content = content

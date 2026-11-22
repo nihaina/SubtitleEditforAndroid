@@ -16,7 +16,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -34,7 +33,6 @@ import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.util.AsrPunctuationOptions
-import com.subtitleedit.ui.components.SettingsSwitchRow
 
 @Composable
 internal fun AsrPunctuationSplitSettings(
@@ -43,35 +41,25 @@ internal fun AsrPunctuationSplitSettings(
     enabled: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     onPunctuationChange: (List<String>) -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     var dialogVisible by rememberSaveable { mutableStateOf(false) }
     var draft by remember { mutableStateOf(selectedPunctuation.toSet()) }
 
-    Column(modifier = modifier) {
-        SettingsSwitchRow(
-            title = stringResource(R.string.speech_merge_punctuation_split),
-            description = stringResource(R.string.speech_merge_punctuation_split_hint),
-            checked = checked,
-            enabled = enabled,
-            opacity = if (enabled) 1f else 0.5f,
-            onCheckedChange = onCheckedChange,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            OutlinedButton(
-                enabled = enabled && checked,
-                onClick = {
-                    draft = selectedPunctuation.toSet()
-                    dialogVisible = true
-                },
-            ) {
-                Text(stringResource(R.string.speech_merge_set_punctuation))
-            }
-        }
-    }
+    SettingsTileSwitchRow(
+        title = stringResource(R.string.speech_merge_punctuation_split),
+        description = stringResource(R.string.speech_merge_punctuation_split_hint),
+        checked = checked,
+        enabled = enabled,
+        onCheckedChange = onCheckedChange,
+    )
+    SettingsTileRow(
+        title = stringResource(R.string.speech_merge_set_punctuation),
+        enabled = enabled && checked,
+        onClick = {
+            draft = selectedPunctuation.toSet()
+            dialogVisible = true
+        },
+    )
 
     if (dialogVisible) {
         AppDialog(

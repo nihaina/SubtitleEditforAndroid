@@ -3,22 +3,19 @@ package com.subtitleedit
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
-import androidx.compose.material3.Text
-import androidx.compose.material3.MaterialTheme
-import com.subtitleedit.ui.components.AppSlider
 import com.subtitleedit.R
-import com.subtitleedit.ui.components.AppSection
-import com.subtitleedit.ui.components.AppToolScaffold
-import com.subtitleedit.ui.components.SettingsSwitchRow
+import com.subtitleedit.ui.settings.ModelSettingsGroup
+import com.subtitleedit.ui.settings.ModelSettingsHint
+import com.subtitleedit.ui.settings.ModelSettingsScaffold
+import com.subtitleedit.ui.settings.ModelSettingsSliderTile
+import com.subtitleedit.ui.settings.SettingsTileCard
+import com.subtitleedit.ui.settings.SettingsTileSwitchRow
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import kotlin.math.roundToInt
 
@@ -49,7 +46,7 @@ class VocalSeparationSettingsActivity : AppComposeActivity() {
 }
 
 @Composable
-private fun VocalSeparationSettingsScreen(
+internal fun VocalSeparationSettingsScreen(
     intraOpThreads: Int,
     onIntraOpThreadsChanged: (Int) -> Unit,
     chunkParallelEnabled: Boolean,
@@ -61,43 +58,31 @@ private fun VocalSeparationSettingsScreen(
     onBack: () -> Unit
 ) {
     val intraOpThreadsDraft = remember(intraOpThreads) { mutableStateOf(intraOpThreads.toFloat()) }
-    AppToolScaffold(
+    ModelSettingsScaffold(
         title = stringResource(R.string.activity_vocal_separation_settings_title),
-        onBack = onBack
+        onBack = onBack,
+        imePadding = false,
     ) {
-        AppSection(title = stringResource(R.string.activity_vocal_separation_settings_text_14)) {
-            SettingsSwitchRow(
+        ModelSettingsGroup(title = stringResource(R.string.activity_vocal_separation_settings_text_14)) {
+            SettingsTileSwitchRow(
                 title = stringResource(R.string.activity_vocal_separation_settings_text_15),
                 description = stringResource(R.string.activity_vocal_separation_settings_text_16),
                 checked = graphOptimizationEnabled,
                 onCheckedChange = onGraphOptimizationChanged
             )
-            SettingsSwitchRow(
+            SettingsTileSwitchRow(
                 title = stringResource(R.string.activity_vocal_separation_settings_text_17),
                 description = stringResource(R.string.activity_vocal_separation_settings_text_18),
                 checked = cpuArenaEnabled,
                 onCheckedChange = onCpuArenaChanged
             )
-            Text(
-                text = stringResource(R.string.activity_vocal_separation_settings_text_20),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 12.dp)
-            )
-            Text(
-                text = stringResource(R.string.activity_vocal_separation_settings_text_21),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp)
-            )
-            Text(
-                text = stringResource(
+            ModelSettingsSliderTile(
+                title = stringResource(R.string.activity_vocal_separation_settings_text_20),
+                description = stringResource(R.string.activity_vocal_separation_settings_text_21),
+                valueLabel = stringResource(
                     R.string.activity_vocal_separation_settings_text_22,
-                    intraOpThreadsDraft.value.roundToInt()
+                    intraOpThreadsDraft.value.roundToInt(),
                 ),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-            AppSlider(
                 value = intraOpThreadsDraft.value,
                 onValueChange = { intraOpThreadsDraft.value = it },
                 valueRange = 1f..8f,
@@ -105,20 +90,16 @@ private fun VocalSeparationSettingsScreen(
                 onValueChangeFinished = {
                     onIntraOpThreadsChanged(intraOpThreadsDraft.value.roundToInt())
                 },
-                modifier = Modifier.padding(horizontal = 4.dp)
             )
-            SettingsSwitchRow(
+            SettingsTileSwitchRow(
                 title = stringResource(R.string.activity_vocal_separation_settings_text_23),
                 description = stringResource(R.string.activity_vocal_separation_settings_text_24),
                 checked = chunkParallelEnabled,
                 onCheckedChange = onChunkParallelChanged
             )
-            Text(
-                text = stringResource(R.string.activity_vocal_separation_settings_text_19),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp)
-            )
+            SettingsTileCard(grouped = true) {
+                ModelSettingsHint(stringResource(R.string.activity_vocal_separation_settings_text_19))
+            }
         }
     }
 }
