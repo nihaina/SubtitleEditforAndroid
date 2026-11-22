@@ -93,6 +93,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.subtitleedit.R
 import com.subtitleedit.ui.MediaCategoryRevealRequest
 import kotlin.math.abs
@@ -110,6 +111,12 @@ internal fun PlayerScreen(
     onLocate: ((String) -> Unit)? = null
 ) {
     val state by viewModel.state.collectAsState()
+    if (embedded && interactionsEnabled && !state.isVideo && state.lyricsVisible) {
+        LifecycleResumeEffect(viewModel) {
+            viewModel.setDetailedLyricsInForeground(true)
+            onPauseOrDispose { viewModel.setDetailedLyricsInForeground(false) }
+        }
+    }
     val pageGradient = PlayerColors.pageGradient
     val configuration = LocalConfiguration.current
     val landscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -326,14 +333,6 @@ internal fun PlayerScreen(
                     }
                 }
             }
-
-            PlayerSubtitleOverlay(
-                text = if (state.isVideo || state.lyricsVisible) "" else state.subtitleText,
-                fontSize = state.subtitleFontSize,
-                lineSpacing = state.audioSubtitleLineSpacing,
-                alignment = state.audioSubtitleAlignment,
-                modifier = Modifier.align(Alignment.Center).padding(bottom = if (landscape) 64.dp else 260.dp)
-            )
 
             PlayerHintOverlay(
                 hint = state.gestureHint,

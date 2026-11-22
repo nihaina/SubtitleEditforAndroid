@@ -1,5 +1,6 @@
 package com.subtitleedit.player
 
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.Context
@@ -7,14 +8,21 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Rect
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
+import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import android.provider.Settings
+import android.view.accessibility.AccessibilityNodeInfo
+import androidx.annotation.StringRes
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -24,6 +32,7 @@ import com.subtitleedit.MediaConvertCoverMode
 import com.subtitleedit.MediaConvertMetadata
 import com.subtitleedit.MediaConvertMetadataField
 import com.subtitleedit.MediaTagAudioRepository
+import com.subtitleedit.R
 import com.subtitleedit.library.MediaLibraryRepository
 import com.subtitleedit.library.PlayerTrackMetadataReader
 import com.subtitleedit.mpv.MPVLib
@@ -35,6 +44,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -174,6 +184,253 @@ class PlayerMediaNotificationTest {
         }
     }
 
+    @Test fun optedInNotificationPublishesTheCurrentLyricAndClearsItWhenDisabled() = Fixture().use { f ->
+        val track = f.wav("with-lyrics.wav")
+        File(track.parentFile, "with-lyrics.srt").writeText(
+            "1\n00:00:00,000 --> 00:00:25,000\nFirst lyric\n\n" +
+                "2\n00:00:30,000 --> 00:00:45,000\nSecond lyric\n",
+        )
+        f.openMain(listOf(track)).use { session ->
+            val model = session.model
+            val controller = awaitController()
+            awaitState(model, "the first lyric is active") { it.subtitleText == "First lyric" }
+            onMain { controller.transportControls.pause() }
+            awaitPaused(model)
+            assertNull(controller.metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE))
+            assertNotEquals("First lyric", notification()?.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString())
+
+            val preferences = PlayerPreferences.getInstance(app)
+            onMain { preferences.notificationsShowLyrics = true }
+            await("opt-in publishes the lyric on the current paused session") {
+                controller.metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE) == "First lyric" &&
+                    controller.metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST) == "First lyric" &&
+                    notification()?.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() == "First lyric"
+            }
+            assertEquals("with-lyrics", controller.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE))
+            assertEquals(controller.sessionToken, sessionToken())
+
+            onMain { controller.transportControls.seekTo(32_000L) }
+            await("a paused system seek publishes the new lyric") {
+                controller.metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE) == "Second lyric" &&
+                    notification()?.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() == "Second lyric"
+            }
+
+            onMain { controller.transportControls.seekTo(27_000L) }
+            await("a gap clears the previous lyric") {
+                controller.metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE) == null &&
+                    notification()?.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() != "Second lyric"
+            }
+
+            onMain { controller.transportControls.seekTo(32_000L) }
+            await("lyrics return after the gap") {
+                controller.metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE) == "Second lyric"
+            }
+            onMain { preferences.notificationsShowLyrics = false }
+            await("disabling the preference clears the lyric without restarting playback") {
+                controller.metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE) == null &&
+                    controller.metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST).isNullOrBlank() &&
+                    notification()?.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() != "Second lyric"
+            }
+            assertEquals(controller.sessionToken, sessionToken())
+        }
+    }
+
+    @Test fun enabledFloatingLyricsShowOverHomeAndDisappearWhenTurnedOff() {
+        assumeTrue("Grant Display over other apps to the test build", Settings.canDrawOverlays(app))
+        Fixture().use { f ->
+            val track = f.wav("desktop.wav")
+            File(track.parentFile, "desktop.srt").writeText(
+                "1\n00:00:00,000 --> 00:00:25,000\nDesktop first lyric\n\n" +
+                    "2\n00:00:30,000 --> 00:00:55,000\nDesktop next lyric\n",
+            )
+            f.openMain(listOf(track)).use { session ->
+                val model = session.model
+                val controller = awaitController()
+                val preferences = PlayerPreferences.getInstance(app)
+                awaitState(model, "the first lyric is active while the switch is off") { it.subtitleText == "Desktop first lyric" }
+                assertFalse(isFloatingLyricOnScreen())
+
+                onMain { preferences.floatingSubtitleEnabled = true }
+                await("the enabled caption is visible over the player") { isFloatingLyricOnScreen() }
+                onMain { model.setLyricsVisible(true) }
+                await("detailed lyrics hide the floating caption over the player") { !isFloatingLyricOnScreen() }
+
+                shell("input keyevent KEYCODE_HOME")
+                await("the player leaves the foreground") {
+                    mainValue { !session.activity.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
+                }
+                await("the real overlay becomes visible over the desktop") { isFloatingLyricOnScreen() }
+
+                onMain { controller.transportControls.seekTo(32_000L) }
+                await("the player continues to publish the active lyric on the desktop") {
+                    PlayerMediaNotifications.state.value?.floatingSubtitleText == "Desktop next lyric" &&
+                        isFloatingLyricOnScreen()
+                }
+                assertNull("The notification lyric switch is independent", controller.metadata?.getString(
+                    MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE,
+                ))
+
+                onMain { controller.transportControls.seekTo(27_000L) }
+                await("a lyric gap hides the overlay on the desktop") { !isFloatingLyricOnScreen() }
+                onMain { controller.transportControls.seekTo(32_000L) }
+                await("a new cue restores the subtitle window") { isFloatingLyricOnScreen() }
+
+                onMain { preferences.floatingSubtitleEnabled = false }
+                await("disabling removes the overlay on the desktop") { !isFloatingLyricOnScreen() }
+                onMain { preferences.floatingSubtitleEnabled = true }
+                await("re-enabling brings back the caption") { isFloatingLyricOnScreen() }
+            }
+            await("closing playback removes the overlay") { !isFloatingLyricOnScreen() }
+        }
+    }
+
+    @Test fun unlockedFloatingLyricsCanBeMovedAndControlledFromHome() {
+        assumeTrue("Grant Display over other apps to the test build", Settings.canDrawOverlays(app))
+        val automation = instrumentation.uiAutomation
+        val info = automation.serviceInfo
+        val originalFlags = info.flags
+        info.flags = originalFlags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+        automation.serviceInfo = info
+        val preferences = PlayerPreferences.getInstance(app)
+        val originalLocked = preferences.floatingSubtitleLocked
+        val originalStyle = preferences.floatingSubtitleStyle
+        val originalPosition = preferences.floatingSubtitlePosition
+        try {
+            Fixture().use { f ->
+                val tracks = listOf(f.wav("overlay-first.wav"), f.wav("overlay-second.wav"))
+                val lyrics = listOf("Movable desktop caption", "Caption from next track")
+                tracks.zip(lyrics).forEach { (track, lyric) ->
+                    File(track.parentFile, "${track.nameWithoutExtension}.srt")
+                        .writeText("1\n00:00:00,000 --> 00:01:00,000\n$lyric\n")
+                }
+                f.openMain(tracks).use { session ->
+                    val model = session.model
+                    val controller = awaitController()
+                    onMain {
+                        model.pause()
+                        preferences.floatingSubtitleLocked = false
+                        preferences.floatingSubtitleStyle = PlayerFloatingSubtitleStyle()
+                        preferences.floatingSubtitlePosition = null
+                        preferences.floatingSubtitleEnabled = true
+                    }
+                    awaitPaused(model)
+                    awaitState(model, "desktop caption is active") { it.subtitleText == lyrics[0] }
+                    shell("input keyevent KEYCODE_HOME")
+                    await("the player leaves the foreground") {
+                        mainValue { !session.activity.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
+                    }
+
+                    val originalBounds = floatingCaptionBounds(lyrics[0])
+                    val moveBy = (96 * app.resources.displayMetrics.density).toInt()
+                    val x = originalBounds.centerX()
+                    val y = originalBounds.centerY()
+                    val initialPosition = preferences.floatingSubtitlePosition
+                    shell("input swipe $x $y ${x + moveBy} $y 450")
+                    assertEquals("A horizontal swipe keeps the floating caption in place",
+                        originalBounds, floatingCaptionBounds(lyrics[0]))
+                    assertEquals(initialPosition, preferences.floatingSubtitlePosition)
+                    assertNull("A horizontal swipe must not open the controls", floatingNodeBounds {
+                        it.contentDescription?.toString() == app.getString(R.string.player_floating_subtitle_lock)
+                    })
+                    onMain { preferences.floatingSubtitleStyle = preferences.floatingSubtitleStyle.copy(leftMarginPercent = 0) }
+                    await("0 percent aligns the text to the left inside the window") {
+                        floatingNodeBounds { it.text?.toString() == lyrics[0] }?.centerX()?.let { it < x } == true
+                    }
+                    onMain { preferences.floatingSubtitleStyle = preferences.floatingSubtitleStyle.copy(leftMarginPercent = 100) }
+                    await("100 percent aligns the text to the right inside the window") {
+                        floatingNodeBounds { it.text?.toString() == lyrics[0] }?.centerX()?.let { it > x } == true
+                    }
+                    onMain { preferences.floatingSubtitleStyle = preferences.floatingSubtitleStyle.copy(leftMarginPercent = 50) }
+                    await("50 percent centers the text again") {
+                        floatingNodeBounds { it.text?.toString() == lyrics[0] } == originalBounds
+                    }
+                    shell("input swipe $x $y ${x + moveBy} ${y - moveBy} 450")
+                    await("drag saves a new position and moves the real window") {
+                        preferences.floatingSubtitlePosition != null &&
+                            floatingNodeBounds { it.text?.toString() == lyrics[0] }?.let {
+                                it.centerX() == x && it.centerY() < y - moveBy / 2
+                            } == true
+                    }
+                    val draggedPosition = preferences.floatingSubtitlePosition
+                    tap(floatingCaptionBounds(lyrics[0]))
+                    val lock = floatingControlBounds(R.string.player_floating_subtitle_lock)
+                    val play = floatingControlBounds(R.string.player_play)
+                    val close = floatingControlBounds(R.string.player_floating_subtitle_close)
+                    assertTrue(lock.centerX() < play.centerX() && play.centerX() < close.centerX())
+                    assertTrue("Lock and Close flank the three transport buttons symmetrically",
+                        abs(lock.centerX() + close.centerX() - 2 * play.centerX()) <= 4)
+
+                    val defaultSize = preferences.floatingSubtitleStyle.fontSize
+                    tap(floatingControlBounds(R.string.player_floating_subtitle_larger))
+                    await("plus increases the persisted font size") { preferences.floatingSubtitleStyle.fontSize > defaultSize }
+                    tap(floatingControlBounds(R.string.player_floating_subtitle_smaller))
+                    await("minus restores the original font size") { preferences.floatingSubtitleStyle.fontSize == defaultSize }
+                    val colorPalette = floatingControlBounds(R.string.player_floating_subtitle_font_color)
+                    val backgroundPalette = floatingControlBounds(R.string.player_floating_subtitle_background_color)
+                    assertTrue(colorPalette.centerX() < backgroundPalette.centerX())
+                    assertEquals(colorPalette.centerY(), backgroundPalette.centerY())
+                    tap(colorPalette)
+                    setFloatingColorHex("#FF44CC88")
+                    await("confirming the color picker persists the custom color") {
+                        preferences.floatingSubtitleStyle.colorArgb == Color.rgb(0x44, 0xCC, 0x88)
+                    }
+                    tap(floatingControlBounds(R.string.player_floating_subtitle_background_color))
+                    val backgroundTitle = app.getString(R.string.player_floating_subtitle_background_color)
+                    awaitFloatingBounds(backgroundTitle) { it.text?.toString() == backgroundTitle }
+                    setFloatingColorHex("#66441199")
+                    await("confirming the background picker persists its custom RGB and opacity") {
+                        preferences.floatingSubtitleStyle.backgroundColorArgb == Color.argb(0x66, 0x44, 0x11, 0x99)
+                    }
+                    assertEquals(Color.rgb(0x44, 0xCC, 0x88), preferences.floatingSubtitleStyle.colorArgb)
+
+                    tap(floatingControlBounds(R.string.player_play))
+                    awaitState(model, "the window resumes native playback") { it.ready && it.playing }
+                    tap(floatingControlBounds(R.string.player_pause))
+                    awaitPaused(model)
+                    tap(floatingControlBounds(R.string.player_next))
+                    awaitState(model, "the window advances the same native queue") {
+                        it.currentTrack?.path == tracks[1].path && it.subtitleText == lyrics[1]
+                    }
+                    onMain { controller.transportControls.seekTo(0L) }
+                    awaitState(model, "previous will start from the beginning of the second track") { it.positionMs < 500L }
+                    openFloatingControlsIfClosed(lyrics[1])
+                    tap(floatingControlBounds(R.string.player_previous))
+                    awaitState(model, "the window returns to the previous track") {
+                        it.currentTrack?.path == tracks[0].path && it.subtitleText == lyrics[0]
+                    }
+
+                    openFloatingControlsIfClosed(lyrics[0])
+                    tap(floatingControlBounds(R.string.player_floating_subtitle_lock))
+                    await("locking keeps the caption visible and lets touches pass through") {
+                        preferences.floatingSubtitleLocked && floatingLyricWindow()?.contains("NOT_TOUCHABLE") == true
+                    }
+                    assertEquals(draggedPosition, preferences.floatingSubtitlePosition)
+
+                    onMain { preferences.floatingSubtitleLocked = false }
+                    await("unlocking restores touch support") {
+                        floatingLyricWindow()?.let { "NOT_TOUCHABLE" !in it } == true
+                    }
+                    tap(floatingCaptionBounds(lyrics[0]))
+                    tap(floatingControlBounds(R.string.player_floating_subtitle_close))
+                    await("Close turns off the preference and removes the window") {
+                        !preferences.floatingSubtitleEnabled && !isFloatingLyricOnScreen()
+                    }
+                    assertEquals(tracks[0].path, state(model).currentTrack?.path)
+                    assertEquals(controller.sessionToken, sessionToken())
+                    assertEquals(draggedPosition, preferences.floatingSubtitlePosition)
+                }
+            }
+        } finally {
+            onMain {
+                preferences.floatingSubtitleLocked = originalLocked
+                preferences.floatingSubtitleStyle = originalStyle
+                preferences.floatingSubtitlePosition = originalPosition
+            }
+            info.flags = originalFlags
+            automation.serviceInfo = info
+        }
+    }
+
     @Test fun systemControlsWorkWhileTheMainWindowIsBackgroundedAndScreenIsOff() = Fixture().use { f ->
         f.openMain(listOf(f.wav("background.wav"))).use { session ->
             val model = session.model
@@ -286,14 +543,15 @@ class PlayerMediaNotificationTest {
         val root = File(app.cacheDir, "player-media-notification-${System.nanoTime()}").apply { check(mkdirs()) }
         private val preferences = app.getSharedPreferences("player_settings", Context.MODE_PRIVATE)
         private val keys = listOf("player_mode_enabled", "default_play_mode", "default_speed", "resume_playback",
-            "eq_enabled", "show_loudness_waveform", "end_behavior_enabled")
+            "eq_enabled", "show_loudness_waveform", "end_behavior_enabled", "notification_lyrics", "floating_subtitle_enabled")
         private val saved = keys.associateWith { preferences.all[it] }
 
         init {
             assertTrue(preferences.edit().putBoolean("player_mode_enabled", audioMode)
                 .putString("default_play_mode", PlayerPlayMode.SEQUENCE.name).putFloat("default_speed", 1f)
                 .putBoolean("resume_playback", false).putBoolean("eq_enabled", false)
-                .putBoolean("show_loudness_waveform", false).putBoolean("end_behavior_enabled", false).commit())
+                .putBoolean("show_loudness_waveform", false).putBoolean("end_behavior_enabled", false)
+                .putBoolean("notification_lyrics", false).putBoolean("floating_subtitle_enabled", false).commit())
             await("previous media notification is cleaned up") { notification() == null }
         }
 
@@ -402,6 +660,71 @@ class PlayerMediaNotificationTest {
         instrumentation.uiAutomation.executeShellCommand(command).use { descriptor ->
             java.io.FileInputStream(descriptor.fileDescriptor).use { it.readBytes() }
         }
+    }
+
+    private fun floatingLyricWindow(): String? {
+        val dump = instrumentation.uiAutomation.executeShellCommand("dumpsys window windows").use { descriptor ->
+            java.io.FileInputStream(descriptor.fileDescriptor).bufferedReader().use { it.readText() }
+        }
+        return dump.split(Regex("(?m)^\\s*Window #\\d+ ")).firstOrNull { window ->
+            window.lineSequence().first().contains("PlayerFloatingSubtitle") &&
+                "package=${app.packageName} " in window && "isOnScreen=true" in window &&
+                ("ty=APPLICATION_OVERLAY" in window || "ty=2038" in window)
+        }
+    }
+
+    private fun isFloatingLyricOnScreen(): Boolean = floatingLyricWindow() != null
+
+    private fun tap(bounds: Rect) = shell("input tap ${bounds.centerX()} ${bounds.centerY()}")
+
+    private fun floatingCaptionBounds(text: String): Rect = awaitFloatingBounds(text) { it.text?.toString() == text }
+
+    private fun openFloatingControlsIfClosed(caption: String) {
+        val captionBounds = floatingCaptionBounds(caption)
+        val lockLabel = app.getString(R.string.player_floating_subtitle_lock)
+        if (floatingNodeBounds { it.contentDescription?.toString() == lockLabel } == null) tap(captionBounds)
+    }
+
+    private fun floatingControlBounds(@StringRes id: Int): Rect {
+        val description = app.getString(id)
+        return awaitFloatingBounds(description) { it.contentDescription?.toString() == description }
+    }
+
+    private fun setFloatingColorHex(hex: String) {
+        await("the existing color picker exposes an editable HEX value") {
+            floatingNode { it.isEditable && it.contentDescription?.toString() == "HEX" }
+                ?.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
+                    putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, hex)
+                }) == true
+        }
+        tap(awaitFloatingBounds("color confirmation") { it.text?.toString() == "确定" })
+    }
+
+    private fun awaitFloatingBounds(label: String, matches: (AccessibilityNodeInfo) -> Boolean): Rect {
+        var result: Rect? = null
+        await("floating window provides $label") {
+            result = floatingNodeBounds(matches)
+            result != null
+        }
+        return requireNotNull(result)
+    }
+
+    private fun floatingNodeBounds(matches: (AccessibilityNodeInfo) -> Boolean): Rect? =
+        floatingNode { matches(it) && !Rect().also(it::getBoundsInScreen).isEmpty }
+            ?.let { Rect().also(it::getBoundsInScreen) }
+
+    private fun floatingNode(matches: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
+        val automation = instrumentation.uiAutomation
+        if (Build.VERSION.SDK_INT >= 33) automation.clearCache()
+        val pending = ArrayDeque<AccessibilityNodeInfo>()
+        automation.windows.mapNotNull { it.root }
+            .filterTo(pending) { it.packageName?.toString() == app.packageName && it.refresh() }
+        while (pending.isNotEmpty()) {
+            val node = pending.removeFirst()
+            if (node.isVisibleToUser && matches(node)) return node
+            for (index in 0 until node.childCount) node.getChild(index)?.let(pending::addLast)
+        }
+        return null
     }
 
     private fun captureNotificationIfRequested() {

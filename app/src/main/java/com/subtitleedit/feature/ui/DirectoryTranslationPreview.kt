@@ -11,6 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -250,6 +251,7 @@ private fun MissingDirectoryTranslationModelsDialog(
 @Composable
 internal fun DirectoryTranslationButton(preview: DirectoryTranslationPreviewState, enabled: Boolean) {
     val supported = FoxletPageTranslation.isSupported
+    val colors = IconButtonDefaults.iconToggleButtonColors()
     val description = stringResource(when {
         !supported -> R.string.page_translation_unsupported
         preview.enabled -> R.string.page_translation_show_original
@@ -259,6 +261,10 @@ internal fun DirectoryTranslationButton(preview: DirectoryTranslationPreviewStat
         checked = preview.enabled,
         onCheckedChange = preview::setPreviewEnabled,
         enabled = enabled && supported,
+        // Keep the icon steady during directory loads and pager gestures while blocking taps.
+        colors = if (supported) colors.copy(
+            disabledContentColor = if (preview.enabled) colors.checkedContentColor else colors.contentColor,
+        ) else colors,
         modifier = Modifier.semantics { contentDescription = description },
     ) {
         if (preview.running) {

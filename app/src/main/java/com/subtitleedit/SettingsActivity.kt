@@ -8,6 +8,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import com.subtitleedit.player.PlayerPreferences
+import com.subtitleedit.player.PlayerSubtitleSettingsActivity
 import com.subtitleedit.ui.settings.SettingsScreen
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.FileUtils
@@ -26,6 +28,10 @@ class SettingsActivity : AppComposeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        val openPlayerSubtitleSettings: (() -> Unit)? =
+            if (PlayerPreferences.getInstance(this).playerModeEnabled) {
+                { open(PlayerSubtitleSettingsActivity::class.java) }
+            } else null
         setContent {
             val state by viewModel.state.collectAsState()
             SubtitleEditComposeTheme {
@@ -54,7 +60,8 @@ class SettingsActivity : AppComposeActivity() {
                     onCacheClear = viewModel::clearCache,
                     onEmptyCacheClear = viewModel::onEmptyCacheClear,
                     onBackup = { backupExporter.launch(getString(R.string.app_name) + ".json") },
-                    onRestore = { backupImporter.launch(arrayOf("application/json", "text/plain", "*/*")) }
+                    onRestore = { backupImporter.launch(arrayOf("application/json", "text/plain", "*/*")) },
+                    onOpenPlayerSubtitleSettings = openPlayerSubtitleSettings
                 )
             }
         }

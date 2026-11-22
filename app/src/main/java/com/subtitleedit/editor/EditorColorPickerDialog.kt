@@ -1,6 +1,8 @@
 package com.subtitleedit.editor
 
+import android.app.Activity
 import android.app.AlertDialog
+import android.content.Context
 import android.graphics.Color
 import android.graphics.Rect
 import android.text.Editable
@@ -17,23 +19,28 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import androidx.appcompat.app.AppCompatActivity
 import com.subtitleedit.util.SubtitleColorOps
 import kotlin.math.roundToInt
 
-internal class EditorColorPickerDialog(private val activity: AppCompatActivity) {
-    fun show(initialColor: Int, recentColors: List<Int>, onConfirm: (Int) -> Unit): AlertDialog {
+internal class EditorColorPickerDialog(private val context: Context) {
+    fun show(
+        initialColor: Int,
+        recentColors: List<Int>,
+        windowType: Int? = null,
+        title: CharSequence? = null,
+        onConfirm: (Int) -> Unit,
+    ): AlertDialog {
         var selectedColor = initialColor
         val hsv = FloatArray(3)
         Color.colorToHSV(initialColor, hsv)
         var updatingControls = false
         var dialogShown = false
         lateinit var dialog: AlertDialog
-        val wheel = ColorWheelView(activity)
-        val preview = ColorPreviewView(activity).apply { contentDescription = "当前颜色" }
-        val valueSlider = ColorGradientSliderView(activity).apply { contentDescription = "明度" }
+        val wheel = ColorWheelView(context)
+        val preview = ColorPreviewView(context).apply { contentDescription = "当前颜色" }
+        val valueSlider = ColorGradientSliderView(context).apply { contentDescription = "明度" }
         val channelSliders = List(4) { index ->
-            ColorGradientSliderView(activity).apply { contentDescription = CHANNEL_NAMES[index] }
+            ColorGradientSliderView(context).apply { contentDescription = CHANNEL_NAMES[index] }
         }
         val channelInputs = List(4) { index ->
             colorInput(CHANNEL_NAMES[index]).apply {
@@ -135,20 +142,20 @@ internal class EditorColorPickerDialog(private val activity: AppCompatActivity) 
         })
 
         val visibleFrame = Rect()
-        activity.window.decorView.getWindowVisibleDisplayFrame(visibleFrame)
-        val availableWidth = visibleFrame.width().takeIf { it > 0 } ?: activity.resources.displayMetrics.widthPixels
+        (context as? Activity)?.window?.decorView?.getWindowVisibleDisplayFrame(visibleFrame)
+        val availableWidth = visibleFrame.width().takeIf { it > 0 } ?: context.resources.displayMetrics.widthPixels
         val dialogWidth = minOf((availableWidth - dp(16)).coerceAtLeast(dp(120)), dp(640))
         val wide = dialogWidth - dp(48) >= dp(500)
         val wheelSize = minOf(dp(208), dialogWidth - dp(64)).coerceAtLeast(dp(48))
-        val root = LinearLayout(activity).apply {
+        val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(4), dp(12), dp(4))
         }
-        val main = LinearLayout(activity).apply {
+        val main = LinearLayout(context).apply {
             orientation = if (wide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
             gravity = Gravity.TOP
         }
-        val wheelColumn = LinearLayout(activity).apply {
+        val wheelColumn = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             addView(wheel, LinearLayout.LayoutParams(wheelSize, wheelSize))
@@ -157,14 +164,14 @@ internal class EditorColorPickerDialog(private val activity: AppCompatActivity) 
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ))
         }
-        val inputsColumn = LinearLayout(activity).apply {
+        val inputsColumn = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             channelSliders.forEachIndexed { index, slider ->
                 addView(sliderRow(CHANNEL_NAMES[index], slider, channelInputs[index]), LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
                 ))
             }
-            val hexRow = LinearLayout(activity).apply {
+            val hexRow = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 addView(label("HEX"), LinearLayout.LayoutParams(dp(40), ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -185,10 +192,10 @@ internal class EditorColorPickerDialog(private val activity: AppCompatActivity) 
         root.addView(main)
         val swatchesPerRow = if (wide) 8 else 4
         recentColors.take(8).chunked(swatchesPerRow).forEach { rowColors ->
-            val row = LinearLayout(activity).apply {
+            val row = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 rowColors.forEach { color ->
-                    addView(ColorPreviewView(activity).apply {
+                    addView(ColorPreviewView(context).apply {
                         this.color = color
                         contentDescription = "#${SubtitleColorOps.toArgbHex(color)}"
                         isClickable = true
@@ -197,25 +204,26 @@ internal class EditorColorPickerDialog(private val activity: AppCompatActivity) 
                     }, LinearLayout.LayoutParams(0, dp(48), 1f))
                 }
                 repeat(swatchesPerRow - rowColors.size) {
-                    addView(View(activity), LinearLayout.LayoutParams(0, dp(48), 1f))
+                    addView(View(context), LinearLayout.LayoutParams(0, dp(48), 1f))
                 }
             }
             root.addView(row, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ))
         }
-        val scroll = BoundedScrollView(activity).apply {
+        val scroll = BoundedScrollView(context).apply {
             isFillViewport = false
             addView(root, ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ))
         }
-        dialog = AlertDialog.Builder(activity)
-            .setTitle("选择颜色")
+        dialog = AlertDialog.Builder(context)
+            .setTitle(title ?: "选择颜色")
             .setView(scroll)
             .setPositiveButton("确定", null)
             .setNegativeButton("取消", null)
             .create()
+        windowType?.let { dialog.window?.setType(it) }
         dialog.setOnShowListener {
             dialogShown = true
             dialog.window?.apply {
@@ -251,7 +259,7 @@ internal class EditorColorPickerDialog(private val activity: AppCompatActivity) 
     }
 
     private fun sliderRow(labelText: String, slider: ColorGradientSliderView, input: EditText? = null): LinearLayout =
-        LinearLayout(activity).apply {
+        LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = dp(48)
@@ -263,13 +271,13 @@ internal class EditorColorPickerDialog(private val activity: AppCompatActivity) 
             ))
         }
 
-    private fun label(text: String): TextView = TextView(activity).apply {
+    private fun label(text: String): TextView = TextView(context).apply {
         this.text = text
         textSize = 15f
         gravity = Gravity.CENTER_VERTICAL
     }
 
-    private fun colorInput(description: String): EditText = EditText(activity).apply {
+    private fun colorInput(description: String): EditText = EditText(context).apply {
         contentDescription = description
         textSize = 15f
         isSingleLine = true
@@ -292,10 +300,10 @@ internal class EditorColorPickerDialog(private val activity: AppCompatActivity) 
         override fun afterTextChanged(s: Editable?) = action()
     }
 
-    private fun dp(value: Int) = (value * activity.resources.displayMetrics.density + 0.5f).toInt()
+    private fun dp(value: Int) = (value * context.resources.displayMetrics.density + 0.5f).toInt()
 
-    private class BoundedScrollView(activity: AppCompatActivity) : ScrollView(activity) {
-        var maximumHeight = activity.resources.displayMetrics.heightPixels
+    private class BoundedScrollView(context: Context) : ScrollView(context) {
+        var maximumHeight = context.resources.displayMetrics.heightPixels
             set(value) {
                 if (field != value) {
                     field = value

@@ -1,5 +1,6 @@
 package com.subtitleedit.player
 
+import android.app.AppOpsManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
 import android.graphics.drawable.Icon
 import android.media.MediaMetadata
 import android.media.AudioAttributes
@@ -17,6 +19,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import com.subtitleedit.MainActivity
 import com.subtitleedit.R
 import com.subtitleedit.library.MediaLibraryRepository
@@ -26,7 +29,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -44,9 +50,38 @@ class PlayerMediaNotificationService : Service() {
     private var notificationJob: Job? = null
     private var lastNotificationAtMs = 0L
     private var foreground = false
+    private lateinit var floatingSubtitleWindow: PlayerFloatingSubtitleWindow
+    private lateinit var appOps: AppOpsManager
+    private val overlayPermissionListener = AppOpsManager.OnOpChangedListener { _, _ ->
+        scope.launch { refreshFloatingSubtitle() }
+    }
+    private val preferences by lazy { PlayerPreferences.getInstance(this) }
+    private var floatingSubtitleObserver: Job? = null
+    private val floatingTrackTitle = MutableStateFlow<Pair<String, String>?>(null)
+
+    private data class FloatingCaption(val text: String?, val playback: PlayerFloatingSubtitlePlayback)
 
     override fun onCreate() {
         super.onCreate()
+        floatingSubtitleWindow = PlayerFloatingSubtitleWindow(
+            context = this,
+            initialPosition = preferences.floatingSubtitlePosition,
+            onPositionChanged = { preferences.floatingSubtitlePosition = it },
+            onAction = ::onFloatingSubtitleAction,
+            onColor = { target, color ->
+                preferences.floatingSubtitleStyle = preferences.floatingSubtitleStyle.withColor(target, color)
+            },
+            onFontSizeDelta = { delta ->
+                val style = preferences.floatingSubtitleStyle
+                preferences.floatingSubtitleStyle = style.copy(fontSize = style.fontSize + delta)
+            },
+        )
+        appOps = getSystemService(AppOpsManager::class.java)
+        try {
+            appOps.startWatchingMode(AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW, packageName, overlayPermissionListener)
+        } catch (error: SecurityException) {
+            Log.w("PlayerMediaNotification", "Unable to watch changes to overlay permission", error)
+        }
         manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL_ID,
             getString(R.string.player_media_notification_channel), NotificationManager.IMPORTANCE_LOW).apply {
@@ -98,7 +133,65 @@ class PlayerMediaNotificationService : Service() {
                 } else update(state)
             }
         }
+        if (floatingSubtitleObserver == null) floatingSubtitleObserver = scope.launch {
+            val captions = combine(PlayerMediaNotifications.state, floatingTrackTitle, ::floatingCaption)
+                .distinctUntilChanged()
+            combine(
+                captions,
+                preferences.floatingSubtitleEnabledChanges,
+                preferences.floatingSubtitleStyleChanges,
+                preferences.floatingSubtitleLockedChanges,
+            ) { caption, enabled, style, locked -> Triple(caption.takeIf { enabled }, style, locked) }
+                .collect { (caption, style, locked) -> updateFloatingSubtitle(caption, style, locked) }
+        }
         return START_NOT_STICKY
+    }
+
+    private fun floatingCaption(state: PlayerMediaNotificationState?, title: Pair<String, String>?): FloatingCaption? {
+        if (state == null || !state.floatingSubtitleAvailable) return null
+        return FloatingCaption(state.floatingSubtitleText, PlayerFloatingSubtitlePlayback(
+            title = title?.takeIf { it.first == state.track.path }?.second ?: state.track.name,
+            playing = state.playing,
+            hasPrevious = state.hasPrevious,
+            hasNext = state.hasNext,
+        ))
+    }
+
+    private fun refreshFloatingSubtitle() {
+        if (!foreground) return
+        val caption = floatingCaption(PlayerMediaNotifications.state.value, floatingTrackTitle.value)
+        updateFloatingSubtitle(
+            caption.takeIf { preferences.floatingSubtitleEnabled }, preferences.floatingSubtitleStyle, preferences.floatingSubtitleLocked,
+        )
+    }
+
+    private fun updateFloatingSubtitle(caption: FloatingCaption?, style: PlayerFloatingSubtitleStyle, locked: Boolean) {
+        if (foreground && caption != null) {
+            floatingSubtitleWindow.render(caption.text, style, caption.playback, locked)
+        } else {
+            floatingSubtitleWindow.hide()
+        }
+    }
+
+    private fun onFloatingSubtitleAction(action: PlayerFloatingSubtitleAction) {
+        if (!preferences.floatingSubtitleEnabled || preferences.floatingSubtitleLocked) return
+        when (action) {
+            PlayerFloatingSubtitleAction.LOCK -> preferences.floatingSubtitleLocked = true
+            PlayerFloatingSubtitleAction.CLOSE -> preferences.floatingSubtitleEnabled = false
+            PlayerFloatingSubtitleAction.PREVIOUS -> dispatch(PlayerMediaNotifications.ACTION_PREVIOUS)
+            PlayerFloatingSubtitleAction.NEXT -> dispatch(PlayerMediaNotifications.ACTION_NEXT)
+            PlayerFloatingSubtitleAction.PLAY_PAUSE -> current?.let {
+                dispatch(if (it.playing) PlayerMediaNotifications.ACTION_PAUSE else PlayerMediaNotifications.ACTION_PLAY)
+            }
+            PlayerFloatingSubtitleAction.TOGGLE_CONTROLS,
+            PlayerFloatingSubtitleAction.PICK_COLOR,
+            PlayerFloatingSubtitleAction.PICK_BACKGROUND_COLOR -> Unit
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        refreshFloatingSubtitle()
     }
 
     private fun dispatch(action: String) {
@@ -116,6 +209,7 @@ class PlayerMediaNotificationService : Service() {
         mediaSession.isActive = true
         if (changedTrack) {
             details = null
+            floatingTrackTitle.value = null
             metadataJob?.cancel()
             metadataJob = scope.launch {
                 observePlayerStoredMedia(state.track.path, MediaLibraryRepository.getInstance(applicationContext))
@@ -125,6 +219,7 @@ class PlayerMediaNotificationService : Service() {
                         }
                         if (current?.sessionId == state.sessionId && current?.track?.path == loaded.path) {
                             details = loaded
+                            floatingTrackTitle.value = loaded.path to loaded.title
                             updateMetadata()
                             publishNotification()
                         }
@@ -154,19 +249,31 @@ class PlayerMediaNotificationService : Service() {
         val state = current ?: return
         val info = details
         val duration = state.durationMs.takeIf { it > 0L } ?: info?.durationMs ?: 0L
-        val key = listOf(state.track.path, duration, info)
+        val lyric = state.lyricText.forMediaControls()
+        val key = listOf(state.track.path, duration, info, lyric)
         if (metadataKey == key) return
         metadataKey = key
+        val title = info?.title ?: state.track.name
+        val artist = info?.artist.orEmpty()
         mediaSession.setMetadata(MediaMetadata.Builder()
             .putString(MediaMetadata.METADATA_KEY_MEDIA_ID, state.track.path)
-            .putString(MediaMetadata.METADATA_KEY_TITLE, info?.title ?: state.track.name)
-            .putString(MediaMetadata.METADATA_KEY_ARTIST, info?.artist.orEmpty())
+            .putString(MediaMetadata.METADATA_KEY_TITLE, title)
+            // Android SystemUI uses the artist field for the secondary text of its media card.
+            .putString(MediaMetadata.METADATA_KEY_ARTIST, lyric ?: artist)
             .putString(MediaMetadata.METADATA_KEY_ALBUM, info?.album.orEmpty())
             .putLong(MediaMetadata.METADATA_KEY_DURATION, duration)
-            .apply { info?.artwork?.let {
-                putBitmap(MediaMetadata.METADATA_KEY_ART, it)
-                putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, it)
-            } }.build())
+            .apply {
+                if (lyric != null) {
+                    putString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE, title)
+                    putString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE, lyric)
+                    if (artist.isNotBlank()) putString(MediaMetadata.METADATA_KEY_DISPLAY_DESCRIPTION, artist)
+                    putString(ORIGINAL_ARTIST_KEY, artist)
+                }
+                info?.artwork?.let {
+                    putBitmap(MediaMetadata.METADATA_KEY_ART, it)
+                    putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, it)
+                }
+            }.build())
     }
 
     private fun publishNotification() {
@@ -189,7 +296,7 @@ class PlayerMediaNotificationService : Service() {
 
     private fun notificationKeyFor(state: PlayerMediaNotificationState): List<Any?> = listOf(
         state.sessionId, state.track.path, state.playing, state.ready, state.error,
-        state.hasPrevious, state.hasNext, details)
+        state.hasPrevious, state.hasNext, state.lyricText.forMediaControls(), details)
 
     private fun buildNotification(state: PlayerMediaNotificationState?): Notification {
         val info = details?.takeIf { it.path == state?.track?.path }
@@ -197,7 +304,7 @@ class PlayerMediaNotificationService : Service() {
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_music_note)
             .setContentTitle(info?.title ?: state?.track?.name ?: getString(R.string.app_name))
-            .setContentText(state?.error ?: info?.artist?.takeIf { it.isNotBlank() }
+            .setContentText(state?.error ?: state?.lyricText.forMediaControls() ?: info?.artist?.takeIf { it.isNotBlank() }
                 ?: info?.album?.takeIf { it.isNotBlank() } ?: getString(R.string.player_media_notification_channel))
             .setContentIntent(openPlayerIntent())
             .setCategory(Notification.CATEGORY_TRANSPORT)
@@ -236,6 +343,7 @@ class PlayerMediaNotificationService : Service() {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
     private fun clearNotification() {
+        floatingSubtitleWindow.hide()
         notificationJob?.cancel()
         metadataJob?.cancel()
         mediaSession.isActive = false
@@ -252,6 +360,7 @@ class PlayerMediaNotificationService : Service() {
     }
 
     override fun onDestroy() {
+        appOps.stopWatchingMode(overlayPermissionListener)
         scope.cancel()
         clearNotification()
         mediaSession.release()
@@ -261,5 +370,15 @@ class PlayerMediaNotificationService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private companion object { const val CHANNEL_ID = "audio_mode_playback" }
+    private fun String?.forMediaControls(): String? = this?.take(MAX_LYRIC_CHARS)?.lineSequence()
+        ?.map(String::trim)
+        ?.filter(String::isNotEmpty)
+        ?.joinToString(" ")
+        ?.takeIf(String::isNotEmpty)
+
+    private companion object {
+        const val CHANNEL_ID = "audio_mode_playback"
+        const val ORIGINAL_ARTIST_KEY = "com.subtitleedit.player.metadata.ORIGINAL_ARTIST"
+        const val MAX_LYRIC_CHARS = 500
+    }
 }

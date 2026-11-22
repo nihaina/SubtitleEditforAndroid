@@ -128,8 +128,10 @@ fun SettingsScreen(
     onCacheClear: (SettingsCacheItem) -> Unit,
     onEmptyCacheClear: (SettingsCacheItem) -> Unit,
     onBackup: () -> Unit,
-    onRestore: () -> Unit
+    onRestore: () -> Unit,
+    onOpenPlayerSubtitleSettings: (() -> Unit)? = null
 ) {
+    val isPlayerSettings = onOpenPlayerSubtitleSettings != null
     var showEncodingDialog by rememberSaveable { mutableStateOf(false) }
     var showThemeDialog by rememberSaveable { mutableStateOf(false) }
     var showCacheDialog by rememberSaveable { mutableStateOf(false) }
@@ -149,7 +151,7 @@ fun SettingsScreen(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(AppSpacing.Page),
         ) {
-            settingsGroupItems("appearance", 2, useMaterial3Visuals) { index ->
+            settingsGroupItems("appearance", if (isPlayerSettings) 3 else 2, useMaterial3Visuals) { index ->
                 when (index) {
                     0 -> SettingsPageRow(
                         useMaterial3Visuals = useMaterial3Visuals,
@@ -167,8 +169,18 @@ fun SettingsScreen(
                         iconRes = if (useMaterial3Visuals) R.drawable.ic_settings_moon else R.drawable.ic_theme_moon,
                         onClick = { showThemeDialog = true }
                     )
+                    2 -> onOpenPlayerSubtitleSettings?.let { openSettings ->
+                        SettingsPageRow(
+                            useMaterial3Visuals = useMaterial3Visuals,
+                            title = stringResource(R.string.player_subtitle_settings_title),
+                            iconRes = R.drawable.ic_subtitle_format,
+                            showArrow = true,
+                            onClick = openSettings
+                        )
+                    }
                 }
             }
+            if (isPlayerSettings) return@LazyColumn
             item(key = "appearance-gap", contentType = "group-gap") {
                 Spacer(Modifier.height(AppSpacing.CardGap * 2 + if (useMaterial3Visuals) 8.dp else 20.dp))
             }
@@ -331,7 +343,7 @@ fun SettingsScreen(
         }
     }
 
-    if (showBackupWarning) {
+    if (!isPlayerSettings && showBackupWarning) {
         AppDialog(
             onDismissRequest = { showBackupWarning = false },
             title = { Text(stringResource(R.string.settings_backup_warning_title)) },
@@ -384,6 +396,8 @@ fun SettingsScreen(
             }
         )
     }
+
+    if (isPlayerSettings) return
 
     if (showCacheDialog) {
         AppDialog(

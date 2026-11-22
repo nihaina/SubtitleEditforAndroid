@@ -20,6 +20,9 @@ import com.subtitleedit.library.SingerSortField
 import com.subtitleedit.player.PlayerEndBehavior
 import com.subtitleedit.player.PlayerActivity
 import com.subtitleedit.player.PlayerEqualizerState
+import com.subtitleedit.player.PlayerFloatingSubtitlePosition
+import com.subtitleedit.player.PlayerFloatingSubtitleStyle
+import com.subtitleedit.player.PlayerFloatingSubtitleWeight
 import com.subtitleedit.player.PlayerPlayMode
 import com.subtitleedit.player.PlayerPreferences
 import com.subtitleedit.player.PlayerQueueEndAction
@@ -96,17 +99,21 @@ class AudioModeSettingsBackupTest {
         }.toMap()
         categories.forEach { (role, options) -> MediaSingerPreferences(app, role).save(options) }
         player.saveLastPosition("/not-backed-up.wav", 12_345L)
+        player.floatingSubtitlePosition = PlayerFloatingSubtitlePosition(0.9f)
 
         val backup = exportAudioSettings()
         assertEquals(setOf("player", "albums", "singers", "artists", "composers", "genres"), backup.keySet())
-        assertEquals(15, backup.getJSONObject("player").length())
+        assertEquals(23, backup.getJSONObject("player").length())
         listOf("albums", "singers", "artists", "composers", "genres").forEach {
             assertEquals(9, backup.getJSONObject(it).length())
         }
         assertEquals("float", backup.getJSONObject("player").getJSONObject("default_speed").getString("type"))
         assertFalse(backup.toString().contains("last_position_"))
+        assertFalse(backup.toString().contains("floating_subtitle_position_"))
         preferenceNames.forEach { assertTrue(prefs(it).edit().clear().commit()) }
         player.saveLastPosition("/not-backed-up.wav", 98_765L)
+        val destinationPosition = PlayerFloatingSubtitlePosition(0.25f)
+        player.floatingSubtitlePosition = destinationPosition
 
         restoreAudioSettings(backup)
 
@@ -114,6 +121,7 @@ class AudioModeSettingsBackupTest {
         assertEquals(albumOptions, albums.load())
         categories.forEach { (role, options) -> assertEquals(role.name, options, MediaSingerPreferences(app, role).load()) }
         assertEquals(98_765L, player.lastPosition("/not-backed-up.wav"))
+        assertEquals(destinationPosition, PlayerPreferences(prefs("player_settings")).floatingSubtitlePosition)
     }
 
     @Test fun untouchedDefaultsAreExportedAndReplaceDifferentDestinationValues() {
@@ -125,6 +133,14 @@ class AudioModeSettingsBackupTest {
         assertEquals(20, defaults.value("player", "subtitle_font_size"))
         assertEquals(24, defaults.value("player", "audio_subtitle_line_spacing"))
         assertEquals("CENTER", defaults.value("player", "audio_subtitle_alignment"))
+        assertEquals(false, defaults.value("player", "floating_subtitle_enabled"))
+        assertEquals(false, defaults.value("player", "floating_subtitle_locked"))
+        assertEquals(20, defaults.value("player", "floating_subtitle_size"))
+        assertEquals(50, defaults.value("player", "floating_subtitle_left_margin"))
+        assertEquals("NORMAL", defaults.value("player", "floating_subtitle_weight"))
+        assertEquals(android.graphics.Color.WHITE, defaults.value("player", "floating_subtitle_color"))
+        assertEquals(0xCCFFFFFF.toInt(), defaults.value("player", "floating_subtitle_background_color"))
+        assertEquals(false, defaults.value("player", "notification_lyrics"))
         assertEquals("GRID", defaults.value("albums", "view_mode"))
         assertEquals(true, defaults.value("albums", "group_tracks"))
         setCustomPlayerSettings()
@@ -138,6 +154,10 @@ class AudioModeSettingsBackupTest {
         assertEquals(PlayerEndBehavior(), player.endBehavior)
         assertEquals(1f, player.defaultSpeed, 0f)
         assertEquals(PlayerEqualizerState(), player.equalizer)
+        assertEquals(PlayerFloatingSubtitleStyle(), player.floatingSubtitleStyle)
+        assertFalse(player.floatingSubtitleEnabled)
+        assertFalse(player.floatingSubtitleLocked)
+        assertFalse(player.notificationsShowLyrics)
         assertEquals(MediaAlbumViewOptions(), albums.load())
         MediaCreditRole.entries.forEach { assertEquals(MediaSingerViewOptions(), MediaSingerPreferences(app, it).load()) }
     }
@@ -150,6 +170,23 @@ class AudioModeSettingsBackupTest {
 
         assertEquals(before, exportAudioSettings().toString())
         assertCustomPlayerSettings()
+    }
+
+    @Test fun olderFloatingSubtitleAlignmentAndVerticalPositionStillLoad() {
+        val raw = prefs("player_settings")
+        assertTrue(raw.edit()
+            .putString("floating_subtitle_alignment", "LEFT")
+            .putFloat("floating_subtitle_position_x", .8f)
+            .putFloat("floating_subtitle_position_y", .3f)
+            .commit())
+        assertEquals(0, player.floatingSubtitleStyle.leftMarginPercent)
+        assertEquals(PlayerFloatingSubtitlePosition(.3f), player.floatingSubtitlePosition)
+
+        player.floatingSubtitleStyle = player.floatingSubtitleStyle.copy(leftMarginPercent = 63)
+        restoreAudioSettings(JSONObject().put("player", JSONObject()
+            .put("floating_subtitle_alignment", typed("string", "RIGHT"))))
+        assertEquals(100, player.floatingSubtitleStyle.leftMarginPercent)
+        assertEquals(PlayerFloatingSubtitlePosition(.3f), player.floatingSubtitlePosition)
     }
 
     @Test fun partialBackupMergesOnlyKnownCorrectlyTypedKeysInTheirOwnGroup() {
@@ -276,6 +313,10 @@ class AudioModeSettingsBackupTest {
         player.subtitleFontSize = 32
         player.audioSubtitleLineSpacing = 40
         player.audioSubtitleAlignment = PlayerSubtitleAlignment.LEFT
+        player.floatingSubtitleEnabled = true
+        player.floatingSubtitleLocked = true
+        player.floatingSubtitleStyle = customizedFloatingSubtitle
+        player.notificationsShowLyrics = true
         player.resumePlayback = false
         player.showLoudnessWaveform = false
     }
@@ -290,9 +331,21 @@ class AudioModeSettingsBackupTest {
         assertEquals(32, player.subtitleFontSize)
         assertEquals(40, player.audioSubtitleLineSpacing)
         assertEquals(PlayerSubtitleAlignment.LEFT, player.audioSubtitleAlignment)
+        assertTrue(player.floatingSubtitleEnabled)
+        assertTrue(player.floatingSubtitleLocked)
+        assertEquals(customizedFloatingSubtitle, player.floatingSubtitleStyle)
+        assertTrue(player.notificationsShowLyrics)
         assertFalse(player.resumePlayback)
         assertFalse(player.showLoudnessWaveform)
     }
+
+    private val customizedFloatingSubtitle = PlayerFloatingSubtitleStyle(
+        fontSize = 27,
+        leftMarginPercent = 73,
+        weight = PlayerFloatingSubtitleWeight.BOLD,
+        colorArgb = android.graphics.Color.CYAN,
+        backgroundColorArgb = 0x80441199.toInt(),
+    )
 
     private fun prefs(name: String): SharedPreferences = app.getSharedPreferences(name, Context.MODE_PRIVATE)
     private fun exportAudioSettings(): JSONObject = JSONObject(SettingsBackupManager.export(app)).getJSONObject("audioModeSettings")

@@ -11,7 +11,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -63,7 +62,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
@@ -277,41 +275,6 @@ private fun LoudnessBar(height: Float) {
                 .clip(RoundedCornerShape(3.dp))
                 .background(PlayerColors.accentBrush)
         )
-    }
-}
-
-/** Floating subtitle cue for audio playback; mpv renders subtitles itself for video. */
-@Composable
-internal fun PlayerSubtitleOverlay(
-    text: String,
-    fontSize: Int,
-    modifier: Modifier = Modifier,
-    lineSpacing: Int = PlayerPreferences.DEFAULT_AUDIO_SUBTITLE_LINE_SPACING,
-    alignment: PlayerSubtitleAlignment = PlayerSubtitleAlignment.CENTER
-) {
-    AnimatedVisibility(
-        visible = text.isNotBlank(),
-        modifier = modifier,
-        enter = fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.94f),
-        exit = fadeOut(tween(180))
-    ) {
-        Box(Modifier.fillMaxWidth().padding(horizontal = 28.dp), contentAlignment = when (alignment) {
-            PlayerSubtitleAlignment.LEFT -> Alignment.CenterStart
-            PlayerSubtitleAlignment.CENTER -> Alignment.Center
-            PlayerSubtitleAlignment.RIGHT -> Alignment.CenterEnd
-        }) {
-            Text(
-                text = text,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(PlayerColors.Surface.copy(alpha = 0.94f))
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                color = PlayerColors.OnDark,
-                style = playerAudioSubtitleTextStyle(fontSize, lineSpacing, alignment),
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
     }
 }
 

@@ -9,14 +9,23 @@ import androidx.compose.runtime.InternalComposeTracingApi
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.subtitleedit.R
 import com.subtitleedit.model.BrowserFileMetadata
+import com.subtitleedit.translation.FoxletPageTranslation
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -73,9 +82,55 @@ class MainPageRecompositionTest {
         assertEquals(0, count("MainBottomBar"))
     }
 
+    @Test fun translateIconKeepsItsAppearanceWhileTheNextDirectoryLoads() {
+        val state = showPage(withTranslation = true)
+        val button = translationButton()
+        if (FoxletPageTranslation.isSupported) button.assertIsEnabled()
+        val before = button.captureToImage().asAndroidBitmap()
+        compose.runOnIdle {
+            state.value = state.value.copy(isDirectoryLoading = true, isDirectoryNavigationPending = true)
+        }
+        button.assertIsDisplayed().assertIsNotEnabled()
+        assertTrue(before.sameAs(button.captureToImage().asAndroidBitmap()))
+
+        compose.runOnIdle {
+            state.value = state.value.copy(
+                currentDirectory = File("/next"), files = emptyList(), fileMetadata = emptyMap(),
+                isDirectoryLoading = false, isDirectoryNavigationPending = false,
+            )
+        }
+        button.assertIsDisplayed()
+        if (FoxletPageTranslation.isSupported) button.assertIsEnabled()
+    }
+
+    @Test fun translateButtonSlidesWithTheDirectoryToolbarDuringADrag() {
+        showPage(withTranslation = true)
+        val button = translationButton().assertIsDisplayed()
+        val restingPosition = button.fetchSemanticsNode().boundsInRoot
+        val pager = compose.onNodeWithTag("main-page-pager")
+        pager.performTouchInput {
+            down(Offset(width * .8f, height * .6f))
+            moveBy(Offset(-width * .09f, 0f), 250L)
+        }
+        button.assertIsDisplayed().assertIsNotEnabled()
+        assertTrue(button.fetchSemanticsNode().boundsInRoot.left < restingPosition.left)
+
+        pager.performTouchInput {
+            moveBy(Offset(width * .09f, 0f), 250L)
+            up()
+        }
+        button.assertIsDisplayed()
+        assertEquals(restingPosition, button.fetchSemanticsNode().boundsInRoot)
+        if (FoxletPageTranslation.isSupported) button.assertIsEnabled()
+    }
+
+    private fun translationButton() = compose.onNodeWithContentDescription(compose.activity.getString(
+        if (FoxletPageTranslation.isSupported) R.string.page_translation_show_preview else R.string.page_translation_unsupported
+    ))
+
     private fun count(function: String) = calls.entries.filter { it.key.endsWith(".$function") }.sumOf { it.value.get() }
 
-    private fun showPage(): MutableState<MainActivityScreenState> {
+    private fun showPage(withTranslation: Boolean = false): MutableState<MainActivityScreenState> {
         val files = (0 until 30).map { File("/scope/Track $it.srt") }
         val state = mutableStateOf(MainActivityScreenState(
             currentDirectory = File("/scope"), files = files,
@@ -103,6 +158,7 @@ class MainPageRecompositionTest {
                         mainDialog = null, onDismissMainDialog = {}, onPermissionDialogConfirm = {}, onRenameConfirm = {},
                         batchRename = null, onDismissBatchRename = {}, onBatchRenameConfirm = {}, onBatchRenameOrderChanged = {},
                         onDeleteBatchRenameHistory = {}, onDeleteConfirm = {}, onCacheItemSelected = {}, onCacheClearConfirm = {},
+                        onOpenPageTranslation = if (withTranslation) ({}) else null,
                     )
                 }
             }

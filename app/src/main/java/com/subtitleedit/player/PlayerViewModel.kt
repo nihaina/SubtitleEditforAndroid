@@ -121,6 +121,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
     val expanded: StateFlow<Boolean> = _expanded.asStateFlow()
     private val _outputSuspended = MutableStateFlow(false)
     val outputSuspended: StateFlow<Boolean> = _outputSuspended.asStateFlow()
+    private val _detailedLyricsInForeground = MutableStateFlow(false)
+    val detailedLyricsInForeground = _detailedLyricsInForeground.asStateFlow()
     private val _outputGeneration = MutableStateFlow(0L)
     val outputGeneration: StateFlow<Long> = _outputGeneration.asStateFlow()
     private var mediaNotifications: PlayerMediaNotificationConnection? = null
@@ -1178,6 +1180,10 @@ internal class PlayerViewModel @JvmOverloads constructor(
     }
 
     fun toggleLyrics() = setLyricsVisible(!_state.value.lyricsVisible)
+
+    fun setDetailedLyricsInForeground(visible: Boolean) {
+        _detailedLyricsInForeground.value = visible
+    }
 
     fun setLyricsVisible(visible: Boolean) {
         if (_state.value.isVideo) return

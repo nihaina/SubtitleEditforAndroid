@@ -40,6 +40,31 @@
     <string name="player_preset_night">夜间</string>
 
     <string name="player_subtitle_off">关闭字幕</string>
+    <string name="player_subtitle_settings_title">字幕调整</string>
+    <string name="player_floating_subtitle_title">悬浮窗字幕</string>
+    <string name="player_floating_subtitle_description">授予悬浮窗权限后，可在桌面显示当前音频字幕</string>
+    <string name="player_floating_subtitle_adjustments">悬浮窗调整</string>
+    <string name="player_floating_subtitle_lock">锁定字幕</string>
+    <string name="player_floating_subtitle_lock_description">锁定后，悬浮字幕无法拖动或点击调整</string>
+    <string name="player_floating_subtitle_close">关闭悬浮窗字幕</string>
+    <string name="player_floating_subtitle_fold">收起悬浮窗控制</string>
+    <string name="player_floating_subtitle_smaller">减小字幕字号</string>
+    <string name="player_floating_subtitle_larger">增大字幕字号</string>
+    <string name="player_floating_subtitle_permission_unavailable">无法打开悬浮窗权限设置</string>
+    <string name="player_floating_subtitle_preview">悬浮窗字幕预览</string>
+    <string name="player_floating_subtitle_font_size_value">%1$d sp</string>
+    <string name="player_floating_subtitle_font_weight">字体粗细</string>
+    <string name="player_floating_subtitle_weight_light">细体</string>
+    <string name="player_floating_subtitle_weight_normal">常规</string>
+    <string name="player_floating_subtitle_weight_medium">中等</string>
+    <string name="player_floating_subtitle_weight_bold">粗体</string>
+    <string name="player_floating_subtitle_font_color">字体颜色</string>
+    <string name="player_floating_subtitle_left_margin">左边距</string>
+    <string name="player_floating_subtitle_background_color">悬浮窗底色</string>
+    <string name="player_floating_subtitle_background_opacity">底色不透明度</string>
+    <string name="player_floating_subtitle_percent">%1$d%%</string>
+    <string name="player_notification_lyrics_title">通知栏字幕</string>
+    <string name="player_notification_lyrics_description">播放音频时向系统媒体控件推送当前歌词</string>
 
     <string name="player_bookmark_add">添加当前书签</string>
     <string name="player_bookmark_empty">还没有书签，播放中点书签按钮即可标记</string>

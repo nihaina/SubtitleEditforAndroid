@@ -34,6 +34,7 @@ import com.subtitleedit.ui.collectRetainedPageState
 import com.subtitleedit.library.MediaLibraryFileObserver
 import com.subtitleedit.ui.showLibraryError
 import com.subtitleedit.model.FileBrowserViewMode
+import com.subtitleedit.player.PlayerSubtitleSettingsActivity
 import com.subtitleedit.ui.ToolDestination
 import com.subtitleedit.ui.ToolsScreen
 import com.subtitleedit.ui.settings.SettingsCacheItem
@@ -331,8 +332,8 @@ internal fun MainTopLevelPages(
         }
     }
 
-    LaunchedEffect(selectedPage, activePage, refreshVersion, resources, state.settingsCacheRefreshVersion) {
-        if (!isActive || selectedPage != R.id.nav_settings) return@LaunchedEffect
+    LaunchedEffect(selectedPage, activePage, refreshVersion, resources, state.settingsCacheRefreshVersion, playerModeEnabled) {
+        if (!isActive || selectedPage != R.id.nav_settings || playerModeEnabled) return@LaunchedEffect
         val cacheItems = withContext(Dispatchers.IO) {
             val job = currentCoroutineContext()
             settingsCacheItems(context, readSettingsCacheSizes(context.cacheDir) { job.ensureActive() })
@@ -536,7 +537,10 @@ internal fun MainTopLevelPages(
             onCacheClear = ::clearCache,
             onEmptyCacheClear = ::clearCache,
             onBackup = { backupExporter.launch(context.getString(R.string.app_name) + ".json") },
-            onRestore = { backupImporter.launch(arrayOf("application/json", "text/plain", "*/*")) }
+            onRestore = { backupImporter.launch(arrayOf("application/json", "text/plain", "*/*")) },
+            onOpenPlayerSubtitleSettings = if (playerModeEnabled) {
+                { context.openActivity(PlayerSubtitleSettingsActivity::class.java) }
+            } else null
         )
     }
     }

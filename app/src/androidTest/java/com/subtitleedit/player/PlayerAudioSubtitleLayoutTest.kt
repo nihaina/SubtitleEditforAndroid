@@ -9,6 +9,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
@@ -19,7 +20,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -35,6 +38,44 @@ import kotlin.math.abs
 @RunWith(AndroidJUnit4::class)
 class PlayerAudioSubtitleLayoutTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun floatingCaptionMovesContinuouslyBetweenLeftAndRightMargins() {
+        val style = mutableStateOf(PlayerFloatingSubtitleStyle())
+        val caption = "Current lyric"
+        compose.setContent {
+            SubtitleEditComposeTheme {
+                Surface(Modifier.requiredSize(340.dp, 180.dp)) {
+                    PlayerFloatingSubtitle(caption, style.value)
+                }
+            }
+        }
+        fun setMargin(percent: Int): Float {
+            compose.runOnIdle { style.value = style.value.copy(leftMarginPercent = percent) }
+            val result = mutableListOf<TextLayoutResult>()
+            val captionNode = compose.onNodeWithTag("player-floating-subtitle-text").assertIsDisplayed().assertTextEquals(caption)
+            captionNode
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(result) }
+            val layout = result.single()
+            assertEquals(28.sp, layout.layoutInput.style.fontSize)
+            assertEquals(FontWeight.Bold, layout.layoutInput.style.fontWeight)
+            assertEquals(Color.Yellow, layout.layoutInput.style.color)
+            return captionNode.fetchSemanticsNode().boundsInRoot.left
+        }
+
+        compose.runOnIdle {
+            assertEquals(50, style.value.leftMarginPercent)
+            style.value = style.value.copy(fontSize = 28, weight = PlayerFloatingSubtitleWeight.BOLD,
+                colorArgb = android.graphics.Color.YELLOW)
+        }
+        val left = setMargin(0)
+        val quarter = setMargin(25)
+        val center = setMargin(50)
+        val right = setMargin(100)
+        assertTrue(left < quarter && quarter < center && center < right)
+        val positions = "0%=$left, 25%=$quarter, 50%=$center, 100%=$right"
+        assertEquals(positions, left + (right - left) * .25f, quarter, 2f)
+        assertEquals(positions, (left + right) / 2f, center, 2f)
+    }
 
     @Test fun alignmentMovesGlyphsWithoutChangingTheSubtitleOrItsFullWidthRow() {
         val alignment = mutableStateOf(PlayerSubtitleAlignment.CENTER)

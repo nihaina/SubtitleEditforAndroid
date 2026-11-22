@@ -31,6 +31,23 @@ class PlayerLyricsHiddenControlsTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val app get() = instrumentation.targetContext
 
+    @Test fun audioPlayerLeavesFloatingCaptionsToTheSystemWindow() = withPlayer { session ->
+        val model = session.model
+        onMain { model.seekTo(5_250L) }
+        awaitState(model, "seek updates the current lyric") { it.subtitleText.contains("Lyric context line 10") }
+        assertNull(findTag("player-floating-subtitle"))
+
+        onMain { model.setLyricsVisible(true) }
+        await("opening detailed lyrics still renders the in-app list") {
+            findTag("player-lyrics-list") != null && findTag("player-floating-subtitle") == null
+        }
+
+        onMain { model.setLyricsVisible(false) }
+        await("closing detailed lyrics leaves no duplicate in-app caption") {
+            findTag("player-lyrics-list") == null && findTag("player-floating-subtitle") == null
+        }
+    }
+
     @Test fun enteringLyricsFromHiddenArtworkAndReturningKeepControlsHidden() = withPlayer { session ->
         val model = session.model
         onMain { model.setControlsVisible(false) }

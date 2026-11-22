@@ -23,7 +23,10 @@ internal data class PlayerMediaNotificationState(
     val error: String?,
     val speed: Float,
     val hasPrevious: Boolean,
-    val hasNext: Boolean
+    val hasNext: Boolean,
+    val lyricText: String? = null,
+    val floatingSubtitleText: String? = null,
+    val floatingSubtitleAvailable: Boolean = false,
 )
 
 /** One main-window session owns the notification; no Activity or second mpv engine is created. */
@@ -112,22 +115,35 @@ internal class PlayerMediaNotificationConnection(
     scope: CoroutineScope
 ) {
     private val app = context.applicationContext
+    private val preferences = PlayerPreferences.getInstance(app)
     private var active = false
     private var sessionId = 0L
     private val job: Job = scope.launch {
-        combine(model.state, model.outputSuspended) { _, _ ->
+        combine(
+            model.state, model.outputSuspended, preferences.notificationLyricsChanges, model.detailedLyricsInForeground,
+        ) { _, _, showLyrics, _ ->
             val state = model.state.value
             val suspended = model.outputSuspended.value
             val track = state.currentTrack
-            if (suspended || track == null || !PlayerPreferences.getInstance(app).playerModeEnabled) {
+            if (suspended || track == null || !preferences.playerModeEnabled) {
                 active = false
                 null
             } else {
                 if (!active) sessionId = PlayerMediaNotifications.newSessionId()
                 active = true
+                val subtitle = state.subtitleText.takeIf {
+                    !track.isVideo && state.ready && state.error == null &&
+                        state.selectedSubtitleId != "none" && it.isNotBlank()
+                }
+                val floatingSubtitleAvailable = !track.isVideo && state.error == null &&
+                    !(state.lyricsVisible && model.detailedLyricsInForeground.value)
                 PlayerMediaNotificationState(sessionId, track, state.positionMs,
                     state.durationMs, state.playing, state.ready, state.error, state.speed,
-                    state.hasPrevious, state.hasNext)
+                    state.hasPrevious, state.hasNext,
+                    lyricText = subtitle.takeIf { showLyrics },
+                    floatingSubtitleText = subtitle.takeIf { floatingSubtitleAvailable },
+                    floatingSubtitleAvailable = floatingSubtitleAvailable,
+                )
             }
         }.distinctUntilChanged { old, new ->
             old != null && new != null && old.copy(positionMs = 0L) == new.copy(positionMs = 0L) &&

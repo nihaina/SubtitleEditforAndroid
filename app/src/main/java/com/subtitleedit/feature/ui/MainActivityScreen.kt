@@ -350,8 +350,8 @@ internal fun MainActivityScreen(
                     },
                     onSearchRequested = onSearchRequested,
                     onOpenFileManagementSettings = onOpenFileManagementSettings,
-                    directoryTitleAction = if (directoryTranslation != null && isDirectoryPage && pageActive) {
-                        { DirectoryTranslationButton(directoryTranslation, canTranslateDirectory) }
+                    directoryTitleAction = if (directoryTranslation != null && isDirectoryPage) {
+                        { DirectoryTranslationButton(directoryTranslation, enabled = pageActive && canTranslateDirectory) }
                     } else null,
                 )
 
