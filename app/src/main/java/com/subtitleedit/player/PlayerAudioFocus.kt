@@ -9,42 +9,58 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import androidx.core.content.ContextCompat
 
-/** Pauses on competing audio or unplugged headphones; registration lasts only while playing. */
-internal class PlayerAudioFocus(context: Context, private val onInterrupted: (Boolean) -> Unit) {
+/** Manages audio focus and stops playback on headphone disconnect in either playback mode. */
+internal class PlayerAudioFocus(context: Context, private val onInterrupted: () -> Unit) {
     private val app = context.applicationContext
     private val audio = app.getSystemService(AudioManager::class.java)
-    private var held = false
+    private var focusRequest: AudioFocusRequest? = null
     private var registered = false
     private val noisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) onInterrupted(true)
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) onInterrupted()
         }
     }
-    private val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-        .setAudioAttributes(AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_MEDIA)
-            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
-        .setOnAudioFocusChangeListener { change ->
-            if (change == AudioManager.AUDIOFOCUS_LOSS ||
-                change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT ||
-                change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) onInterrupted(true)
-        }
+    private val attributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
         .build()
 
-    fun request(): Boolean {
-        if (held) return true
-        held = audio.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-        if (held && !registered) {
+    fun request(allowConcurrentPlayback: Boolean): Boolean {
+        if (allowConcurrentPlayback) abandonFocus()
+        else if (focusRequest == null && !requestFocus()) return false
+        if (!registered) {
             ContextCompat.registerReceiver(app, noisyReceiver,
                 IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), ContextCompat.RECEIVER_NOT_EXPORTED)
             registered = true
         }
-        return held
+        return true
+    }
+
+    fun updatePolicy(allowConcurrentPlayback: Boolean) {
+        if (registered && !request(allowConcurrentPlayback)) onInterrupted()
+    }
+
+    private fun requestFocus(): Boolean {
+        lateinit var request: AudioFocusRequest
+        request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(attributes)
+            .setOnAudioFocusChangeListener { change ->
+                if (focusRequest === request && change < 0) onInterrupted()
+            }
+            .build()
+        if (audio.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return false
+        focusRequest = request
+        return true
+    }
+
+    private fun abandonFocus() {
+        val request = focusRequest ?: return
+        focusRequest = null
+        audio.abandonAudioFocusRequest(request)
     }
 
     fun abandon() {
-        if (held) audio.abandonAudioFocusRequest(request)
-        held = false
+        abandonFocus()
         if (registered) {
             app.unregisterReceiver(noisyReceiver)
             registered = false

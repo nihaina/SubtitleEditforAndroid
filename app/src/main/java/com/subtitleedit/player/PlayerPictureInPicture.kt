@@ -3,6 +3,7 @@ package com.subtitleedit.player
 import android.app.Activity
 import android.app.PictureInPictureParams
 import android.content.pm.PackageManager
+import android.graphics.Rect
 import android.util.Rational
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
@@ -15,6 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.core.app.PictureInPictureModeChangedInfo
 import androidx.core.util.Consumer
 import com.subtitleedit.R
+import kotlin.math.roundToInt
 
 @Composable
 internal fun rememberPlayerPictureInPicture(): Boolean {
@@ -37,16 +39,25 @@ internal fun rememberPlayerPictureInPictureAction(viewModel: PlayerViewModel): (
     return remember(activity, viewModel) {
         {
             val state = viewModel.state.value
-            if (state.showsVideo && state.ready && !activity.enterPlayerPictureInPicture()) {
+            if (state.showsVideo && state.ready &&
+                !activity.enterPlayerPictureInPicture(viewModel.pictureInPictureSourceRect())) {
                 viewModel.hint(R.string.player_picture_in_picture_unavailable)
             }
         }
     }
 }
 
-private fun Activity.enterPlayerPictureInPicture(): Boolean {
+private fun Activity.enterPlayerPictureInPicture(sourceRect: Rect?): Boolean {
     if (isFinishing || isDestroyed) return false
-    val params = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()
+    val params = PictureInPictureParams.Builder().apply {
+        if (sourceRect != null) {
+            val aspect = (sourceRect.width().toDouble() / sourceRect.height()).coerceIn(0.42, 2.38)
+            setAspectRatio(Rational((aspect * 10_000).roundToInt(), 10_000))
+            setSourceRectHint(sourceRect)
+        } else {
+            setAspectRatio(Rational(16, 9))
+        }
+    }.build()
     return try {
         enterPictureInPictureMode(params)
     } catch (_: IllegalStateException) {

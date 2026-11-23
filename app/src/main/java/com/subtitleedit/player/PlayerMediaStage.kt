@@ -1,5 +1,6 @@
 package com.subtitleedit.player
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
@@ -10,6 +11,7 @@ import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -29,7 +31,8 @@ internal fun PlayerMediaStage(
     onArtworkBoundsChanged: ((Rect?) -> Unit)? = null
 ) {
     val state by viewModel.state.collectAsState()
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(modifier.fillMaxSize().then(if (state.showsVideo) Modifier.background(Color.Black) else Modifier),
+        contentAlignment = Alignment.Center) {
         // This node must never be keyed by the track, expanded state or animation progress.
         AndroidView(
             factory = { context -> PlayerMpvView(context).also(viewModel::attach) },

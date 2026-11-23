@@ -133,12 +133,19 @@ internal class PlayerViewModel @JvmOverloads constructor(
     private val _outputGeneration = MutableStateFlow(0L)
     val outputGeneration: StateFlow<Long> = _outputGeneration.asStateFlow()
     private var mediaNotifications: PlayerMediaNotificationConnection? = null
+    private var mainPlayerConnected = false
     private var mainSessionStore: MainPlayerSessionStore? = null
     private var savedMainSession: MainPlayerSession? = null
 
-    fun connectMediaNotifications() {
-        if (mediaNotifications == null) mediaNotifications =
-            PlayerMediaNotificationConnection(getApplication(), this, viewModelScope)
+    fun connectMainPlayer() {
+        if (mainPlayerConnected) return
+        mainPlayerConnected = true
+        mediaNotifications = PlayerMediaNotificationConnection(getApplication(), this, viewModelScope)
+        viewModelScope.launch {
+            preferences.allowConcurrentPlaybackChanges.collect {
+                audioFocus.updatePolicy(preferences.allowConcurrentPlayback)
+            }
+        }
     }
 
     private var engine: PlayerEngine? = null
@@ -172,9 +179,10 @@ internal class PlayerViewModel @JvmOverloads constructor(
     private val listening = PlayerListeningTracker()
     private data class HistoryProgress(val playbackId: String, val positionMs: Long, val durationMs: Long)
     private var lastHistoryProgress: HistoryProgress? = null
-    private val audioFocus = PlayerAudioFocus(application) { interrupted ->
-        if (interrupted) pause()
-    }
+    private val audioFocus = PlayerAudioFocus(application, ::pause)
+
+    private fun requestPlaybackAudioFocus(): Boolean =
+        audioFocus.request(mainPlayerConnected && preferences.allowConcurrentPlayback)
     private val timerAlarm = PlayerTimerAlarm(application) { tickTimers() }
     private val libraryController = PlayerLibraryController(
         application = application,
@@ -434,6 +442,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
         }
     }
 
+    fun pictureInPictureSourceRect() = host?.pictureInPictureSourceRect()
+
     fun detach(view: PlayerMpvView) {
         if (host !== view) return
         cancelNextQueue()
@@ -463,7 +473,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
             playOnAttach = true
             return
         }
-        if (!audioFocus.request()) return
+        if (!requestPlaybackAudioFocus()) return
         playOnAttach = true
         if (_state.value.error != null) {
             loadCurrent(resume = false, autoplay = true)
@@ -805,7 +815,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
             trackContainedPlaylistIds = emptySet()
         )
         refreshFavorite()
-        val shouldPlay = autoplay && audioFocus.request()
+        val shouldPlay = autoplay && requestPlaybackAudioFocus()
         if (!shouldPlay) audioFocus.abandon()
         playOnAttach = shouldPlay
         saveMainSession(saved)
@@ -877,7 +887,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         naturalEnd: Boolean = true) {
         cancelNextQueue()
         if (!naturalEnd) cancelScheduledStart()
-        if (autoplay && !audioFocus.request()) { pause(); return }
+        if (autoplay && !requestPlaybackAudioFocus()) { pause(); return }
         rememberPosition()
         stopListening()
         playOnAttach = false

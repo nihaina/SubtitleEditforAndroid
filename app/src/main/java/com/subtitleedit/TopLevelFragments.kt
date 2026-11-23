@@ -34,6 +34,7 @@ import com.subtitleedit.ui.collectRetainedPageState
 import com.subtitleedit.library.MediaLibraryFileObserver
 import com.subtitleedit.ui.showLibraryError
 import com.subtitleedit.model.FileBrowserViewMode
+import com.subtitleedit.player.PlayerPreferences
 import com.subtitleedit.player.PlayerSubtitleSettingsActivity
 import com.subtitleedit.ui.ToolDestination
 import com.subtitleedit.ui.ToolsScreen
@@ -512,6 +513,10 @@ internal fun MainTopLevelPages(
                 state.settingsPage = state.settingsPage.copy(hardwareDecodingEnabled = enabled)
                 settings.setHardwareDecodingEnabled(enabled)
             },
+            onAllowConcurrentPlaybackChanged = { enabled ->
+                state.settingsPage = state.settingsPage.copy(allowConcurrentPlayback = enabled)
+                PlayerPreferences.getInstance(context).allowConcurrentPlayback = enabled
+            },
             onOpenAiSettings = { context.openActivity(AiSettingsActivity::class.java) },
             onOpenModelManagement = { context.openActivity(ModelManagementActivity::class.java) },
             onOpenPageTranslation = { context.openActivity(PageTranslationSettingsActivity::class.java) },
@@ -655,6 +660,7 @@ private fun loadSettingsPage(
         loopSelectedSubtitle = settings.isLoopSelectedSubtitleEnabled(),
         selectPlayingSubtitle = settings.isSelectPlayingSubtitleEnabled(),
         hardwareDecodingEnabled = settings.isHardwareDecodingEnabled(),
+        allowConcurrentPlayback = PlayerPreferences.getInstance(context).allowConcurrentPlayback,
         cacheItems = cacheItems
     )
 }

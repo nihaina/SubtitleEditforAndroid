@@ -30,7 +30,7 @@ internal class MainPlayerController(
     }
     init {
         PlayerOutputHandoff.addListener(playbackOwnerChanged)
-        viewModel.connectMediaNotifications()
+        viewModel.connectMainPlayer()
     }
     private val audioManager = activity.getSystemService(AudioManager::class.java)
     private var outputDeviceIds: Set<Int>? = null

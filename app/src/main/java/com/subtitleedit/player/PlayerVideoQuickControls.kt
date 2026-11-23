@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 
 private val QuickControlBackground = Color(0xDD1B1B1B)
+private val QuickControlDisabledIcon = Color.White.copy(alpha = 0.38f)
 
 @Composable
 internal fun PlayerVideoQuickControls(
@@ -42,7 +43,7 @@ internal fun PlayerVideoQuickControls(
                 containerColor = QuickControlBackground,
                 contentColor = Color.White,
                 disabledContainerColor = QuickControlBackground,
-                disabledContentColor = Color.White.copy(alpha = 0.38f)
+                disabledContentColor = QuickControlDisabledIcon
             )
         ) {
             QuickControlIcon(R.drawable.ic_player_picture_in_picture, R.string.player_picture_in_picture)
@@ -90,6 +91,8 @@ private fun QuickControlToggle(
         colors = IconButtonDefaults.filledIconToggleButtonColors(
             containerColor = QuickControlBackground,
             contentColor = Color.White,
+            disabledContainerColor = QuickControlBackground,
+            disabledContentColor = QuickControlDisabledIcon,
             checkedContainerColor = Color.White,
             checkedContentColor = Color.Black
         )

@@ -2,6 +2,8 @@ package com.subtitleedit.player
 
 import android.content.Context
 import android.content.res.Resources
+import android.graphics.Point
+import android.graphics.Rect
 import android.graphics.SurfaceTexture
 import android.util.AttributeSet
 import android.util.TypedValue
@@ -11,6 +13,7 @@ import com.subtitleedit.mpv.MPVLib
 import com.subtitleedit.mpv.MpvPlayerHost
 import com.subtitleedit.mpv.MpvVideoDecoding
 import com.subtitleedit.util.SubtitleFontManager
+import kotlin.math.roundToInt
 
 /** Player output can disappear/reappear without stopping audio or deferring a media load. */
 internal class PlayerMpvView @JvmOverloads constructor(
@@ -101,12 +104,33 @@ internal class PlayerMpvView @JvmOverloads constructor(
         outputWidth = width
         outputHeight = height
         if (initialized && videoOutputEnabled && outputSurface != null && sizeChanged) {
-            // Recreate the EGL output so a paused frame also gets a correctly sized buffer.
-            // Updating android-surface-size alone leaves the old native buffer stretched.
-            MPVLib.setPropertyString("vo", "null")
+            // mpv resizes the existing EGL output and redraws its current frame.
             updateSurfaceSize()
-            MPVLib.setPropertyString("vo", "gpu-next")
         }
+    }
+
+    fun pictureInPictureSourceRect(): Rect? = synchronized(outputLock) {
+        if (!initialized || !videoOutputEnabled || outputSurface == null || width <= 0 || height <= 0) {
+            return@synchronized null
+        }
+        val visible = Rect()
+        val globalOrigin = Point()
+        if (!getGlobalVisibleRect(visible, globalOrigin)) return@synchronized null
+        val osdWidth = MPVLib.getPropertyInt("osd-dimensions/w")?.takeIf { it > 0 } ?: return@synchronized null
+        val osdHeight = MPVLib.getPropertyInt("osd-dimensions/h")?.takeIf { it > 0 } ?: return@synchronized null
+        val left = MPVLib.getPropertyInt("osd-dimensions/ml") ?: return@synchronized null
+        val right = MPVLib.getPropertyInt("osd-dimensions/mr") ?: return@synchronized null
+        val top = MPVLib.getPropertyInt("osd-dimensions/mt") ?: return@synchronized null
+        val bottom = MPVLib.getPropertyInt("osd-dimensions/mb") ?: return@synchronized null
+        val origin = IntArray(2).also(::getLocationOnScreen)
+        visible.offset(origin[0] - globalOrigin.x, origin[1] - globalOrigin.y)
+        val scaleX = width.toFloat() / osdWidth
+        val scaleY = height.toFloat() / osdHeight
+        Rect(
+            origin[0] + (left * scaleX).roundToInt(), origin[1] + (top * scaleY).roundToInt(),
+            origin[0] + ((osdWidth - right) * scaleX).roundToInt(),
+            origin[1] + ((osdHeight - bottom) * scaleY).roundToInt()
+        ).takeIf { it.intersect(visible) }
     }
 
     override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean = synchronized(outputLock) {

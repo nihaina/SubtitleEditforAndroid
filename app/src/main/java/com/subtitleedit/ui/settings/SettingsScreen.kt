@@ -85,7 +85,8 @@ data class SettingsPageState(
     val loopSelectedSubtitle: Boolean = false,
     val selectPlayingSubtitle: Boolean = false,
     val cacheItems: List<SettingsCacheItem> = emptyList(),
-    val hardwareDecodingEnabled: Boolean = true
+    val hardwareDecodingEnabled: Boolean = true,
+    val allowConcurrentPlayback: Boolean = false
 )
 
 data class SettingsCacheItem(
@@ -132,7 +133,8 @@ fun SettingsScreen(
     onEmptyCacheClear: (SettingsCacheItem) -> Unit,
     onBackup: () -> Unit,
     onRestore: () -> Unit,
-    onOpenPlayerSubtitleSettings: (() -> Unit)? = null
+    onOpenPlayerSubtitleSettings: (() -> Unit)? = null,
+    onAllowConcurrentPlaybackChanged: (Boolean) -> Unit = {}
 ) {
     val isPlayerSettings = onOpenPlayerSubtitleSettings != null
     var showEncodingDialog by rememberSaveable { mutableStateOf(false) }
@@ -145,10 +147,16 @@ fun SettingsScreen(
         item(key = "editor-heading", contentType = "heading") {
             SectionHeader(stringResource(R.string.activity_settings_text_09), Modifier.padding(bottom = AppSpacing.CardGap))
         }
-        val count = if (isPlayerSettings) 1 else 3
+        val count = if (isPlayerSettings) 2 else 3
         settingsGroupItems("editor", count, useMaterial3Visuals) { index ->
             when {
-                index == count - 1 -> SettingsPageSwitchRow(
+                isPlayerSettings && index == 1 -> SettingsPageSwitchRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
+                    title = stringResource(R.string.player_allow_concurrent_playback),
+                    checked = state.allowConcurrentPlayback,
+                    onCheckedChange = onAllowConcurrentPlaybackChanged
+                )
+                isPlayerSettings || index == 2 -> SettingsPageSwitchRow(
                     useMaterial3Visuals = useMaterial3Visuals,
                     title = stringResource(R.string.settings_hardware_decoding),
                     checked = state.hardwareDecodingEnabled,

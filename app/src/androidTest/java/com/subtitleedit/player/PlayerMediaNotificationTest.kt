@@ -10,6 +10,9 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Point
 import android.graphics.Rect
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSession
@@ -599,7 +602,7 @@ class PlayerMediaNotificationTest {
         }
     }
 
-    @Test fun restartingAudioModeRestoresTheSelectedQueueEntryAndPositionPaused() = Fixture(resumePlayback = true).use { f ->
+    @Test fun restartingAudioModeRestoresTheSelectedQueueEntryAndPositionPaused(): Unit = Fixture(resumePlayback = true).use { f ->
         val repeated = f.wav("repeated.wav")
         val queue = listOf(repeated, f.wav("other.wav"), repeated)
         val paths = queue.map { it.path }
@@ -655,11 +658,46 @@ class PlayerMediaNotificationTest {
         }
     }
 
+    @Test fun concurrentPlaybackReleasesAudioFocusAndRestoresItWhenDisabled() = Fixture().use { f ->
+        val preferences = PlayerPreferences.getInstance(app)
+        val audio = app.getSystemService(AudioManager::class.java)
+        val competitorLostFocus = AtomicBoolean(false)
+        val competitor = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build())
+            .setOnAudioFocusChangeListener { if (it < 0) competitorLostFocus.set(true) }
+            .build()
+        f.openMain(listOf(f.wav("concurrent.wav"))).use { session ->
+            val model = session.model
+            fun requestCompetingFocus() = assertEquals(AudioManager.AUDIOFOCUS_REQUEST_GRANTED,
+                mainValue { audio.requestAudioFocus(competitor) })
+
+            try {
+                requestCompetingFocus()
+                awaitPaused(model)
+
+                onMain { preferences.allowConcurrentPlayback = true; model.play() }
+                val startedAt = state(model).positionMs
+                awaitState(model, "audio advances alongside the competing focus owner") {
+                    it.playing && it.positionMs > startedAt + 500L
+                }
+                assertFalse("Starting playback leaves the other client focused", competitorLostFocus.get())
+
+                onMain { preferences.allowConcurrentPlayback = false }
+                await("disabling concurrent playback reclaims focus") { competitorLostFocus.get() }
+                requestCompetingFocus()
+                awaitPaused(model)
+            } finally {
+                onMain { audio.abandonAudioFocusRequest(competitor) }
+            }
+        }
+    }
+
     private inner class Fixture(audioMode: Boolean = true, resumePlayback: Boolean = false) : Closeable {
         val root = File(app.cacheDir, "player-media-notification-${System.nanoTime()}").apply { check(mkdirs()) }
         private val preferences = app.getSharedPreferences("player_settings", Context.MODE_PRIVATE)
         private val keys = listOf("player_mode_enabled", "default_play_mode", "default_speed", "resume_playback",
-            "eq_enabled", "show_loudness_waveform", "end_behavior_enabled", "notification_lyrics", "floating_subtitle_enabled")
+            "eq_enabled", "show_loudness_waveform", "end_behavior_enabled", "notification_lyrics", "floating_subtitle_enabled",
+            "allow_concurrent_playback")
         private val saved = keys.associateWith { preferences.all[it] }
         private val sessionPreferences = app.getSharedPreferences("main_player_session", Context.MODE_PRIVATE)
         private val savedSession = sessionPreferences.getString("session", null)
@@ -672,6 +710,7 @@ class PlayerMediaNotificationTest {
                 .putString("default_play_mode", PlayerPlayMode.SEQUENCE.name).putFloat("default_speed", 1f)
                 .putBoolean("resume_playback", resumePlayback).putBoolean("eq_enabled", false)
                 .putBoolean("show_loudness_waveform", false).putBoolean("end_behavior_enabled", false)
+                .putBoolean("allow_concurrent_playback", false)
                 .putBoolean("notification_lyrics", false).putBoolean("floating_subtitle_enabled", false).commit())
             await("previous media notification is cleaned up") { notification() == null }
         }

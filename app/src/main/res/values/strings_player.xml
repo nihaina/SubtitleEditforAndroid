@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="player_mode_title">音声模式</string>
+    <string name="player_allow_concurrent_playback">允许与其他应用同时播放</string>
     <string name="player_mode_enabled">音声模式已开启：点击音视频直接进入播放</string>
     <string name="player_mode_disabled">音声模式已关闭：点击音视频进入编辑器</string>
     <string name="player_online_title">在线</string>

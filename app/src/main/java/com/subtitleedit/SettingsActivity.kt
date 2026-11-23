@@ -62,7 +62,8 @@ class SettingsActivity : AppComposeActivity() {
                     onEmptyCacheClear = viewModel::onEmptyCacheClear,
                     onBackup = { backupExporter.launch(getString(R.string.app_name) + ".json") },
                     onRestore = { backupImporter.launch(arrayOf("application/json", "text/plain", "*/*")) },
-                    onOpenPlayerSubtitleSettings = openPlayerSubtitleSettings
+                    onOpenPlayerSubtitleSettings = openPlayerSubtitleSettings,
+                    onAllowConcurrentPlaybackChanged = viewModel::setAllowConcurrentPlayback
                 )
             }
         }

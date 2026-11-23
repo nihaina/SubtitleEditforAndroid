@@ -104,11 +104,13 @@ class AudioModeSettingsBackupTest {
 
         val backup = exportAudioSettings()
         assertEquals(setOf("player", "albums", "singers", "artists", "composers", "genres"), backup.keySet())
-        assertEquals(34, backup.getJSONObject("player").length())
+        assertEquals(35, backup.getJSONObject("player").length())
         listOf("albums", "singers", "artists", "composers", "genres").forEach {
             assertEquals(9, backup.getJSONObject(it).length())
         }
         assertEquals("float", backup.getJSONObject("player").getJSONObject("default_speed").getString("type"))
+        assertEquals("boolean", backup.getJSONObject("player").getJSONObject("allow_concurrent_playback").getString("type"))
+        assertEquals(true, backup.value("player", "allow_concurrent_playback"))
         assertFalse(backup.toString().contains("last_position_"))
         assertFalse(backup.toString().contains("floating_subtitle_position_"))
         preferenceNames.forEach { assertTrue(prefs(it).edit().clear().commit()) }
@@ -128,6 +130,7 @@ class AudioModeSettingsBackupTest {
     @Test fun untouchedDefaultsAreExportedAndReplaceDifferentDestinationValues() {
         val defaults = exportAudioSettings()
         assertEquals(false, defaults.value("player", "player_mode_enabled"))
+        assertEquals(false, defaults.value("player", "allow_concurrent_playback"))
         assertEquals(true, defaults.value("player", "resume_playback"))
         assertEquals(true, defaults.value("player", "show_loudness_waveform"))
         assertEquals(1.0, defaults.getJSONObject("player").getJSONObject("default_speed").getDouble("value"), 0.0)
@@ -159,6 +162,7 @@ class AudioModeSettingsBackupTest {
         restoreAudioSettings(defaults)
 
         assertFalse(player.playerModeEnabled)
+        assertFalse(player.allowConcurrentPlayback)
         assertEquals(PlayerPlayMode.REPEAT_ALL, player.defaultPlayMode)
         assertEquals(PlayerEndBehavior(), player.endBehavior)
         assertEquals(1f, player.defaultSpeed, 0f)
@@ -325,6 +329,7 @@ class AudioModeSettingsBackupTest {
 
     private fun setCustomPlayerSettings() {
         player.playerModeEnabled = true
+        player.allowConcurrentPlayback = true
         player.savePlaybackBehavior(PlayerPlayMode.SHUFFLE, PlayerEndBehavior(
             enabled = true, trackAction = PlayerTrackEndAction.LOAD_NEXT_PAUSED,
             queueAction = PlayerQueueEndAction.NEXT_QUEUE, wrapQueues = true, reshuffle = false
@@ -345,6 +350,7 @@ class AudioModeSettingsBackupTest {
 
     private fun assertCustomPlayerSettings() {
         assertTrue(player.playerModeEnabled)
+        assertTrue(player.allowConcurrentPlayback)
         assertEquals(PlayerPlayMode.SHUFFLE, player.defaultPlayMode)
         assertEquals(PlayerEndBehavior(true, PlayerTrackEndAction.LOAD_NEXT_PAUSED,
             PlayerQueueEndAction.NEXT_QUEUE, true, false), player.endBehavior)

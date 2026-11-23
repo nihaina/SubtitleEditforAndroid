@@ -114,6 +114,7 @@ internal fun PlayerScreen(
 ) {
     if (embedded && inPictureInPicture) return
     val state by viewModel.state.collectAsState()
+    val videoAudioMode = state.isVideo && state.audioMode
     val acceptsInput = interactionsEnabled && !inPictureInPicture
     if (embedded && acceptsInput && !state.showsVideo && state.lyricsVisible) {
         LifecycleResumeEffect(viewModel) {
@@ -133,11 +134,11 @@ internal fun PlayerScreen(
     var audioEdgeBounds by remember { mutableStateOf<Rect?>(null) }
     var videoEdgeBounds by remember { mutableStateOf<Rect?>(null) }
     var expandedAudioTopInset by remember(configuration.screenWidthDp, configuration.screenHeightDp,
-        landscape, configuration.fontScale, density.density) {
+        landscape, configuration.fontScale, density.density, state.isVideo) {
         mutableStateOf<Float?>(null)
     }
     var expandedAudioBottomInset by remember(configuration.screenWidthDp, configuration.screenHeightDp,
-        landscape, configuration.fontScale, density.density) {
+        landscape, configuration.fontScale, density.density, state.isVideo) {
         mutableStateOf<Float?>(null)
     }
     var gestureOrigin by remember { mutableStateOf(Offset.Zero) }
@@ -158,8 +159,10 @@ internal fun PlayerScreen(
     val audioButtonBottomPadding = expandedAudioBottomInset?.let {
         with(density) { it.coerceAtLeast(0f).toDp() }
     } ?: if (landscape) 132.dp else 204.dp
-    val audioContentTopPadding = if (state.controlsVisible) audioButtonTopPadding else 0.dp
-    val audioContentBottomPadding = if (state.controlsVisible) audioButtonBottomPadding else 0.dp
+    // A video keeps its audio content in the same viewport while the controls fade.
+    val reserveControlsSpace = state.controlsVisible || videoAudioMode
+    val audioContentTopPadding = if (reserveControlsSpace) audioButtonTopPadding else 0.dp
+    val audioContentBottomPadding = if (reserveControlsSpace) audioButtonBottomPadding else 0.dp
     BackHandler(enabled = embedded && acceptsInput && onCollapse != null && !state.controlsLocked &&
         state.panel == PlayerPanel.NONE && !state.showTrackInfoDialog && !state.showPlaylistPickerDialog && !state.showEndBehaviorDialog) {
         onCollapse?.invoke()
@@ -180,7 +183,7 @@ internal fun PlayerScreen(
                 .onGloballyPositioned { gestureOrigin = it.positionInRoot(); playerHeightPx = it.size.height }
                 .then(when {
                     embedded -> Modifier
-                    inPictureInPicture -> Modifier.background(Color.Black)
+                    inPictureInPicture || state.showsVideo -> Modifier.background(Color.Black)
                     else -> Modifier.background(pageGradient)
                 })
                 .then(if (acceptsInput) Modifier else Modifier
@@ -303,9 +306,14 @@ internal fun PlayerScreen(
             }
             if (inPictureInPicture) return@Box
             if (!state.showsVideo) {
-                Box(Modifier.fillMaxSize().then(
-                    if (!embedded || state.isVideo || state.lyricsVisible) Modifier.background(pageGradient) else Modifier
-                ), contentAlignment = Alignment.Center) {
+                PlayerAudioContent(
+                    modifier = Modifier.fillMaxSize().then(when {
+                        videoAudioMode -> Modifier.background(PlayerColors.VideoAudioBackground)
+                        !embedded || state.lyricsVisible -> Modifier.background(pageGradient)
+                        else -> Modifier
+                    }),
+                    videoAudioMode = videoAudioMode
+                ) {
                     key(state.currentTrack?.path) {
                         if (state.lyricsVisible) {
                             key(state.selectedSubtitleId) {
@@ -361,15 +369,16 @@ internal fun PlayerScreen(
                 modifier = Modifier.align(Alignment.Center)
             )
 
-            if (!state.isVideo && state.panel == PlayerPanel.NONE &&
-                !state.showTrackInfoDialog && !state.showPlaylistPickerDialog && !state.showEndBehaviorDialog) {
-                if (!state.controlsVisible && playerHeightPx > 0 &&
-                    (expandedAudioTopInset == null || expandedAudioBottomInset == null)) {
-                    MeasurePlayerAudioControls(state, viewModel, landscape) { topHeight, bottomHeight ->
-                        expandedAudioTopInset = topHeight.toFloat()
-                        expandedAudioBottomInset = bottomHeight.toFloat()
-                    }
+            val showAudioControlsToggle = !state.isVideo && state.panel == PlayerPanel.NONE &&
+                !state.showTrackInfoDialog && !state.showPlaylistPickerDialog && !state.showEndBehaviorDialog
+            if ((videoAudioMode || showAudioControlsToggle) && !state.controlsVisible && playerHeightPx > 0 &&
+                (expandedAudioTopInset == null || expandedAudioBottomInset == null)) {
+                MeasurePlayerAudioControls(state, viewModel, landscape) { topHeight, bottomHeight ->
+                    expandedAudioTopInset = topHeight.toFloat()
+                    expandedAudioBottomInset = bottomHeight.toFloat()
                 }
+            }
+            if (showAudioControlsToggle) {
                 Box(Modifier.fillMaxSize().padding(top = audioButtonTopPadding, bottom = audioButtonBottomPadding)) {
                     PlayerAudioControlsToggle(
                         controlsVisible = state.controlsVisible,
@@ -404,26 +413,9 @@ internal fun PlayerScreen(
             ) {
                 PlayerControlOverlay(state.isVideo, top = true, onBoundsChanged = {
                     topOverlayBounds = it
-                    if (it != null && !state.showsVideo) expandedAudioTopInset = it.bottom - gestureOrigin.y
+                    if (it != null) expandedAudioTopInset = it.bottom - gestureOrigin.y
                 }) {
-                    if (state.isVideo) {
-                        Column(Modifier.windowInsetsPadding(playerTopCutoutInsets(landscape))) {
-                            PlayerTopBar(state, viewModel, landscape, onCollapse)
-                            PlayerVideoQuickControls(
-                                pictureInPictureEnabled = onEnterPictureInPicture != null && state.showsVideo && state.ready,
-                                muted = state.muted,
-                                mirrored = state.mirrored,
-                                audioMode = state.audioMode,
-                                onPictureInPicture = { onEnterPictureInPicture?.invoke() },
-                                onToggleMute = viewModel::toggleMute,
-                                onToggleMirror = viewModel::toggleMirror,
-                                onToggleAudioMode = viewModel::toggleAudioMode,
-                                modifier = Modifier.padding(start = 8.dp)
-                            )
-                        }
-                    } else {
-                        PlayerTopBar(state, viewModel, landscape, onCollapse)
-                    }
+                    PlayerTopControls(state, viewModel, landscape, onCollapse, onEnterPictureInPicture)
                 }
             }
 
@@ -435,7 +427,7 @@ internal fun PlayerScreen(
             ) {
                 PlayerControlOverlay(state.isVideo, top = false, onBoundsChanged = {
                     bottomOverlayBounds = it
-                    if (it != null && !state.showsVideo) expandedAudioBottomInset = playerHeightPx - it.top + gestureOrigin.y
+                    if (it != null) expandedAudioBottomInset = playerHeightPx - it.top + gestureOrigin.y
                 }) {
                     PlayerControls(state, viewModel, landscape)
                 }
@@ -509,7 +501,7 @@ private fun MeasurePlayerAudioControls(
 ) {
     SubcomposeLayout { constraints ->
         val barConstraints = constraints.copy(minHeight = 0)
-        val top = subcompose("top") { PlayerTopBar(state, viewModel, landscape) }
+        val top = subcompose("top") { PlayerTopControls(state, viewModel, landscape) }
             .single().measure(barConstraints)
         val bottom = subcompose("bottom") { PlayerControls(state, viewModel, landscape) }
             .single().measure(barConstraints)
@@ -560,6 +552,34 @@ private const val AXIS_VOLUME = 1
 private fun playerTopCutoutInsets(landscape: Boolean): WindowInsets =
     if (landscape) WindowInsets(0, 0, 0, 0)
     else WindowInsets.displayCutout.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+
+@Composable
+private fun PlayerTopControls(
+    state: PlayerUiState,
+    viewModel: PlayerViewModel,
+    landscape: Boolean,
+    onCollapse: (() -> Unit)? = null,
+    onEnterPictureInPicture: (() -> Unit)? = null
+) {
+    if (!state.isVideo) {
+        PlayerTopBar(state, viewModel, landscape, onCollapse)
+        return
+    }
+    Column(Modifier.windowInsetsPadding(playerTopCutoutInsets(landscape))) {
+        PlayerTopBar(state, viewModel, landscape, onCollapse)
+        PlayerVideoQuickControls(
+            pictureInPictureEnabled = onEnterPictureInPicture != null && state.showsVideo && state.ready,
+            muted = state.muted,
+            mirrored = state.mirrored,
+            audioMode = state.audioMode,
+            onPictureInPicture = { onEnterPictureInPicture?.invoke() },
+            onToggleMute = viewModel::toggleMute,
+            onToggleMirror = viewModel::toggleMirror,
+            onToggleAudioMode = viewModel::toggleAudioMode,
+            modifier = Modifier.padding(start = 8.dp)
+        )
+    }
+}
 
 @Composable
 private fun PlayerTopBar(

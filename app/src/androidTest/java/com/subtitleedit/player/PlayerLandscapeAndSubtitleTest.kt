@@ -1,10 +1,12 @@
 package com.subtitleedit.player
 
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -12,20 +14,25 @@ import android.graphics.Rect
 import android.os.SystemClock
 import android.os.Build
 import android.util.TypedValue
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.lifecycle.ViewModelProvider
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.ReturnCode
+import com.subtitleedit.MainActivity
 import com.subtitleedit.library.MediaLibraryRepository
 import com.subtitleedit.mpv.MPVLib
 import com.subtitleedit.util.SettingsManager
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.Closeable
@@ -171,16 +178,8 @@ class PlayerLandscapeAndSubtitleTest {
 
     @Test fun videoQuickControlsKeepPlaybackAndSubtitlesOnTheSameSession() {
         Fixture("video-quick-controls").use { fixture ->
-            val video = File(fixture.root, "video.mp4")
-            val subtitle = File(fixture.root, "video.srt").apply {
-                writeText("1\n00:00:00,000 --> 00:00:04,000\nFirst line\n\n2\n00:00:04,000 --> 00:00:19,500\nSecond line\n")
-            }
-            val generated = FFmpegKit.executeWithArguments(arrayOf(
-                "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=10:duration=20",
-                "-f", "lavfi", "-i", "sine=frequency=440:duration=20",
-                "-c:v", "mpeg4", "-c:a", "aac", video.path
-            ))
-            assertTrue(generated.getAllLogsAsString().takeLast(2000), ReturnCode.isSuccess(generated.getReturnCode()))
+            val video = fixture.videoWithSubtitles()
+            val subtitle = File(fixture.root, "video.srt")
             openPlayer(video).use { session ->
                 session.rotate(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, Configuration.ORIENTATION_PORTRAIT)
                 val model = session.model
@@ -235,6 +234,72 @@ class PlayerLandscapeAndSubtitleTest {
         }
     }
 
+    @Test fun videoAudioModeUsesDarkBackgroundAndKeepsContentStillAsControlsFade() {
+        Fixture("video-audio-mode-layout", preserveQueue = true).use { fixture ->
+            openPlayer(fixture.videoWithSubtitles()).use { session ->
+                session.rotate(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, Configuration.ORIENTATION_PORTRAIT)
+                val model = session.model
+                awaitState(model, "video is ready") { it.ready }
+                onMain { model.pause(); model.seekTo(2_000L) }
+                awaitState(model, "video is paused on its first subtitle") {
+                    !it.playing && it.positionMs in 1_850L..2_150L && it.subtitleText == "First line"
+                }
+                clickTag("player-video-audio-mode")
+                assertAudioModeControlsDoNotMoveContent(model)
+
+                clickTag("player-video-audio-note")
+                awaitState(model, "detailed subtitles are open") { it.lyricsVisible }
+                automation.waitForIdle(100L, 2_000L)
+                val lyrics = requiredBounds("player-lyrics-list")
+                onMain { model.setControlsVisible(false) }
+                await("the controls fade while detailed subtitles stay open") { boundsOrNull("player-bottom-overlay") == null }
+                assertEquals(lyrics, requiredBounds("player-lyrics-list"))
+                onMain { model.setControlsVisible(true) }
+                requiredBounds("player-bottom-overlay")
+                assertEquals(lyrics, requiredBounds("player-lyrics-list"))
+            }
+        }
+    }
+
+    private fun assertAudioModeControlsDoNotMoveContent(model: PlayerViewModel) {
+        val note = requiredBounds("player-video-audio-note")
+        val caption = requiredBounds("player-video-audio-subtitle")
+        val viewport = requiredBounds("player-screen")
+        val x = viewport.left + viewport.width() / 8
+        val y = note.centerY()
+        val screenshot = automation.takeScreenshot() ?: throw AssertionError("No audio-mode screenshot")
+        try {
+            val pixel = screenshot.getPixel(x, y)
+            assertTrue("Video audio mode uses a dark backdrop for its white controls",
+                maxOf(Color.red(pixel), Color.green(pixel), Color.blue(pixel)) < 64)
+        } finally { screenshot.recycle() }
+
+        tapPicture(x, y)
+        await("the video controls fade out") {
+            !state(model).controlsVisible && boundsOrNull("player-top-overlay") == null &&
+                boundsOrNull("player-bottom-overlay") == null
+        }
+        assertEquals("Hiding controls leaves the note in place", note, requiredBounds("player-video-audio-note"))
+        assertEquals("Hiding controls leaves the caption in place", caption, requiredBounds("player-video-audio-subtitle"))
+
+        tapPicture(x, y)
+        awaitState(model, "the video controls are visible again") { it.controlsVisible }
+        requiredBounds("player-top-overlay")
+        requiredBounds("player-bottom-overlay")
+        assertEquals("Showing controls leaves the note in place", note, requiredBounds("player-video-audio-note"))
+        assertEquals("Showing controls leaves the caption in place", caption, requiredBounds("player-video-audio-subtitle"))
+    }
+
+    private fun tapPicture(x: Int, y: Int) {
+        val downAt = SystemClock.uptimeMillis()
+        for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+            val event = MotionEvent.obtain(downAt, SystemClock.uptimeMillis(), action, x.toFloat(), y.toFloat(), 0)
+            event.source = InputDevice.SOURCE_TOUCHSCREEN
+            try { assertTrue("Inject audio mode picture tap", automation.injectInputEvent(event, true)) }
+            finally { event.recycle() }
+        }
+    }
+
     @Test fun hardwareDecodingFollowsTheSharedSettingOnTheSameVideo() {
         val settings = SettingsManager.getInstance(app)
         val preferences = app.getSharedPreferences("subtitle_edit_settings", Context.MODE_PRIVATE)
@@ -273,6 +338,92 @@ class PlayerLandscapeAndSubtitleTest {
                 PlayerLibraryWriter.execute { repository.saveCurrentQueue(queue.map { it.path }, index, allowDuplicates = true) }
             }
         }
+    }
+
+    @Test fun pictureInPictureResizesAndRedrawsTheSamePausedVideo() {
+        checkPictureInPicture(embedded = false)
+    }
+
+    @Test fun mainPlayerPictureInPictureResizesAndRedrawsTheSamePausedVideo() {
+        checkPictureInPicture(embedded = true)
+    }
+
+    private fun checkPictureInPicture(embedded: Boolean) {
+        assumeTrue(app.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE))
+        val repository = MediaLibraryRepository.getInstance(app)
+        val (queue, index) = runBlocking { PlayerLibraryWriter.execute(repository::getCurrentQueue) }
+        val preferences = PlayerPreferences.getInstance(app)
+        val originalMode = preferences.playerModeEnabled
+        val sessionPrefs = app.getSharedPreferences("main_player_session", Context.MODE_PRIVATE)
+        val originalSession = sessionPrefs.getString("session", null)
+        Fixture("picture-in-picture").use { fixture ->
+            val video = File(fixture.root, "picture-in-picture.mp4")
+            val generated = FFmpegKit.executeWithArguments(arrayOf(
+                "-y", "-f", "lavfi", "-i", "color=c=red:s=320x180:r=10:d=20", "-c:v", "mpeg4", video.path
+            ))
+            assertTrue(generated.getAllLogsAsString().takeLast(2000), ReturnCode.isSuccess(generated.getReturnCode()))
+            try {
+                if (embedded) {
+                    preferences.playerModeEnabled = true
+                    sessionPrefs.edit().remove("session").commit()
+                    ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                        lateinit var activity: MainActivity
+                        lateinit var model: PlayerViewModel
+                        scenario.onActivity {
+                            activity = it
+                            model = ViewModelProvider(it)[PlayerViewModel::class.java]
+                            model.openQueue(listOf(PlayerTrack(video.path, video.name, isVideo = true)), 0)
+                        }
+                        assertPictureInPictureFrame(model, activity, video)
+                    }
+                } else {
+                    openPlayer(video).use { assertPictureInPictureFrame(it.model, it.activity, video) }
+                }
+            } finally {
+                if (embedded) {
+                    sessionPrefs.edit().putString("session", originalSession).commit()
+                    preferences.playerModeEnabled = originalMode
+                }
+                runBlocking {
+                    PlayerLibraryWriter.execute {
+                        repository.removePlaybackHistory(video.path)
+                        repository.saveCurrentQueue(queue.map { it.path }, index, allowDuplicates = true)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun assertPictureInPictureFrame(model: PlayerViewModel, activity: Activity, video: File) {
+        awaitState(model, "video is playing") { it.ready && it.playing && it.positionMs > 300L }
+        onMain { model.pause() }
+        await("mpv pauses") { mainValue { MPVLib.getPropertyBoolean("pause") == true } }
+        val fullWidth = mainValue { activity.window.decorView.width }
+        await("the source rectangle fits the rendered video") {
+            mainValue { model.pictureInPictureSourceRect()?.let { abs(it.width().toFloat() / it.height() - 16f / 9f) < 0.02f } == true }
+        }
+
+        clickTag("player-picture-in-picture")
+        await("Android opens the same player in a smaller window") {
+            mainValue { activity.isInPictureInPictureMode && activity.window.decorView.width < fullWidth }
+        }
+        await("the paused red frame is visible in the resized window") {
+            val pip = mainValue {
+                val decor = activity.window.decorView
+                val origin = IntArray(2).also(decor::getLocationOnScreen)
+                Rect(origin[0], origin[1], origin[0] + decor.width, origin[1] + decor.height)
+            }
+            val screenshot = automation.takeScreenshot() ?: return@await false
+            try {
+                val x = pip.centerX()
+                val y = pip.top + pip.height() / 3
+                if (x !in 0 until screenshot.width || y !in 0 until screenshot.height) return@await false
+                val pixel = screenshot.getPixel(x, y)
+                Color.red(pixel) > 150 && Color.green(pixel) < 80 && Color.blue(pixel) < 80
+            } finally { screenshot.recycle() }
+        }
+        assertFalse(state(model).playing)
+        assertEquals(video.path, mainValue { MPVLib.getPropertyString("path") })
     }
 
     private fun assertNativeSubtitleSize(session: Session, size: Int) {
@@ -409,9 +560,11 @@ class PlayerLandscapeAndSubtitleTest {
         } finally { screenshot.recycle() }
     }
 
-    private inner class Fixture(name: String) : Closeable {
+    private inner class Fixture(name: String, preserveQueue: Boolean = false) : Closeable {
         val root = File(app.cacheDir, "player-$name-layout-${System.nanoTime()}").apply { mkdirs() }
         val preferences = app.getSharedPreferences("player_settings", Context.MODE_PRIVATE)
+        private val repository = MediaLibraryRepository.getInstance(app)
+        private val savedQueue = if (preserveQueue) runBlocking { PlayerLibraryWriter.execute(repository::getCurrentQueue) } else null
         private val keys = listOf("default_play_mode", "default_speed", "resume_playback", "eq_enabled", "show_loudness_waveform", "subtitle_font_size")
         private val saved = keys.associateWith { preferences.all[it] }
         init {
@@ -420,7 +573,28 @@ class PlayerLandscapeAndSubtitleTest {
                 .putBoolean("eq_enabled", false).putBoolean("show_loudness_waveform", true)
                 .remove("subtitle_font_size").commit())
         }
+        fun videoWithSubtitles(): File {
+            val video = File(root, "video.mp4")
+            File(root, "video.srt").writeText(
+                "1\n00:00:00,000 --> 00:00:04,000\nFirst line\n\n2\n00:00:04,000 --> 00:00:19,500\nSecond line\n"
+            )
+            val generated = FFmpegKit.executeWithArguments(arrayOf(
+                "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=10:duration=20",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=20",
+                "-c:v", "mpeg4", "-c:a", "aac", video.path
+            ))
+            assertTrue(generated.getAllLogsAsString().takeLast(2000), ReturnCode.isSuccess(generated.getReturnCode()))
+            return video
+        }
         override fun close() {
+            savedQueue?.let { (queue, index) ->
+                runBlocking {
+                    PlayerLibraryWriter.execute {
+                        root.listFiles().orEmpty().forEach { repository.removePlaybackHistory(it.path) }
+                        repository.saveCurrentQueue(queue.map { it.path }, index, allowDuplicates = true)
+                    }
+                }
+            }
             val editor = preferences.edit()
             saved.forEach { (key, value) -> restore(editor, key, value) }
             root.listFiles().orEmpty().forEach { editor.remove("last_position_${it.path}") }

@@ -2,6 +2,7 @@ package com.subtitleedit
 
 import android.app.Application
 import android.net.Uri
+import com.subtitleedit.player.PlayerPreferences
 import com.subtitleedit.ui.settings.SettingsCacheItem
 import com.subtitleedit.ui.settings.SettingsPageState
 import com.subtitleedit.util.AppThemeMode
@@ -28,6 +29,7 @@ internal class SettingsViewModel(
     application: Application
 ) : AppViewModel<SettingsPageState, Nothing>(application, SettingsPageState()) {
     private val settingsManager = SettingsManager.getInstance(application)
+    private val playerPreferences = PlayerPreferences.getInstance(application)
 
     init {
         refresh()
@@ -65,6 +67,7 @@ internal class SettingsViewModel(
                 loopSelectedSubtitle = settingsManager.isLoopSelectedSubtitleEnabled(),
                 selectPlayingSubtitle = settingsManager.isSelectPlayingSubtitleEnabled(),
                 hardwareDecodingEnabled = settingsManager.isHardwareDecodingEnabled(),
+                allowConcurrentPlayback = playerPreferences.allowConcurrentPlayback,
                 cacheItems = cacheItems
             )
         }
@@ -106,6 +109,11 @@ internal class SettingsViewModel(
     fun setHardwareDecodingEnabled(enabled: Boolean) {
         setState { copy(hardwareDecodingEnabled = enabled) }
         settingsManager.setHardwareDecodingEnabled(enabled)
+    }
+
+    fun setAllowConcurrentPlayback(enabled: Boolean) {
+        setState { copy(allowConcurrentPlayback = enabled) }
+        playerPreferences.allowConcurrentPlayback = enabled
     }
 
     fun exportBackup(uri: Uri) {

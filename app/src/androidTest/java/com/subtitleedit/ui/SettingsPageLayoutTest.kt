@@ -51,11 +51,15 @@ class SettingsPageLayoutTest {
 
         compose.onNodeWithText(compose.activity.getString(R.string.activity_settings_text_01)).assertIsDisplayed()
         compose.onNodeWithText(compose.activity.getString(R.string.activity_settings_text_02)).assertIsDisplayed()
-        compose.onAllNodes(hasClickAction()).assertCountEquals(4)
+        compose.onAllNodes(hasClickAction()).assertCountEquals(5)
         compose.onNodeWithText(compose.activity.getString(R.string.player_subtitle_settings_title))
             .assertIsDisplayed().performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.activity_settings_text_09)).assertIsDisplayed()
         checkHardwareDecodingSwitch()
+        val concurrentPlayback = compose.onNodeWithText(compose.activity.getString(R.string.player_allow_concurrent_playback))
+        concurrentPlayback.assertIsDisplayed().assertIsOff().performClick()
+        concurrentPlayback.assertIsOn().performClick()
+        concurrentPlayback.assertIsOff()
         compose.runOnIdle { assertEquals(1, subtitleSettingsOpened) }
     }
 
@@ -76,6 +80,7 @@ class SettingsPageLayoutTest {
         val hardwareDecoding = compose.activity.getString(R.string.settings_hardware_decoding)
         compose.onNode(hasScrollAction()).performScrollToNode(hasText(hardwareDecoding))
         checkHardwareDecodingSwitch()
+        compose.onNodeWithText(compose.activity.getString(R.string.player_allow_concurrent_playback)).assertDoesNotExist()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText(backup))
         val row = compose.onNodeWithText(backup)
         val before = row.fetchSemanticsNode().boundsInRoot
@@ -113,6 +118,7 @@ class SettingsPageLayoutTest {
                         onCheckUpdatesChanged = {}, onPreserveDirectoriesChanged = {},
                         onLoopSelectedChanged = {}, onSelectPlayingChanged = {},
                         onHardwareDecodingChanged = { state.value = state.value.copy(hardwareDecodingEnabled = it) },
+                        onAllowConcurrentPlaybackChanged = { state.value = state.value.copy(allowConcurrentPlayback = it) },
                         onOpenAiSettings = {}, onOpenModelManagement = {}, onOpenTtsSettings = {},
                         onOpenPageTranslation = { actions += "translation" },
                         onOpenLogs = {}, onOpenAbout = {}, onSelectSoftwareDirectory = {},

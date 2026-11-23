@@ -267,6 +267,12 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) : Setting
         get() = prefs.getBoolean(KEY_RESUME, true)
         set(value) = prefs.edit().putBoolean(KEY_RESUME, value).apply()
 
+    var allowConcurrentPlayback: Boolean
+        get() = prefs.getBoolean(KEY_ALLOW_CONCURRENT_PLAYBACK, false)
+        set(value) = prefs.edit().putBoolean(KEY_ALLOW_CONCURRENT_PLAYBACK, value).apply()
+
+    val allowConcurrentPlaybackChanges = observe(setOf(KEY_ALLOW_CONCURRENT_PLAYBACK)) { allowConcurrentPlayback }
+
     var showLoudnessWaveform: Boolean
         get() = prefs.getBoolean(KEY_LOUDNESS_WAVEFORM, true)
         set(value) = prefs.edit().putBoolean(KEY_LOUDNESS_WAVEFORM, value).apply()
@@ -316,6 +322,7 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) : Setting
             KEY_STATUS_LYRICS_WIDTH to statusLyrics.widthPercent,
             KEY_NOTIFICATION_LYRICS to notificationsShowLyrics,
             KEY_RESUME to resumePlayback,
+            KEY_ALLOW_CONCURRENT_PLAYBACK to allowConcurrentPlayback,
             KEY_LOUDNESS_WAVEFORM to showLoudnessWaveform
         )
     }
@@ -370,6 +377,7 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) : Setting
         private const val KEY_STATUS_LYRICS_WIDTH = "status_bar_lyrics_width"
         private const val KEY_NOTIFICATION_LYRICS = "notification_lyrics"
         private const val KEY_RESUME = "resume_playback"
+        private const val KEY_ALLOW_CONCURRENT_PLAYBACK = "allow_concurrent_playback"
         private const val KEY_LOUDNESS_WAVEFORM = "show_loudness_waveform"
         private const val KEY_LAST_POS = "last_position_"
 
