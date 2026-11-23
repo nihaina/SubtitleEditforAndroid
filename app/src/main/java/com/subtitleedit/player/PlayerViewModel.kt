@@ -9,6 +9,7 @@ import com.subtitleedit.library.MediaLibraryRepository
 import com.subtitleedit.library.MediaPlaylist
 import com.subtitleedit.library.PlayerTrackDetails
 import com.subtitleedit.library.PlayerTrackMetadataReader
+import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsBackupManager
 import kotlinx.coroutines.Job
@@ -131,6 +132,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
     private val _outputGeneration = MutableStateFlow(0L)
     val outputGeneration: StateFlow<Long> = _outputGeneration.asStateFlow()
     private var mediaNotifications: PlayerMediaNotificationConnection? = null
+    private var mainSessionStore: MainPlayerSessionStore? = null
+    private var savedMainSession: MainPlayerSession? = null
 
     fun connectMediaNotifications() {
         if (mediaNotifications == null) mediaNotifications =
@@ -189,12 +192,38 @@ internal class PlayerViewModel @JvmOverloads constructor(
     }
 
     fun restoreSession(playlist: List<PlayerTrack>, startIndex: Int, mode: PlayerPlayMode?,
-        positionMs: Long, playing: Boolean, expanded: Boolean, queueSource: PlayerQueueSource? = null) {
+        positionMs: Long, playing: Boolean, expanded: Boolean, queueSource: PlayerQueueSource? = null,
+        audioMode: Boolean = false) {
         if (configured) return
         configure(playlist, startIndex, mode, queueSource, allowDuplicates = true)
-        detachedPosition = positionMs.coerceAtLeast(0L)
+        detachedPosition = if (_state.value.currentTrack?.path == playlist.getOrNull(startIndex)?.path)
+            positionMs.coerceAtLeast(0L) else 0L
         playOnAttach = playing
+        _state.value = _state.value.copy(audioMode = audioMode)
         _expanded.value = expanded
+    }
+
+    fun restoreMainSession(expanded: Boolean) {
+        val store = mainSessionStore ?: MainPlayerSessionStore(getApplication()).also { mainSessionStore = it }
+        if (configured) return
+        if (!preferences.playerModeEnabled) {
+            store.clear()
+            savedMainSession = null
+            return
+        }
+        val session = store.read() ?: return
+        savedMainSession = session
+        val tracks = session.paths.map { path ->
+            val file = File(path)
+            PlayerTrack(path, file.name, FileTypePolicy.isVideo(file))
+        }
+        restoreSession(tracks, session.index, session.mode,
+            positionMs = if (preferences.resumePlayback) session.positionMs else 0L,
+            playing = false, expanded = expanded, queueSource = session.queueSource, audioMode = session.audioMode)
+        if (_state.value.currentTrack == null) {
+            store.clear()
+            savedMainSession = null
+        }
     }
 
     /** A new library selection replaces the queue without replacing the output view. */
@@ -227,6 +256,11 @@ internal class PlayerViewModel @JvmOverloads constructor(
             subtitleCueTiming = null,
             controlsLocked = false, controlsVisible = true, lyricsVisible = false,
             showTrackInfoDialog = false, showPlaylistPickerDialog = false, showEndBehaviorDialog = false)
+        if (engine == null) {
+            val current = _state.value
+            trackEnded = false
+            saveMainSession(current.currentTrack?.let { preferences.lastPosition(it.path) } ?: 0L)
+        }
         loadCurrent(resume = _state.value.resumePlayback, autoplay = true)
         expand()
     }
@@ -248,7 +282,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
     }
 
     /** Leaving audio mode must not leave an invisible player or its timers running. */
-    fun closeSession() {
+    fun closeSession(preserveForRestore: Boolean = false) {
         appendGeneration++
         mediaNotifications?.invalidate()
         cancelNextQueue()
@@ -269,6 +303,13 @@ internal class PlayerViewModel @JvmOverloads constructor(
             controlsLocked = false, lyricsVisible = false, lyricLines = emptyList(),
             isVideo = false, muted = false, mirrored = false, audioMode = false,
             subtitleOptions = emptyList(), subtitleText = "", subtitleCueTiming = null, gestureHint = null)
+        if (!preserveForRestore) clearMainSession()
+    }
+
+    fun pauseForAppExit() {
+        if (_state.value.currentTrack == null) return
+        cancelScheduledStart()
+        pause()
     }
 
     /** Release the global mpv context before an editor Activity claims it. */
@@ -350,6 +391,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
                     }
                 )
                 refreshLyricLines()
+                if (sample.ready && !snapshot.ready) saveMainSession()
                 if (!previouslyPlayed && listening.hasPlayed) rememberPosition()
                 if (sample.error != null) audioFocus.abandon()
                 if (sample.ended && sample.ready && sample.error == null && handledEndId != loadId) {
@@ -458,6 +500,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         engine?.seekTo(target)
         _state.value = current.copy(positionMs = target, seekPreviewMs = null, loudness = 0f,
             subtitleCueTiming = current.subtitleCueTiming?.takeIf { target in it })
+        saveMainSession()
     }
 
     fun clearSeekPreview() { _state.value = _state.value.copy(seekPreviewMs = null) }
@@ -677,6 +720,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
             _expanded.value = false
             _state.value = _state.value.copy(queueSource = null, controlsLocked = false,
                 lyricsVisible = false, gestureHint = null)
+            clearMainSession()
             persistEditedQueue(edit)
         } else {
             refreshFavorite()
@@ -687,6 +731,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
     }
 
     private fun persistEditedQueue(edit: PlayerQueueEdit) {
+        saveMainSession()
         val paths = edit.playlist.map { it.path }
         PlayerLibraryWriter.submit { libraryRepository.saveCurrentQueue(paths, edit.currentIndex, allowDuplicates = true) }
     }
@@ -713,6 +758,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         val track = current.currentTrack ?: return
         val session = engine ?: return
         val app = getApplication<Application>()
+        val saved = resumeAt ?: if (resume) preferences.lastPosition(track.path) else 0L
         if (loadedTrackPath != track.path) {
             volumeGesture.reset()
             loadedTrackPath = track.path
@@ -753,6 +799,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         val shouldPlay = autoplay && audioFocus.request()
         if (!shouldPlay) audioFocus.abandon()
         playOnAttach = shouldPlay
+        saveMainSession(saved)
         session.start(File(app.filesDir, "player/config"), app.cacheDir, track.file, shouldPlay, loadId,
             fallbackSubtitle = externalSubtitles.firstOrNull(),
             audioOnly = track.isVideo && current.audioMode, mirrored = track.isVideo && current.mirrored,
@@ -762,7 +809,6 @@ internal class PlayerViewModel @JvmOverloads constructor(
         session.setLoudnessEnabled(current.showLoudnessWaveform && !track.isVideo)
         session.setVolume(volumeController.snapshot.softwarePercent)
         session.setSubtitleFontSize(current.subtitleFontSize)
-        val saved = resumeAt ?: if (resume) preferences.lastPosition(track.path) else 0L
         if (saved > 0L) session.seekTo(saved)
         val restoredSubtitle = subtitle?.takeIf {
             it.kind != PlayerSubtitleKind.EXTERNAL || it.id.startsWith("embedded:") ||
@@ -884,6 +930,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
     private fun rememberPosition() {
         val current = _state.value
         val track = current.currentTrack ?: return
+        saveMainSession()
         if (!current.ready || current.error != null || !listening.hasPlayed || track.path != listening.path) return
         val completed = trackEnded || (current.durationMs > 0L && current.positionMs >= current.durationMs - 1_000L)
         val position = if (completed) 0L else current.positionMs
@@ -900,6 +947,25 @@ internal class PlayerViewModel @JvmOverloads constructor(
                 libraryRepository.indexTrack(track.path, progress.durationMs, forceFileRevision = false)
             }
         }
+    }
+
+    private fun saveMainSession(initialPositionMs: Long? = null) {
+        val store = mainSessionStore ?: return
+        val current = _state.value
+        if (current.currentTrack == null || !preferences.playerModeEnabled) return
+        if (current.error != null) return
+        val currentPosition = initialPositionMs ?: current.positionMs.takeIf { current.ready } ?: detachedPosition ?: return
+        val position = if (!current.resumePlayback || trackEnded) 0L else currentPosition
+        val session = MainPlayerSession(current.playlist.map { it.path }, current.currentIndex, current.mode, position,
+            current.queueSource, current.audioMode)
+        if (session == savedMainSession) return
+        store.save(session)
+        savedMainSession = session
+    }
+
+    private fun clearMainSession() {
+        mainSessionStore?.clear()
+        savedMainSession = null
     }
 
     private fun selectListening(path: String, preservePlayback: Boolean) {
@@ -1044,6 +1110,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
             if (resolvedMode == PlayerPlayMode.SHUFFLE && current.mode != resolvedMode)
                 PlayerPlaylistOrder.newShuffleOrder(current.playlist.size, current.currentIndex)
             else current.shuffleOrder)
+        saveMainSession()
     }
 
     fun openEndBehaviorDialog() {
@@ -1096,6 +1163,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         val audioMode = !current.audioMode
         engine?.setAudioOnly(audioMode)
         _state.value = current.copy(audioMode = audioMode, lyricsVisible = false)
+        saveMainSession()
     }
 
     /** Read before a drag as well as periodically, so hardware keys and system sliders stay in sync. */
@@ -1162,6 +1230,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         preferences.resumePlayback = enabled
         _state.value = _state.value.copy(resumePlayback = enabled)
         if (enabled) rememberPosition()
+        else saveMainSession()
     }
 
     fun setShowLoudnessWaveform(enabled: Boolean) {

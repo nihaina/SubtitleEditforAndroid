@@ -374,7 +374,7 @@ class PlayerMediaNotificationService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        dispatch(PlayerMediaNotifications.ACTION_STOP)
+        current?.let { PlayerMediaNotifications.closeRemovedTask(it.sessionId) }
         clearNotification()
         stopSelf()
         super.onTaskRemoved(rootIntent)

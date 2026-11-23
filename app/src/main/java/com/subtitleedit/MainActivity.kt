@@ -547,6 +547,7 @@ class MainActivity : AppComposeActivity() {
 
     override fun onResume() {
         super.onResume()
+        backNavigationCallback.isEnabled = true
         applyPlayerWindow()
         showFullFileNames = SettingsManager.getInstance(this).isShowFullFileNamesEnabled()
         lifecycleCoordinator.onResume()
@@ -2499,6 +2500,7 @@ class MainActivity : AppComposeActivity() {
         val now = System.currentTimeMillis()
         if (now - lastBackExitPromptAt <= BACK_EXIT_CONFIRM_WINDOW_MS) {
             lastBackExitPromptAt = 0L
+            playerModel.pauseForAppExit()
             backNavigationCallback.isEnabled = false
             onBackPressedDispatcher.onBackPressed()
         } else {

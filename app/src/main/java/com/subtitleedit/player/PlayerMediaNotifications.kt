@@ -126,6 +126,10 @@ internal object PlayerMediaNotifications {
             else -> if (seekMs != null && current.state.value.ready) current.seekTo(seekMs)
         }
     }
+
+    fun closeRemovedTask(sessionId: Long) {
+        if (state.value?.sessionId == sessionId) model?.closeSession(preserveForRestore = true)
+    }
 }
 
 /** Lives with the ViewModel, so recreation never registers or tears down a second session. */

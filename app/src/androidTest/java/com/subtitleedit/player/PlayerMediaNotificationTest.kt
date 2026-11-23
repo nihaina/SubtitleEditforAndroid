@@ -45,6 +45,7 @@ import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -598,17 +599,78 @@ class PlayerMediaNotificationTest {
         }
     }
 
-    private inner class Fixture(audioMode: Boolean = true) : Closeable {
+    @Test fun restartingAudioModeRestoresTheSelectedQueueEntryAndPositionPaused() = Fixture(resumePlayback = true).use { f ->
+        val repeated = f.wav("repeated.wav")
+        val queue = listOf(repeated, f.wav("other.wav"), repeated)
+        val paths = queue.map { it.path }
+        lateinit var previousModel: PlayerViewModel
+        var exitPosition = 0L
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                previousModel = ViewModelProvider(activity)[PlayerViewModel::class.java]
+                previousModel.openQueue(queue.map { PlayerTrack(it.path, it.name, false) }, startIndex = 2,
+                    allowDuplicates = true)
+            }
+            awaitState(previousModel, "the second occurrence of the repeated audio file is playing") {
+                it.ready && it.playing && it.currentIndex == 2 && it.positionMs > 250L
+            }
+            onMain { previousModel.seekTo(12_000L) }
+            awaitState(previousModel, "native playback reaches the seek target") {
+                it.playing && it.positionMs >= 12_000L && (MPVLib.getPropertyDouble("time-pos") ?: 0.0) >= 12.0
+            }
+            scenario.onActivity { activity ->
+                exitPosition = previousModel.state.value.positionMs
+                activity.finish()
+            }
+        }
+        await("the previous player's notification is removed") { notification() == null }
+
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var restoredModel: PlayerViewModel
+            scenario.onActivity { restoredModel = ViewModelProvider(it)[PlayerViewModel::class.java] }
+            assertNotSame(previousModel, restoredModel)
+            awaitState(restoredModel, "the same queue occurrence and position are restored with native output paused") {
+                it.ready && !it.playing && it.currentIndex == 2 && it.playlist.map { track -> track.path } == paths &&
+                    abs(it.positionMs - exitPosition) <= 1_000L && MPVLib.getPropertyString("path") == repeated.path &&
+                    MPVLib.getPropertyBoolean("pause") == true &&
+                    abs((MPVLib.getPropertyDouble("time-pos") ?: 0.0) * 1_000 - exitPosition) <= 1_000
+            }
+            val restoredPosition = state(restoredModel).positionMs
+            val controller = awaitController()
+            await("the restored notification reports paused playback") {
+                controller.playbackState?.state == PlaybackState.STATE_PAUSED
+            }
+            onMain { controller.transportControls.play() }
+            awaitState(restoredModel, "manual Play resumes from the restored position") {
+                it.playing && it.positionMs > restoredPosition + 250L
+            }
+            onMain { controller.transportControls.stop() }
+            await("an explicit Stop clears the player's active queue") {
+                state(restoredModel).currentTrack == null && notification() == null
+            }
+        }
+
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { assertNull(ViewModelProvider(it)[PlayerViewModel::class.java].state.value.currentTrack) }
+        }
+    }
+
+    private inner class Fixture(audioMode: Boolean = true, resumePlayback: Boolean = false) : Closeable {
         val root = File(app.cacheDir, "player-media-notification-${System.nanoTime()}").apply { check(mkdirs()) }
         private val preferences = app.getSharedPreferences("player_settings", Context.MODE_PRIVATE)
         private val keys = listOf("player_mode_enabled", "default_play_mode", "default_speed", "resume_playback",
             "eq_enabled", "show_loudness_waveform", "end_behavior_enabled", "notification_lyrics", "floating_subtitle_enabled")
         private val saved = keys.associateWith { preferences.all[it] }
+        private val sessionPreferences = app.getSharedPreferences("main_player_session", Context.MODE_PRIVATE)
+        private val savedSession = sessionPreferences.getString("session", null)
+        private val repository = MediaLibraryRepository.getInstance(app)
+        private val savedQueue = runBlocking { PlayerLibraryWriter.execute(repository::getCurrentQueue) }
 
         init {
+            assertTrue(sessionPreferences.edit().remove("session").commit())
             assertTrue(preferences.edit().putBoolean("player_mode_enabled", audioMode)
                 .putString("default_play_mode", PlayerPlayMode.SEQUENCE.name).putFloat("default_speed", 1f)
-                .putBoolean("resume_playback", false).putBoolean("eq_enabled", false)
+                .putBoolean("resume_playback", resumePlayback).putBoolean("eq_enabled", false)
                 .putBoolean("show_loudness_waveform", false).putBoolean("end_behavior_enabled", false)
                 .putBoolean("notification_lyrics", false).putBoolean("floating_subtitle_enabled", false).commit())
             await("previous media notification is cleaned up") { notification() == null }
@@ -642,7 +704,13 @@ class PlayerMediaNotificationTest {
         }
 
         override fun close() {
-            MediaLibraryRepository.getInstance(app).removeDirectoryFromLibrary(root, emptyList())
+            runBlocking {
+                PlayerLibraryWriter.execute {
+                    repository.removeDirectoryFromLibrary(root, emptyList())
+                    root.walkTopDown().filter { it.isFile }.forEach { repository.removePlaybackHistory(it.path) }
+                    repository.saveCurrentQueue(savedQueue.first.map { it.path }, savedQueue.second, allowDuplicates = true)
+                }
+            }
             val editor = preferences.edit()
             saved.forEach { (key, value) -> restore(editor, key, value) }
             root.walkTopDown().filter { it.isFile }.forEach {
@@ -650,6 +718,7 @@ class PlayerMediaNotificationTest {
                 PlayerTrackMetadataReader.invalidate(it.path)
             }
             assertTrue(editor.commit())
+            assertTrue(sessionPreferences.edit().putString("session", savedSession).commit())
             root.deleteRecursively()
         }
     }

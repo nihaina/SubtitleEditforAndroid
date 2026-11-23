@@ -11,7 +11,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.Lifecycle
-import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.MainActivity
 import com.subtitleedit.MediaTagEditorActivity
 import com.subtitleedit.filepicker.AppFilePickerContracts
@@ -58,35 +57,15 @@ internal class MainPlayerController(
         subtitlePickerTrackPath = savedInstanceState?.getString(STATE_SUBTITLE_PICKER_TRACK)
         if (!PlayerPreferences.getInstance(activity).playerModeEnabled) {
             viewModel.closeSession()
-            return
+        } else if (PlayerOutputHandoff.hasExclusiveOwner) {
+            viewModel.suspendOutput()
         }
-        if (PlayerOutputHandoff.hasExclusiveOwner) viewModel.suspendOutput()
-        savedInstanceState?.getStringArrayList("main_player_queue")?.let { paths ->
-            val tracks = paths.map { path ->
-                val file = File(path)
-                PlayerTrack(path, file.name, FileTypePolicy.isVideo(file))
-            }
-            viewModel.restoreSession(tracks, savedInstanceState.getInt("main_player_index"),
-                savedInstanceState.getString("main_player_mode")?.let { value ->
-                    PlayerPlayMode.entries.firstOrNull { it.name == value }
-                }, savedInstanceState.getLong("main_player_position"),
-                savedInstanceState.getBoolean("main_player_playing"), savedInstanceState.getBoolean("main_player_expanded"),
-                savedInstanceState.getPlayerQueueSource())
-        }
+        viewModel.restoreMainSession(expanded = savedInstanceState?.getBoolean(STATE_EXPANDED) == true)
     }
 
     fun saveState(outState: Bundle) {
         subtitlePickerTrackPath?.let { outState.putString(STATE_SUBTITLE_PICKER_TRACK, it) }
-        val state = viewModel.state.value
-        if (state.currentTrack != null) {
-            outState.putStringArrayList("main_player_queue", ArrayList(state.playlist.map { it.path }))
-            outState.putInt("main_player_index", state.currentIndex)
-            outState.putString("main_player_mode", state.mode.name)
-            outState.putLong("main_player_position", state.positionMs)
-            outState.putBoolean("main_player_playing", state.playing)
-            outState.putBoolean("main_player_expanded", viewModel.expanded.value)
-            outState.putPlayerQueueSource(state.queueSource)
-        }
+        outState.putBoolean(STATE_EXPANDED, viewModel.expanded.value)
     }
 
     fun cancelPlaybackActivityLaunch() {
@@ -160,6 +139,7 @@ internal class MainPlayerController(
     }
 
     private companion object {
+        const val STATE_EXPANDED = "main_player_expanded"
         const val STATE_SUBTITLE_PICKER_TRACK = "main_player_subtitle_picker_track"
         val SUBTITLE_EXTENSIONS = setOf("srt", "lrc", "vtt", "ass", "ssa")
     }
