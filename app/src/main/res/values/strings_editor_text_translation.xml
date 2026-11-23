@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item type="id" name="editor_text_translation_content" />
+    <string name="editor_text_translation_preview">快速翻译预览</string>
+    <string name="editor_text_translation_show_original">显示原文</string>
+    <string name="editor_text_translation_loading">正在本地翻译…</string>
+    <string name="editor_text_translation_no_changes">没有可翻译的文本</string>
+    <string name="editor_text_translation_partial_failure">部分或全部段落无法翻译，已保留对应原文。</string>
+    <string name="editor_text_translation_missing_models">缺少语言包：%1$s。对应段落暂时保留原文，可在页面翻译设置中下载语言包。</string>
+</resources>

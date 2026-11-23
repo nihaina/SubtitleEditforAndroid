@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="page_translation">页面翻译</string>
-    <string name="page_translation_description">在设备上预览文件和文件夹的译名，不修改原文件。自动识别使用内置语种模型；无法确定语种时保留原名，也可手动选择原语言。</string>
+    <string name="page_translation_description">在设备上预览文件和文件夹的译名以及文本文件的译文。自动识别使用内置语种模型，无法确定语种时保留原文，也可手动选择原语言。</string>
     <string name="page_translation_unsupported">当前版本无法加载离线页面翻译引擎。</string>
     <string name="page_translation_source">原语言</string>
     <string name="page_translation_target">目标语言</string>

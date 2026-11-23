@@ -66,6 +66,7 @@ import com.subtitleedit.editor.EditorSaveSessionController
 import com.subtitleedit.editor.EditorListPresentationController
 import com.subtitleedit.editor.EditorSubtitlePreviewController
 import com.subtitleedit.editor.EditorTextPreviewDialog
+import com.subtitleedit.editor.EditorTextTranslationPreview
 import com.subtitleedit.editor.EditorTranscribeController
 import com.subtitleedit.editor.EditorTranslationController
 import com.subtitleedit.editor.EditorTtsController
@@ -186,6 +187,7 @@ class EditorActivity : AppCompatActivity() {
     private lateinit var translationController: EditorTranslationController
     private lateinit var transcribeController: EditorTranscribeController
     private lateinit var textPreviewDialog: EditorTextPreviewDialog
+    private lateinit var textTranslationPreview: EditorTextTranslationPreview
     private lateinit var ttsController: EditorTtsController
     private lateinit var searchController: EditorSearchController
     private lateinit var editorCoordinator: EditorCoordinator
@@ -370,6 +372,9 @@ class EditorActivity : AppCompatActivity() {
             updateSelectedCount = ::updateSelectedCountDisplay
         )
         setupSourceView()
+        textTranslationPreview = EditorTextTranslationPreview(
+            this, binding.sourceViewContainer, binding.etSourceView, ::invalidateOptionsMenu, ::showShortToast
+        )
         fileSessionController = EditorFileSessionController(this, stateModel.subtitleRepository)
         saveSessionController = EditorSaveSessionController(this, stateModel.subtitleRepository)
         setupHistoryCoordinator()
@@ -481,7 +486,7 @@ class EditorActivity : AppCompatActivity() {
                     finishCoordinatePicker(confirm = false)
                 } else if (coordinatePickerPending) {
                     cancelPendingCoordinatePicker()
-                } else {
+                } else if (!textTranslationPreview.close()) {
                     isEnabled = false
                     onBackPressedDispatcher.onBackPressed()
                     isEnabled = true
@@ -519,7 +524,7 @@ class EditorActivity : AppCompatActivity() {
         supportActionBar?.title = "未命名"
         
         binding.toolbar.setNavigationOnClickListener {
-            editorCoordinator.onNavigateUp()
+            if (!textTranslationPreview.close()) editorCoordinator.onNavigateUp()
         }
         
         binding.toolbar.setOnMenuItemClickListener { menuItem ->
@@ -541,12 +546,15 @@ class EditorActivity : AppCompatActivity() {
         } else stateModel.peekRedo(),
         sourceTransitioning = stateModel.isSourceViewTransitioning ||
             sourceViewTransitionJob?.isActive == true || sourceHistorySyncPending ||
-            sourceListHistorySyncPending
+            sourceListHistorySyncPending,
+        showTextTranslation = canPreviewTextTranslation(),
+        textTranslationActive = textTranslationPreview.active
     )
 
     private fun handleMenuClick(item: MenuItem): Boolean = editorCoordinator.handleMenu(item)
 
     private fun handleEditorMenuAction(action: EditorMenuController.Action) {
+        val closedPreview = textTranslationPreview.close()
         if ((sourceHistorySyncPending || sourceListHistorySyncPending) &&
             action == EditorMenuController.Action.SEARCH
         ) {
@@ -572,8 +580,17 @@ class EditorActivity : AppCompatActivity() {
             EditorMenuController.Action.SELECT_RANGE -> selectRangeBetweenSelectedSubtitles()
             EditorMenuController.Action.SAVE_DRAFT -> saveDraft()
             EditorMenuController.Action.DRAFTS -> openDrafts()
+            EditorMenuController.Action.TEXT_TRANSLATION -> {
+                if (!closedPreview && canPreviewTextTranslation()) {
+                    if (binding.searchBar.visibility == View.VISIBLE) searchController.hide()
+                    textTranslationPreview.start()
+                }
+            }
         }
     }
+
+    private fun canPreviewTextTranslation(): Boolean = stateModel.isSourceViewMode &&
+        stateModel.currentFormat == SubtitleParser.SubtitleFormat.TXT && !stateModel.isSourceViewTransitioning
 
     private fun setupRecyclerView() {
         subtitleAdapter = SubtitleAdapter(
@@ -643,6 +660,7 @@ class EditorActivity : AppCompatActivity() {
             onParsed = ::applySourcePreview
         )
         binding.etSourceView.addOnDocumentChangeListener { change ->
+            textTranslationPreview.close()
             if (stateModel.isSourceViewMode && !suppressSourceViewChanges && !sourceHistorySyncPending) {
                 // Keep the last displayed timing preview in history, then let
                 // the user's source edit supersede any queued timing results.
@@ -1574,6 +1592,7 @@ class EditorActivity : AppCompatActivity() {
         preparedDocument: SubtitleDocument? = null,
         preparedSource: SourceEditorView.PreparedDocument? = null
     ) {
+        textTranslationPreview.close()
         // A new subtitle document invalidates previews from the previous document before its
         // rows are installed. Otherwise an already-running build could replace the new video's
         // track after this parse completes.
@@ -1592,6 +1611,7 @@ class EditorActivity : AppCompatActivity() {
         }
         
         updateFormatInfo()
+        invalidateOptionsMenu()
         
         if (stateModel.subtitleEntries.isEmpty() && !stateModel.isSourceViewMode) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "未找到字幕内容", Toast.LENGTH_SHORT).show()
@@ -4859,6 +4879,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        textTranslationPreview.close()
         pendingFontParentDialog = null
         pendingStyleFontName = ""
         pendingStyleFontSelection = null

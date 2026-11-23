@@ -11,6 +11,7 @@ import io.github.yinvoker.foxlet.InstalledModel
 import io.github.yinvoker.foxlet.LanguagePair
 import io.github.yinvoker.foxlet.VerificationStatus
 import java.io.Closeable
+import java.io.File
 import java.util.Locale
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -57,7 +58,7 @@ internal object FoxletPageTranslation {
 
     suspend fun openPreview(context: Context, options: PageTranslationOptions, locale: Locale): Session {
         val plan = catalog(context).plan(options, locale)
-        return Session(client(context), plan)
+        return Session(client(context), plan, TextTranslationCache(File(context.cacheDir, "text_translation")))
     }
 
     private suspend fun listLocalModels(client: Foxlet): Map<PageTranslationModel, List<InstalledModel>> =
@@ -87,6 +88,7 @@ internal object FoxletPageTranslation {
     internal class Session(
         private val client: Foxlet,
         val plan: PageTranslationPlan,
+        private val textCache: TextTranslationCache,
     ) : PageTranslationSession, Closeable {
         private var identifier: PageTranslationLanguageIdentifier? = null
         private var localModels: Map<PageTranslationModel, List<InstalledModel>>? = null
@@ -118,6 +120,23 @@ internal object FoxletPageTranslation {
                 throw IllegalStateException("Foxlet native runtime is unavailable", unavailable)
             }
         }
+
+        override suspend fun translateDocumentChunk(text: String, source: PageTranslationLanguage): String =
+            inferenceLock.withLock {
+                val route = checkNotNull(plan.route(source)).map(::verifiedModel)
+                val routeKey = route.joinToString("\n", prefix = "foxlet-v0.5.0\n") {
+                    "${it.pair.source}:${it.pair.target}:${it.identity}"
+                }
+                textCache.get(routeKey, text)?.let { return@withLock it }
+                var translated = text
+                for (model in route) {
+                    // Separate calls also run sentence and token wrapping on the intermediate text.
+                    translated = client.translator.translate(translated, model)
+                    check(translated.isNotBlank())
+                }
+                textCache.put(routeKey, text, translated)
+                translated
+            }
 
         private fun verifiedModel(model: PageTranslationModel): InstalledModel = checkNotNull(verifiedModels[model])
 

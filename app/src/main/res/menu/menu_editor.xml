@@ -2,6 +2,13 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
+    <item
+        android:id="@+id/menu_text_translation"
+        android:title="@string/editor_text_translation_preview"
+        android:icon="@drawable/ic_page_translation"
+        android:visible="false"
+        app:showAsAction="always" />
+
     <!-- 文件菜单 -->
     <item
         android:id="@+id/menu_file"

@@ -29,9 +29,12 @@ internal class EditorCoordinator(
         selectedCount: Int,
         undo: EditorEditHistory.Operation?,
         redo: EditorEditHistory.Operation?,
-        sourceTransitioning: Boolean
+        sourceTransitioning: Boolean,
+        showTextTranslation: Boolean = false,
+        textTranslationActive: Boolean = false
     ): Boolean = menu.prepare(
-        menuView, sourceMode, selectedCount, undo, redo, sourceTransitioning
+        menuView, sourceMode, selectedCount, undo, redo, sourceTransitioning,
+        showTextTranslation, textTranslationActive
     )
 
     fun handleMenu(item: MenuItem): Boolean = menu.handle(item)

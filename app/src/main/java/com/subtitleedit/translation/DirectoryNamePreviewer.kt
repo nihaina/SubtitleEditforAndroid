@@ -10,6 +10,7 @@ internal interface PageTranslationSession {
     suspend fun missingModels(models: Collection<PageTranslationModel>): Set<PageTranslationModel>
     suspend fun identifyLanguage(text: String): PageTranslationLanguage?
     suspend fun translate(text: String, source: PageTranslationLanguage): String
+    suspend fun translateDocumentChunk(text: String, source: PageTranslationLanguage): String = translate(text, source)
 }
 
 internal data class DirectoryTranslationResult(

@@ -12,7 +12,7 @@ internal class EditorMenuController(
     private val onAction: (Action) -> Unit
 ) {
     enum class Action {
-        UNDO, REDO, NEW, OPEN, SAVE, SAVE_AS, ENCODING, SOURCE_VIEW,
+        UNDO, REDO, NEW, OPEN, SAVE, SAVE_AS, ENCODING, SOURCE_VIEW, TEXT_TRANSLATION,
         MERGE, SEARCH, SELECT_ALL, SELECT_RANGE, SAVE_DRAFT, DRAFTS
     }
 
@@ -22,7 +22,9 @@ internal class EditorMenuController(
         selectedCount: Int,
         undo: EditorEditHistory.Operation?,
         redo: EditorEditHistory.Operation?,
-        sourceTransitioning: Boolean
+        sourceTransitioning: Boolean,
+        showTextTranslation: Boolean = false,
+        textTranslationActive: Boolean = false
     ): Boolean {
         menu.clear()
         if (!sourceMode && selectedCount > 0) {
@@ -32,6 +34,18 @@ internal class EditorMenuController(
             addCommand(menu, MENU_REDO, R.string.menu_redo, redo != null)
         } else {
             activity.menuInflater.inflate(R.menu.menu_editor, menu)
+            menu.findItem(R.id.menu_text_translation)?.apply {
+                isVisible = sourceMode && showTextTranslation
+                if (isVisible) {
+                    isEnabled = !sourceTransitioning
+                    if (textTranslationActive) {
+                        setTitle(R.string.editor_text_translation_show_original)
+                        setIcon(R.drawable.ic_page_translation_active)
+                    }
+                    contentDescription = title
+                    tooltipText = title
+                }
+            }
             menu.findItem(R.id.menu_undo)?.apply {
                 isEnabled = undo != null
                 contentDescription = undo?.description ?: activity.getString(R.string.menu_undo)
@@ -57,6 +71,7 @@ internal class EditorMenuController(
             R.id.menu_save_as -> Action.SAVE_AS
             R.id.menu_encoding -> Action.ENCODING
             R.id.menu_source_view -> Action.SOURCE_VIEW
+            R.id.menu_text_translation -> Action.TEXT_TRANSLATION
             R.id.menu_merge_subtitles -> Action.MERGE
             R.id.menu_search -> Action.SEARCH
             MENU_SELECT_ALL -> Action.SELECT_ALL
