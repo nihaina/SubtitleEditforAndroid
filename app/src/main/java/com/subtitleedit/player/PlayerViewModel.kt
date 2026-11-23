@@ -12,6 +12,7 @@ import com.subtitleedit.library.PlayerTrackMetadataReader
 import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsBackupManager
+import com.subtitleedit.util.SettingsManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -183,6 +184,14 @@ internal class PlayerViewModel @JvmOverloads constructor(
         currentGeneration = { loadId },
         showHint = ::hint
     )
+
+    init {
+        viewModelScope.launch {
+            SettingsManager.getInstance(application).hardwareDecodingChanges.collect {
+                engine?.refreshHardwareDecoding()
+            }
+        }
+    }
 
     fun configure(playlist: List<PlayerTrack>, startIndex: Int, initialMode: PlayerPlayMode? = null,
         queueSource: PlayerQueueSource? = null, allowDuplicates: Boolean = false) {

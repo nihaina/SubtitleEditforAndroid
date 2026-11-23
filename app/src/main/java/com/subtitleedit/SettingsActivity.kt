@@ -45,6 +45,7 @@ class SettingsActivity : AppComposeActivity() {
                     onPreserveDirectoriesChanged = viewModel::setPreserveOutputDirectories,
                     onLoopSelectedChanged = viewModel::setLoopSelectedSubtitle,
                     onSelectPlayingChanged = viewModel::setSelectPlayingSubtitle,
+                    onHardwareDecodingChanged = viewModel::setHardwareDecodingEnabled,
                     onOpenAiSettings = { open(AiSettingsActivity::class.java) },
                     onOpenModelManagement = { open(ModelManagementActivity::class.java) },
                     onOpenPageTranslation = { open(PageTranslationSettingsActivity::class.java) },

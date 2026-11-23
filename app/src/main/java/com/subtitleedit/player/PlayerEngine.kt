@@ -7,6 +7,7 @@ import android.os.Looper
 import android.util.Log
 import com.subtitleedit.R
 import com.subtitleedit.mpv.MPVLib
+import com.subtitleedit.mpv.MpvVideoDecoding
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -215,6 +216,10 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
         this.muted = muted
         if (initialized) MPVLib.setPropertyBoolean("mute", muted)
         if (muted) publishLoudness(0f)
+    }
+
+    fun refreshHardwareDecoding() = post {
+        if (initialized) MpvVideoDecoding.refresh(playerHost.context)
     }
 
     fun setMirrored(mirrored: Boolean) = post {

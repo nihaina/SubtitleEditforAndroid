@@ -21,7 +21,10 @@ import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.ReturnCode
+import com.subtitleedit.library.MediaLibraryRepository
 import com.subtitleedit.mpv.MPVLib
+import com.subtitleedit.util.SettingsManager
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -228,6 +231,46 @@ class PlayerLandscapeAndSubtitleTest {
                     it.showsVideo && !it.playing && it.positionMs in 4_850L..5_150L &&
                         it.subtitleText == "Second line" && it.selectedSubtitleId == "external:${subtitle.path}"
                 }
+            }
+        }
+    }
+
+    @Test fun hardwareDecodingFollowsTheSharedSettingOnTheSameVideo() {
+        val settings = SettingsManager.getInstance(app)
+        val preferences = app.getSharedPreferences("subtitle_edit_settings", Context.MODE_PRIVATE)
+        val original = preferences.all["hardware_decoding_enabled"]
+        val repository = MediaLibraryRepository.getInstance(app)
+        val (queue, index) = runBlocking { PlayerLibraryWriter.execute(repository::getCurrentQueue) }
+        try {
+            settings.setHardwareDecodingEnabled(false)
+            Fixture("hardware-decoding").use { fixture ->
+                val video = File(fixture.root, "video.mp4")
+                val generated = FFmpegKit.executeWithArguments(arrayOf(
+                    "-y", "-f", "lavfi", "-i", "color=s=320x180:r=10:d=20", "-c:v", "mpeg4", video.path
+                ))
+                assertTrue(generated.getAllLogsAsString().takeLast(2000), ReturnCode.isSuccess(generated.getReturnCode()))
+                try {
+                    openPlayer(video).use { session ->
+                        val model = session.model
+                        awaitState(model, "video opens in software decoding mode") { it.ready }
+                        assertEquals("no", mainValue { MPVLib.getPropertyString("hwdec") })
+                        onMain { model.pause(); model.seekTo(3_000L); settings.setHardwareDecodingEnabled(true) }
+                        await("the active player applies the enabled hardware option and keeps the same position") {
+                            mainValue {
+                                val state = model.state.value
+                                MPVLib.getPropertyString("hwdec") == "mediacodec-copy,mediacodec" &&
+                                    state.currentTrack?.path == video.path && !state.playing && state.positionMs in 2_850L..3_150L
+                            }
+                        }
+                    }
+                } finally {
+                    runBlocking { PlayerLibraryWriter.execute { repository.removePlaybackHistory(video.path) } }
+                }
+            }
+        } finally {
+            settings.restoreSettingsSnapshot(mapOf("hardware_decoding_enabled" to original))
+            runBlocking {
+                PlayerLibraryWriter.execute { repository.saveCurrentQueue(queue.map { it.path }, index, allowDuplicates = true) }
             }
         }
     }

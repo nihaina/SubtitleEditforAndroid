@@ -14,6 +14,33 @@ import org.junit.runner.RunWith
 class SettingsBackupManagerTest {
 
     @Test
+    fun hardwareDecodingDefaultsToEnabledAndSurvivesBackupRestore() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val settings = SettingsManager.getInstance(context)
+        val key = "hardware_decoding_enabled"
+        val prefs = context.getSharedPreferences("subtitle_edit_settings", Context.MODE_PRIVATE)
+        val original = prefs.all[key]
+        try {
+            settings.restoreSettingsSnapshot(mapOf(key to null))
+            assertTrue(settings.isHardwareDecodingEnabled())
+            assertTypedValue(JSONObject(SettingsBackupManager.export(context)).getJSONObject("settings"),
+                key, "boolean", true)
+
+            settings.setHardwareDecodingEnabled(false)
+            val options = JSONObject(SettingsBackupManager.export(context)).getJSONObject("settings")
+            assertTypedValue(options, key, "boolean", false)
+            settings.setHardwareDecodingEnabled(true)
+            val backup = JSONObject().put("schemaVersion", 1)
+            SettingsBackupManager.restore(context, backup.put("settings", JSONObject().put(key, options.getJSONObject(key))).toString())
+            assertEquals(false, settings.isHardwareDecodingEnabled())
+            SettingsBackupManager.restore(context, backup.put("settings", JSONObject()).toString())
+            assertEquals(false, settings.isHardwareDecodingEnabled())
+        } finally {
+            settings.restoreSettingsSnapshot(mapOf(key to original))
+        }
+    }
+
+    @Test
     fun localLlmSettingsAreExportedAndRestored() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val settings = SettingsManager.getInstance(context)

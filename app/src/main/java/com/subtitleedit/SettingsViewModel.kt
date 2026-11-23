@@ -64,6 +64,7 @@ internal class SettingsViewModel(
                 preserveOutputDirectories = settingsManager.isOutputDirectoryPersistenceEnabled(),
                 loopSelectedSubtitle = settingsManager.isLoopSelectedSubtitleEnabled(),
                 selectPlayingSubtitle = settingsManager.isSelectPlayingSubtitleEnabled(),
+                hardwareDecodingEnabled = settingsManager.isHardwareDecodingEnabled(),
                 cacheItems = cacheItems
             )
         }
@@ -100,6 +101,11 @@ internal class SettingsViewModel(
     fun setSelectPlayingSubtitle(enabled: Boolean) {
         setState { copy(selectPlayingSubtitle = enabled) }
         settingsManager.setSelectPlayingSubtitleEnabled(enabled)
+    }
+
+    fun setHardwareDecodingEnabled(enabled: Boolean) {
+        setState { copy(hardwareDecodingEnabled = enabled) }
+        settingsManager.setHardwareDecodingEnabled(enabled)
     }
 
     fun exportBackup(uri: Uri) {

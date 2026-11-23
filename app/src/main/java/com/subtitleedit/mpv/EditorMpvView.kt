@@ -18,8 +18,12 @@ internal class EditorMpvView @JvmOverloads constructor(
         setVo("gpu-next")
         MPVLib.setOptionString("gpu-context", "android")
         MPVLib.setOptionString("opengl-es", "yes")
-        MPVLib.setOptionString("hwdec", "mediacodec-copy,mediacodec")
-        MPVLib.setOptionString("hwdec-codecs", "h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1")
+        MpvVideoDecoding.configure(context)
+    }
+
+    override fun playFile(filePath: String) {
+        MpvVideoDecoding.refresh(context)
+        super.playFile(filePath)
     }
 
     override fun postInitOptions() {

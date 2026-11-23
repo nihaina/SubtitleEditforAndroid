@@ -8,6 +8,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
@@ -37,7 +39,7 @@ class SettingsPageLayoutTest {
 
     @Test fun legacySettingsKeepBottomActionsAndScrollAfterStateRestoration() = checkLayout(false)
 
-    @Test fun audioModeShowsAppearanceAndSubtitleSettings() {
+    @Test fun audioModeShowsAppearanceSubtitleAndPlaybackSettings() {
         var subtitleSettingsOpened = 0
         showSettingsPage(
             state = mutableStateOf(SettingsPageState()),
@@ -49,9 +51,11 @@ class SettingsPageLayoutTest {
 
         compose.onNodeWithText(compose.activity.getString(R.string.activity_settings_text_01)).assertIsDisplayed()
         compose.onNodeWithText(compose.activity.getString(R.string.activity_settings_text_02)).assertIsDisplayed()
-        compose.onAllNodes(hasClickAction()).assertCountEquals(3)
+        compose.onAllNodes(hasClickAction()).assertCountEquals(4)
         compose.onNodeWithText(compose.activity.getString(R.string.player_subtitle_settings_title))
             .assertIsDisplayed().performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.activity_settings_text_09)).assertIsDisplayed()
+        checkHardwareDecodingSwitch()
         compose.runOnIdle { assertEquals(1, subtitleSettingsOpened) }
     }
 
@@ -69,6 +73,9 @@ class SettingsPageLayoutTest {
         val translation = compose.activity.getString(R.string.page_translation)
         compose.onNode(hasScrollAction()).performScrollToNode(hasText(translation))
         compose.onNodeWithText(translation).assertIsDisplayed().performClick()
+        val hardwareDecoding = compose.activity.getString(R.string.settings_hardware_decoding)
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText(hardwareDecoding))
+        checkHardwareDecodingSwitch()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText(backup))
         val row = compose.onNodeWithText(backup)
         val before = row.fetchSemanticsNode().boundsInRoot
@@ -80,6 +87,13 @@ class SettingsPageLayoutTest {
         compose.onNodeWithText(compose.activity.getString(R.string.settings_backup_continue)).performClick()
         compose.onNodeWithText(restore).assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(listOf("translation", "backup", "restore"), actions) }
+    }
+
+    private fun checkHardwareDecodingSwitch() {
+        val node = compose.onNodeWithText(compose.activity.getString(R.string.settings_hardware_decoding))
+        node.assertIsDisplayed().assertIsOn().performClick()
+        node.assertIsOff().performClick()
+        node.assertIsOn()
     }
 
     private fun showSettingsPage(
@@ -98,6 +112,7 @@ class SettingsPageLayoutTest {
                         onBack = {}, onEncodingSelected = {}, onThemeSelected = {},
                         onCheckUpdatesChanged = {}, onPreserveDirectoriesChanged = {},
                         onLoopSelectedChanged = {}, onSelectPlayingChanged = {},
+                        onHardwareDecodingChanged = { state.value = state.value.copy(hardwareDecodingEnabled = it) },
                         onOpenAiSettings = {}, onOpenModelManagement = {}, onOpenTtsSettings = {},
                         onOpenPageTranslation = { actions += "translation" },
                         onOpenLogs = {}, onOpenAbout = {}, onSelectSoftwareDirectory = {},

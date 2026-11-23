@@ -4,6 +4,10 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.subtitleedit.translation.PageTranslationLanguage
 import com.subtitleedit.translation.PageTranslationOptions
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import java.io.File
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
@@ -62,6 +66,7 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_MODEL_DIRECTORY = "model_directory"
         private const val KEY_LOOP_SELECTED_SUBTITLE = "loop_selected_subtitle"
         private const val KEY_SELECT_PLAYING_SUBTITLE = "select_playing_subtitle"
+        private const val KEY_HARDWARE_DECODING = "hardware_decoding_enabled"
         private const val KEY_SUBTITLE_COLOR = "subtitle_color"
         private const val KEY_RECENT_SUBTITLE_COLORS = "recent_subtitle_colors"
         private val DEFAULT_SUBTITLE_COLORS = listOf(
@@ -317,6 +322,7 @@ class SettingsManager private constructor(context: Context) {
         val snapshot = prefs.all.toMutableMap()
         snapshot[KEY_AI_CUSTOM_PROVIDERS] = CustomAiProviders.encode(getCustomAiProviders())
         snapshot[KEY_SHOW_FULL_FILE_NAMES] = isShowFullFileNamesEnabled()
+        snapshot[KEY_HARDWARE_DECODING] = isHardwareDecodingEnabled()
         // Dynamic Padding defaults to enabled and therefore may not have a
         // persisted key until the user changes it. Export the effective value
         // for every ASR timeline so the backup is complete even in that case.
@@ -718,6 +724,20 @@ class SettingsManager private constructor(context: Context) {
     /** 设置播放时是否自动选中播放头经过的字幕。 */
     fun setSelectPlayingSubtitleEnabled(enabled: Boolean) =
         prefs.edit().putBoolean(KEY_SELECT_PLAYING_SUBTITLE, enabled).apply()
+
+    fun isHardwareDecodingEnabled(): Boolean = prefs.getBoolean(KEY_HARDWARE_DECODING, true)
+
+    fun setHardwareDecodingEnabled(enabled: Boolean) =
+        prefs.edit().putBoolean(KEY_HARDWARE_DECODING, enabled).apply()
+
+    internal val hardwareDecodingChanges: Flow<Boolean> = callbackFlow {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_HARDWARE_DECODING || key == null) trySend(isHardwareDecodingEnabled())
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        trySend(isHardwareDecodingEnabled())
+        awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }.distinctUntilChanged()
 
     fun getSubtitleColor(): Int = prefs.getInt(KEY_SUBTITLE_COLOR, DEFAULT_SUBTITLE_COLORS.first())
 

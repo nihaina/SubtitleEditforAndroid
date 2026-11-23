@@ -9,6 +9,7 @@ import android.view.Surface
 import android.view.TextureView
 import com.subtitleedit.mpv.MPVLib
 import com.subtitleedit.mpv.MpvPlayerHost
+import com.subtitleedit.mpv.MpvVideoDecoding
 import com.subtitleedit.util.SubtitleFontManager
 
 /** Player output can disappear/reappear without stopping audio or deferring a media load. */
@@ -46,8 +47,7 @@ internal class PlayerMpvView @JvmOverloads constructor(
             MPVLib.setOptionString("idle", "yes")
             MPVLib.setOptionString("gpu-context", "android")
             MPVLib.setOptionString("opengl-es", "yes")
-            MPVLib.setOptionString("hwdec", "mediacodec-copy,mediacodec")
-            MPVLib.setOptionString("hwdec-codecs", "h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1")
+            MpvVideoDecoding.configure(context)
             val result = MPVLib.init()
             check(result >= 0) { "libmpv 初始化失败：$result" }
             PlayerMpvOptions.configureAfterInit()
@@ -63,6 +63,7 @@ internal class PlayerMpvView @JvmOverloads constructor(
 
     override fun playFile(filePath: String): Unit = synchronized(outputLock) {
         check(initialized) { "libmpv 尚未初始化" }
+        MpvVideoDecoding.refresh(context)
         MPVLib.command(arrayOf("loadfile", filePath, "replace"))
     }
 

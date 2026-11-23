@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -83,7 +84,8 @@ data class SettingsPageState(
     val preserveOutputDirectories: Boolean = true,
     val loopSelectedSubtitle: Boolean = false,
     val selectPlayingSubtitle: Boolean = false,
-    val cacheItems: List<SettingsCacheItem> = emptyList()
+    val cacheItems: List<SettingsCacheItem> = emptyList(),
+    val hardwareDecodingEnabled: Boolean = true
 )
 
 data class SettingsCacheItem(
@@ -116,6 +118,7 @@ fun SettingsScreen(
     onPreserveDirectoriesChanged: (Boolean) -> Unit,
     onLoopSelectedChanged: (Boolean) -> Unit,
     onSelectPlayingChanged: (Boolean) -> Unit,
+    onHardwareDecodingChanged: (Boolean) -> Unit,
     onOpenAiSettings: () -> Unit,
     onOpenModelManagement: () -> Unit,
     onOpenPageTranslation: () -> Unit,
@@ -137,6 +140,37 @@ fun SettingsScreen(
     var showCacheDialog by rememberSaveable { mutableStateOf(false) }
     var showBackupWarning by rememberSaveable { mutableStateOf(false) }
     var pendingCacheKey by rememberSaveable { mutableStateOf<String?>(null) }
+
+    fun LazyListScope.playbackSettings() {
+        item(key = "editor-heading", contentType = "heading") {
+            SectionHeader(stringResource(R.string.activity_settings_text_09), Modifier.padding(bottom = AppSpacing.CardGap))
+        }
+        val count = if (isPlayerSettings) 1 else 3
+        settingsGroupItems("editor", count, useMaterial3Visuals) { index ->
+            when {
+                index == count - 1 -> SettingsPageSwitchRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
+                    title = stringResource(R.string.settings_hardware_decoding),
+                    checked = state.hardwareDecodingEnabled,
+                    onCheckedChange = onHardwareDecodingChanged
+                )
+                index == 0 -> SettingsPageSwitchRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
+                    title = stringResource(R.string.activity_settings_text_10),
+                    description = stringResource(R.string.activity_settings_text_11),
+                    checked = state.loopSelectedSubtitle,
+                    onCheckedChange = onLoopSelectedChanged
+                )
+                else -> SettingsPageSwitchRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
+                    title = stringResource(R.string.activity_settings_text_19),
+                    description = stringResource(R.string.activity_settings_text_20),
+                    checked = state.selectPlayingSubtitle,
+                    onCheckedChange = onSelectPlayingChanged
+                )
+            }
+        }
+    }
 
     AppToolScaffold(
         title = stringResource(R.string.menu_main_title_02),
@@ -180,9 +214,12 @@ fun SettingsScreen(
                     }
                 }
             }
-            if (isPlayerSettings) return@LazyColumn
             item(key = "appearance-gap", contentType = "group-gap") {
                 Spacer(Modifier.height(AppSpacing.CardGap * 2 + if (useMaterial3Visuals) 8.dp else 20.dp))
+            }
+            if (isPlayerSettings) {
+                playbackSettings()
+                return@LazyColumn
             }
             settingsGroupItems("general", 9, useMaterial3Visuals) { index ->
                 when (index) {
@@ -268,27 +305,7 @@ fun SettingsScreen(
             item(key = "directories-gap", contentType = "group-gap") {
                 Spacer(Modifier.height(AppSpacing.CardGap * 2 + if (useMaterial3Visuals) 8.dp else 20.dp))
             }
-            item(key = "editor-heading", contentType = "heading") {
-                SectionHeader(stringResource(R.string.activity_settings_text_09), Modifier.padding(bottom = AppSpacing.CardGap))
-            }
-            settingsGroupItems("editor", 2, useMaterial3Visuals) { index ->
-                when (index) {
-                    0 -> SettingsPageSwitchRow(
-                        useMaterial3Visuals = useMaterial3Visuals,
-                        title = stringResource(R.string.activity_settings_text_10),
-                        description = stringResource(R.string.activity_settings_text_11),
-                        checked = state.loopSelectedSubtitle,
-                        onCheckedChange = onLoopSelectedChanged
-                    )
-                    1 -> SettingsPageSwitchRow(
-                        useMaterial3Visuals = useMaterial3Visuals,
-                        title = stringResource(R.string.activity_settings_text_19),
-                        description = stringResource(R.string.activity_settings_text_20),
-                        checked = state.selectPlayingSubtitle,
-                        onCheckedChange = onSelectPlayingChanged
-                    )
-                }
-            }
+            playbackSettings()
             item(key = "editor-gap", contentType = "group-gap") {
                 Spacer(Modifier.height(AppSpacing.CardGap * 2 + if (useMaterial3Visuals) 8.dp else 20.dp))
             }
@@ -555,7 +572,7 @@ private fun SettingsPageRow(
 private fun SettingsPageSwitchRow(
     useMaterial3Visuals: Boolean,
     title: String,
-    description: String,
+    description: String = "",
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {

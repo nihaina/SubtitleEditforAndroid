@@ -508,6 +508,10 @@ internal fun MainTopLevelPages(
                 state.settingsPage = state.settingsPage.copy(selectPlayingSubtitle = enabled)
                 settings.setSelectPlayingSubtitleEnabled(enabled)
             },
+            onHardwareDecodingChanged = { enabled ->
+                state.settingsPage = state.settingsPage.copy(hardwareDecodingEnabled = enabled)
+                settings.setHardwareDecodingEnabled(enabled)
+            },
             onOpenAiSettings = { context.openActivity(AiSettingsActivity::class.java) },
             onOpenModelManagement = { context.openActivity(ModelManagementActivity::class.java) },
             onOpenPageTranslation = { context.openActivity(PageTranslationSettingsActivity::class.java) },
@@ -650,6 +654,7 @@ private fun loadSettingsPage(
         preserveOutputDirectories = settings.isOutputDirectoryPersistenceEnabled(),
         loopSelectedSubtitle = settings.isLoopSelectedSubtitleEnabled(),
         selectPlayingSubtitle = settings.isSelectPlayingSubtitleEnabled(),
+        hardwareDecodingEnabled = settings.isHardwareDecodingEnabled(),
         cacheItems = cacheItems
     )
 }
