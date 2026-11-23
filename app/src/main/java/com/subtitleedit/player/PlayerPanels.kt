@@ -405,7 +405,7 @@ private fun PlayerSubtitlePanel(state: PlayerUiState, viewModel: PlayerViewModel
             inactiveTrackColor = PlayerColors.SurfaceHigh
         )
     )
-    if (!state.isVideo) {
+    if (!state.showsVideo) {
         PlayerAudioSubtitleLayoutControls(
             lineSpacing = state.audioSubtitleLineSpacing,
             alignment = state.audioSubtitleAlignment,

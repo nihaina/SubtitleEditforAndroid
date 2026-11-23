@@ -166,6 +166,72 @@ class PlayerLandscapeAndSubtitleTest {
         }
     }
 
+    @Test fun videoQuickControlsKeepPlaybackAndSubtitlesOnTheSameSession() {
+        Fixture("video-quick-controls").use { fixture ->
+            val video = File(fixture.root, "video.mp4")
+            val subtitle = File(fixture.root, "video.srt").apply {
+                writeText("1\n00:00:00,000 --> 00:00:04,000\nFirst line\n\n2\n00:00:04,000 --> 00:00:19,500\nSecond line\n")
+            }
+            val generated = FFmpegKit.executeWithArguments(arrayOf(
+                "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=10:duration=20",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=20",
+                "-c:v", "mpeg4", "-c:a", "aac", video.path
+            ))
+            assertTrue(generated.getAllLogsAsString().takeLast(2000), ReturnCode.isSuccess(generated.getReturnCode()))
+            openPlayer(video).use { session ->
+                session.rotate(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, Configuration.ORIENTATION_PORTRAIT)
+                val model = session.model
+                awaitState(model, "video is ready") { it.ready }
+                onMain { model.pause(); model.seekTo(2_000L) }
+                awaitState(model, "video is paused on its first subtitle") {
+                    it.ready && !it.playing && it.positionMs in 1_850L..2_150L && it.subtitleText == "First line"
+                }
+                val buttons = listOf("player-picture-in-picture", "player-video-mute", "player-video-mirror", "player-video-audio-mode")
+                    .map { tag ->
+                        requiredBounds(tag)
+                        val node = requireNotNull(nodeWithTag(tag))
+                        assertTrue("$tag has no visible text", node.text.isNullOrEmpty())
+                        assertFalse("$tag has an accessibility label", node.contentDescription.isNullOrEmpty())
+                        Rect().also(node::getBoundsInScreen)
+                    }
+                assertTrue(buttons.first().top >= requiredBounds("player-top-bar").bottom)
+                assertTrue(buttons.zipWithNext().all { (left, right) -> left.centerY() == right.centerY() && left.right <= right.left })
+
+                val volume = mainValue { MPVLib.getPropertyDouble("volume") }
+                clickTag("player-video-mute")
+                await("mute is applied to mpv") { mainValue { MPVLib.getPropertyBoolean("mute") } == true }
+                assertEquals(volume, mainValue { MPVLib.getPropertyDouble("volume") })
+                clickTag("player-video-mute")
+                await("mute is released") { mainValue { MPVLib.getPropertyBoolean("mute") } == false }
+
+                val originalFilters = mainValue { MPVLib.getPropertyString("vf") }
+                clickTag("player-video-mirror")
+                await("horizontal flip is active") { mainValue { MPVLib.getPropertyString("vf") } != originalFilters }
+                clickTag("player-video-mirror")
+                await("original video filters are restored") { mainValue { MPVLib.getPropertyString("vf") } == originalFilters }
+
+                val videoTrack = mainValue { MPVLib.getPropertyInt("current-tracks/video/id") }
+                assertNotNull(videoTrack)
+                clickTag("player-video-audio-mode")
+                await("mpv deselects the video track") { mainValue { MPVLib.getPropertyInt("current-tracks/video/id") } == null }
+                requiredBounds("player-video-audio-note")
+                requiredBounds("player-video-audio-subtitle")
+                assertEquals("First line", nodeWithTag("player-video-audio-subtitle")?.text?.toString())
+                clickTag("player-video-audio-note")
+                requiredBounds("player-lyrics-list")
+                onMain { model.seekTo(5_000L) }
+                awaitState(model, "subtitles follow seeks in audio mode") { it.subtitleText == "Second line" }
+
+                clickTag("player-video-audio-mode")
+                await("mpv restores the video track") { mainValue { MPVLib.getPropertyInt("current-tracks/video/id") } == videoTrack }
+                awaitState(model, "video resumes the same paused cue and subtitle choice") {
+                    it.showsVideo && !it.playing && it.positionMs in 4_850L..5_150L &&
+                        it.subtitleText == "Second line" && it.selectedSubtitleId == "external:${subtitle.path}"
+                }
+            }
+        }
+    }
+
     private fun assertNativeSubtitleSize(session: Session, size: Int) {
         val expected = mainValue { TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP,
             size.toFloat(), session.activity.resources.displayMetrics).toDouble() }
@@ -360,7 +426,15 @@ class PlayerLandscapeAndSubtitleTest {
         await("visible $tag") { result = boundsOrNull(tag); result != null }
         return requireNotNull(result)
     }
-    private fun boundsOrNull(tag: String): Rect? {
+    private fun boundsOrNull(tag: String): Rect? =
+        nodeWithTag(tag)?.let { Rect().also(it::getBoundsInScreen) }
+
+    private fun clickTag(tag: String) {
+        requiredBounds(tag)
+        assertTrue("$tag is clickable", nodeWithTag(tag)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true)
+    }
+
+    private fun nodeWithTag(tag: String): AccessibilityNodeInfo? {
         val pending = ArrayDeque<AccessibilityNodeInfo>()
         automation.windows.mapNotNull { it.root }.forEach { pending.addLast(it) }
         automation.rootInActiveWindow?.let { pending.addLast(it) }
@@ -368,8 +442,7 @@ class PlayerLandscapeAndSubtitleTest {
             val node = pending.removeFirst()
             val id = node.viewIdResourceName.orEmpty()
             if (id == tag || id.endsWith(":id/$tag")) {
-                val bounds = Rect().also { node.getBoundsInScreen(it) }
-                if (!bounds.isEmpty) return bounds
+                if (!Rect().also(node::getBoundsInScreen).isEmpty) return node
             }
             repeat(node.childCount) { index -> node.getChild(index)?.let { pending.addLast(it) } }
         }

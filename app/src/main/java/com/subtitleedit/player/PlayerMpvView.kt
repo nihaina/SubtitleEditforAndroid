@@ -18,6 +18,7 @@ internal class PlayerMpvView @JvmOverloads constructor(
 ) : TextureView(context, attrs), TextureView.SurfaceTextureListener, MpvPlayerHost {
     private val outputLock = Any()
     private var initialized = false
+    private var videoOutputEnabled = true
     private var outputSurface: Surface? = null
     private var outputWidth = 0
     private var outputHeight = 0
@@ -52,7 +53,7 @@ internal class PlayerMpvView @JvmOverloads constructor(
             PlayerMpvOptions.configureAfterInit()
             PlayerMpvOptions.observe()
             initialized = true
-            outputSurface?.let(::attachOutput)
+            if (videoOutputEnabled) outputSurface?.let(::attachOutput)
         } catch (error: Throwable) {
             initialized = false
             runCatching { MPVLib.destroy() }
@@ -69,11 +70,20 @@ internal class PlayerMpvView @JvmOverloads constructor(
         if (!initialized) return@synchronized
         initialized = false
         try {
-            if (outputSurface != null) runCatching { MPVLib.detachSurface() }
+            if (videoOutputEnabled && outputSurface != null) runCatching { MPVLib.detachSurface() }
             MPVLib.destroy()
         } finally {
             outputSurface?.release()
             outputSurface = null
+        }
+    }
+
+    fun setVideoOutputEnabled(enabled: Boolean): Unit = synchronized(outputLock) {
+        if (videoOutputEnabled == enabled) return@synchronized
+        videoOutputEnabled = enabled
+        val surface = outputSurface ?: return@synchronized
+        if (initialized) {
+            if (enabled) attachOutput(surface) else detachOutput()
         }
     }
 
@@ -82,14 +92,14 @@ internal class PlayerMpvView @JvmOverloads constructor(
         outputHeight = height
         outputSurface?.release()
         outputSurface = Surface(texture)
-        if (initialized) attachOutput(checkNotNull(outputSurface))
+        if (initialized && videoOutputEnabled) attachOutput(checkNotNull(outputSurface))
     }
 
     override fun onSurfaceTextureSizeChanged(texture: SurfaceTexture, width: Int, height: Int): Unit = synchronized(outputLock) {
         val sizeChanged = outputWidth != width || outputHeight != height
         outputWidth = width
         outputHeight = height
-        if (initialized && outputSurface != null && sizeChanged) {
+        if (initialized && videoOutputEnabled && outputSurface != null && sizeChanged) {
             // Recreate the EGL output so a paused frame also gets a correctly sized buffer.
             // Updating android-surface-size alone leaves the old native buffer stretched.
             MPVLib.setPropertyString("vo", "null")
@@ -100,11 +110,7 @@ internal class PlayerMpvView @JvmOverloads constructor(
 
     override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean = synchronized(outputLock) {
         try {
-            if (initialized) {
-                MPVLib.setPropertyString("vo", "null")
-                MPVLib.setPropertyString("force-window", "no")
-                if (outputSurface != null) MPVLib.detachSurface()
-            }
+            if (initialized && videoOutputEnabled && outputSurface != null) detachOutput()
         } finally {
             outputSurface?.release()
             outputSurface = null
@@ -119,6 +125,12 @@ internal class PlayerMpvView @JvmOverloads constructor(
         updateSurfaceSize()
         MPVLib.setPropertyString("force-window", "yes")
         MPVLib.setPropertyString("vo", "gpu-next")
+    }
+
+    private fun detachOutput() {
+        MPVLib.setPropertyString("vo", "null")
+        MPVLib.setPropertyString("force-window", "no")
+        MPVLib.detachSurface()
     }
 
     private fun updateSurfaceSize() {
@@ -168,6 +180,7 @@ internal object PlayerMpvOptions {
         MPVLib.observeProperty("seeking", MPVLib.MpvFormat.FLAG)
         MPVLib.observeProperty("eof-reached", MPVLib.MpvFormat.FLAG)
         MPVLib.observeProperty("track-list", MPVLib.MpvFormat.NONE)
+        MPVLib.observeProperty("video-params/rotate", MPVLib.MpvFormat.INT64)
         MPVLib.observeProperty("sid", MPVLib.MpvFormat.STRING)
         MPVLib.observeProperty("sub-text", MPVLib.MpvFormat.STRING)
     }

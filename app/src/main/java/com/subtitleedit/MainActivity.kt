@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
@@ -581,6 +582,11 @@ class MainActivity : AppComposeActivity() {
         if (hasFocus) applyPlayerWindow()
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applyPlayerWindow()
+    }
+
     private fun updatePlayerWindow(immersive: Boolean, keepScreenOn: Boolean) {
         if (playerImmersive == immersive && playerKeepScreenOn == keepScreenOn) return
         playerImmersive = immersive
@@ -591,7 +597,7 @@ class MainActivity : AppComposeActivity() {
     private fun applyPlayerWindow() {
         if (playerImmersive) {
             window.updatePlayerCutoutMode(resources.configuration.orientation ==
-                android.content.res.Configuration.ORIENTATION_LANDSCAPE, mainCutoutMode)
+                Configuration.ORIENTATION_LANDSCAPE, mainCutoutMode)
             window.hidePlayerSystemBars()
         } else {
             window.updatePlayerCutoutMode(false, mainCutoutMode)

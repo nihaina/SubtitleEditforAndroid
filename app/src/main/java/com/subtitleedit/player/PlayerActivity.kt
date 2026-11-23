@@ -107,14 +107,23 @@ class PlayerActivity : AppComposeActivity() {
                     viewModel.finishRequests.collect { requests -> if (requests > 0) finish() }
                 }
                 CompositionLocalProvider(LocalMediaSelection provides selectionModel.selection) {
-                    PlayerScreen(viewModel, onEditTags = ::openTagEditor, onPickSubtitle = ::openSubtitlePicker,
-                        onLocate = ::locateMediaFile)
-                    StandaloneMediaSelectionHost(
-                        model = selectionModel,
-                        player = viewModel,
+                    val inPictureInPicture = rememberPlayerPictureInPicture()
+                    PlayerScreen(
+                        viewModel,
                         onEditTags = ::openTagEditor,
-                        onLocate = ::locateMediaFile
+                        onPickSubtitle = ::openSubtitlePicker,
+                        onLocate = ::locateMediaFile,
+                        onEnterPictureInPicture = rememberPlayerPictureInPictureAction(viewModel),
+                        inPictureInPicture = inPictureInPicture
                     )
+                    if (!inPictureInPicture) {
+                        StandaloneMediaSelectionHost(
+                            model = selectionModel,
+                            player = viewModel,
+                            onEditTags = ::openTagEditor,
+                            onLocate = ::locateMediaFile
+                        )
+                    }
                 }
             }
         }

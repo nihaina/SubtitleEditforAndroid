@@ -20,6 +20,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.Espresso.pressBack
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.replaceText
 import androidx.test.espresso.action.ViewActions.scrollTo
@@ -27,6 +28,8 @@ import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.subtitleedit.R
+import com.subtitleedit.util.SettingsBackupManager
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -74,17 +77,41 @@ class PlayerSubtitleSettingsTest {
         }
     }
 
-    @Test fun adjustmentsOpenWithoutAndroidPermissionAndShowTheFloatingWindowAsOff() {
-        assumeFalse(Settings.canDrawOverlays(compose.activity))
+    @Test fun openingEachSettingsPageWithoutOverlayPermissionTurnsItsRestoredSwitchOff() {
+        val activity = compose.activity
+        assumeFalse(Settings.canDrawOverlays(activity))
         val preferences = PlayerPreferences.getInstance(compose.activity)
         val saved = preferences.exportSettingsSnapshot()
         try {
-            compose.runOnIdle { preferences.floatingSubtitleEnabled = true }
+            compose.runOnIdle {
+                preferences.floatingSubtitleEnabled = false
+                preferences.statusBarLyrics = PlayerStatusBarLyricsSettings()
+            }
+            fun enabledValue() = JSONObject().put("type", "boolean").put("value", true)
+            SettingsBackupManager.restore(activity, JSONObject().put("schemaVersion", 1)
+                .put("audioModeSettings", JSONObject().put("player", JSONObject()
+                    .put("floating_subtitle_enabled", enabledValue())
+                    .put("status_bar_lyrics_enabled", enabledValue())))
+                .toString())
+            assertTrue(preferences.floatingSubtitleEnabled)
+            assertTrue(preferences.statusBarLyrics.enabled)
             compose.onNodeWithText(text(R.string.player_floating_subtitle_title)).performClick()
             compose.onNodeWithText(text(R.string.player_floating_subtitle_title)).assertIsOff()
             compose.onNodeWithText(text(R.string.player_floating_subtitle_lock)).assertIsNotEnabled()
             compose.onNodeWithTag("player-floating-subtitle").performScrollTo().assertIsDisplayed()
-            compose.runOnIdle { assertFalse(preferences.floatingSubtitleEnabled) }
+            compose.runOnIdle {
+                assertFalse(preferences.floatingSubtitleEnabled)
+                assertTrue(preferences.statusBarLyrics.enabled)
+            }
+
+            pressBack()
+            compose.onNodeWithText(text(R.string.player_status_bar_lyrics_title)).performClick()
+            compose.onNodeWithText(text(R.string.player_status_bar_lyrics_enabled)).assertIsOff()
+            compose.runOnIdle { assertFalse(preferences.statusBarLyrics.enabled) }
+            val playerBackup = JSONObject(SettingsBackupManager.export(activity))
+                .getJSONObject("audioModeSettings").getJSONObject("player")
+            assertFalse(playerBackup.getJSONObject("floating_subtitle_enabled").getBoolean("value"))
+            assertFalse(playerBackup.getJSONObject("status_bar_lyrics_enabled").getBoolean("value"))
         } finally {
             preferences.restoreSettingsSnapshot(saved)
         }

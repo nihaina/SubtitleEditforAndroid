@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -45,6 +46,8 @@ internal fun MainPlayerHost(
     val expanded by viewModel.expanded.collectAsState()
     val outputSuspended by viewModel.outputSuspended.collectAsState()
     val outputGeneration by viewModel.outputGeneration.collectAsState()
+    val inPictureInPicture = rememberPlayerPictureInPicture()
+    val enterPictureInPicture = rememberPlayerPictureInPictureAction(viewModel)
     val density = LocalDensity.current
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val animation = remember { Animatable(if (expanded) 1f else 0f) }
@@ -56,7 +59,7 @@ internal fun MainPlayerHost(
     var miniBounds by remember { mutableStateOf<Rect?>(null) }
     var audioArtworkBounds by remember { mutableStateOf<Rect?>(null) }
     val hasTrack = enabled && state.currentTrack != null
-    BackHandler(enabled = hasTrack && (expanded || dragging || animation.value > 0f)) {
+    BackHandler(enabled = !inPictureInPicture && hasTrack && (expanded || dragging || animation.value > 0f)) {
         viewModel.collapse()
     }
 
@@ -71,9 +74,10 @@ internal fun MainPlayerHost(
             settleVelocity = 0f
         }
     }
-    val progress = (if (dragging) dragProgress else settleStart ?: animation.value).coerceIn(0f, 1f)
+    val progress = if (inPictureInPicture) 1f else
+        (if (dragging) dragProgress else settleStart ?: animation.value).coerceIn(0f, 1f)
     val immersive = hasTrack && (expanded || dragging || progress > 0f)
-    SideEffect { onImmersiveChanged(immersive, hasTrack && (immersive || state.isVideo && state.playing)) }
+    SideEffect { onImmersiveChanged(immersive, hasTrack && (immersive || state.showsVideo && state.playing)) }
     DisposableEffect(Unit) { onDispose { onImmersiveChanged(false, false) } }
 
     BoxWithConstraints(Modifier.fillMaxSize().then(if (enabled) Modifier.testTag("main-player-host")
@@ -90,8 +94,8 @@ internal fun MainPlayerHost(
         val flingThreshold = with(density) { 700.dp.toPx() }
         val travel = (mini?.top ?: heightPx).coerceAtLeast(heightPx * 0.5f)
 
-        Box(Modifier.fillMaxSize().pointerInput(hasTrack, widthPx, heightPx, mini) {
-            if (!hasTrack) return@pointerInput
+        Box(Modifier.fillMaxSize().pointerInput(hasTrack, widthPx, heightPx, mini, inPictureInPicture) {
+            if (!hasTrack || inPictureInPicture) return@pointerInput
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                 val snapshot = currentState
@@ -146,25 +150,33 @@ internal fun MainPlayerHost(
                 if (hasTrack) Box(Modifier.fillMaxWidth().height(72.dp)
                     .onGloballyPositioned { miniBounds = it.boundsInRoot() })
             }
-            if (hasTrack && mini != null && widthPx > 0f && heightPx > 0f) {
-                val sheet = PlayerSheetMotion.mediaBounds(mini, fullBounds, progress)
+            if (inPictureInPicture) Box(Modifier.fillMaxSize().background(Color.Black))
+            if (hasTrack && (mini != null || inPictureInPicture) && widthPx > 0f && heightPx > 0f) {
+                val dockBounds = mini ?: fullBounds
+                val sheet = PlayerSheetMotion.mediaBounds(dockBounds, fullBounds, progress)
                 val thumbnail = with(density) {
-                    Rect(12.dp.toPx(), mini.top + 12.dp.toPx(), 84.dp.toPx(), mini.top + 60.dp.toPx())
+                    Rect(12.dp.toPx(), dockBounds.top + 12.dp.toPx(), 84.dp.toPx(), dockBounds.top + 60.dp.toPx())
                 }
                 val media = PlayerSheetMotion.mediaBounds(thumbnail, fullBounds, progress)
                 val videoScale = media.width / widthPx
-                val background = PlayerColors.pageGradient
-                Box(Modifier.offset { IntOffset(0, sheet.top.roundToInt()) }
-                    .fillMaxWidth().height(with(density) { sheet.height.toDp() }).background(background))
+                if (!inPictureInPicture) {
+                    val background = PlayerColors.pageGradient
+                    Box(Modifier.offset { IntOffset(0, sheet.top.roundToInt()) }
+                        .fillMaxWidth().height(with(density) { sheet.height.toDp() }).background(background))
+                }
 
                 // Measure the TextureView at the viewport size throughout the animation.
                 // Resizing it on each drag frame would rebuild mpv's EGL output each time.
                 val discSize = if (landscape)
                     (LocalConfiguration.current.screenHeightDp.dp * 0.42f).coerceIn(96.dp, 180.dp) else 300.dp
                 val discPx = with(density) { discSize.toPx() }
-                val bottomPadding = if (landscape) 24.dp else 120.dp
+                val bottomPadding = when {
+                    inPictureInPicture -> 0.dp
+                    landscape -> 24.dp
+                    else -> 120.dp
+                }
                 val artOffset = with(density) {
-                    bottomPadding.toPx() / 2f + if (state.showLoudnessWaveform) 30.dp.toPx() else 0f
+                    bottomPadding.toPx() / 2f + if (!state.isVideo && state.showLoudnessWaveform) 30.dp.toPx() else 0f
                 }
                 val artScale = thumbnail.height / discPx + (1f - thumbnail.height / discPx) * progress
                 if (!outputSuspended) key(outputGeneration) { PlayerMediaStage(
@@ -172,7 +184,7 @@ internal fun MainPlayerHost(
                     modifier = Modifier.playerMediaViewport(media),
                     onArtworkBoundsChanged = { audioArtworkBounds = it },
                     videoModifier = Modifier.graphicsLayer {
-                        alpha = if (state.isVideo) 1f else 0f
+                        alpha = if (state.showsVideo) 1f else 0f
                         transformOrigin = TransformOrigin(0f, 0f)
                         scaleX = videoScale
                         scaleY = videoScale
@@ -193,10 +205,12 @@ internal fun MainPlayerHost(
                     translationY = (1f - progress) * travel * 0.55f
                 }) {
                     PlayerScreen(viewModel, onEditTags = onEditTags, onPickSubtitle = onPickSubtitle,
-                        embedded = true, interactionsEnabled = expanded && !dragging && progress >= 0.999f,
+                        embedded = true,
+                        interactionsEnabled = !inPictureInPicture && expanded && !dragging && progress >= 0.999f,
                         embeddedArtworkBounds = audioArtworkBounds,
                         onCollapse = viewModel::collapse, onNavigateToCategory = onNavigateToCategory,
-                        onLocate = onLocate)
+                        onLocate = onLocate, onEnterPictureInPicture = enterPictureInPicture,
+                        inPictureInPicture = inPictureInPicture)
                 }
                 if (progress < 0.34f) PlayerMiniBar(state, viewModel::expand, viewModel::togglePlay,
                     viewModel::previous, viewModel::next,

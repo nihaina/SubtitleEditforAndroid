@@ -270,7 +270,8 @@ internal fun DirectoryTranslationButton(preview: DirectoryTranslationPreviewStat
         if (preview.running) {
             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
         } else {
-            Icon(painterResource(R.drawable.ic_page_translation), contentDescription = null)
+            val icon = if (preview.enabled) R.drawable.ic_page_translation_active else R.drawable.ic_page_translation
+            Icon(painterResource(icon), contentDescription = null)
         }
     }
 }

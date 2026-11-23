@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_picture_in_picture">弹窗播放</string>
+    <string name="player_picture_in_picture_unavailable">无法进入弹窗播放</string>
+    <string name="player_video_mute">静音播放</string>
+    <string name="player_video_mirror">镜像播放</string>
+    <string name="player_video_audio_mode">音频模式</string>
+</resources>

@@ -7,7 +7,6 @@ import android.os.Looper
 import android.util.Log
 import com.subtitleedit.R
 import com.subtitleedit.mpv.MPVLib
-import com.subtitleedit.mpv.MpvPlayerHost
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,7 +17,7 @@ import java.util.UUID
 import kotlin.math.roundToLong
 
 /** Owns one player session. Commands and native callbacks are serialized on the access thread. */
-internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val resources: Resources) :
+internal class PlayerEngine(private val playerHost: PlayerMpvView, private val resources: Resources) :
     MPVLib.EventObserver, MPVLib.LogObserver {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val accessThread = HandlerThread("player-mpv").apply { start() }
@@ -48,6 +47,10 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
     private var durationMs = 0L
     private var speed = 1f
     private var volume = 100
+    private var muted = false
+    private var mirrored = false
+    private var mirrorFilter = ""
+    private var audioOnly = false
     private var audioFilter = ""
     private var subtitleFontSize = PlayerPreferences.DEFAULT_SUBTITLE_FONT_SIZE
     private var loudnessEnabled = false
@@ -56,7 +59,7 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
         override fun run() {
             synchronized(accessLock) {
                 if (released.get() || mediaGeneration != generation.get() || !shouldPollLoudness()) return
-                val audible = MPVLib.getPropertyBoolean("pause") == false &&
+                val audible = !muted && MPVLib.getPropertyBoolean("pause") == false &&
                     MPVLib.getPropertyBoolean("paused-for-cache") != true &&
                     MPVLib.getPropertyBoolean("seeking") != true
                 val level = if (audible) {
@@ -74,7 +77,10 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
         file: File,
         autoplay: Boolean = true,
         loadId: Long = 0L,
-        fallbackSubtitle: PlayerSubtitleOption? = null
+        fallbackSubtitle: PlayerSubtitleOption? = null,
+        muted: Boolean = false,
+        mirrored: Boolean = false,
+        audioOnly: Boolean = false
     ) {
         if (released.get()) return
         val request = generation.incrementAndGet()
@@ -94,8 +100,12 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
             clearEmbeddedSubtitles()
             cacheDirectory = cacheDir
             playRequested = autoplay
+            this.muted = muted
+            this.mirrored = mirrored
+            this.audioOnly = audioOnly
             check(file.isFile && file.canRead()) { "无法读取文件：${file.name}" }
             check(configDir.isDirectory || configDir.mkdirs()) { "无法创建播放器配置目录" }
+            if (audioOnly) playerHost.setVideoOutputEnabled(false)
             if (!initialized) {
                 MPVLib.addObserver(this)
                 MPVLib.addLogObserver(this)
@@ -105,6 +115,7 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
             }
             // Prepare paused, then apply resume/seek and the latest user intent at FILE_LOADED.
             MPVLib.setPropertyBoolean("pause", true)
+            MPVLib.setPropertyBoolean("mute", muted)
             playerHost.playFile(mediaPath)
         }
     }
@@ -199,6 +210,50 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
         if (initialized) MPVLib.setPropertyDouble("volume", PlayerVolumePolicy.mpvVolume(volume))
     }
 
+    fun setMuted(muted: Boolean) = post {
+        if (this.muted == muted) return@post
+        this.muted = muted
+        if (initialized) MPVLib.setPropertyBoolean("mute", muted)
+        if (muted) publishLoudness(0f)
+    }
+
+    fun setMirrored(mirrored: Boolean) = post {
+        this.mirrored = mirrored
+        if (ready) applyMirrorFilter()
+    }
+
+    fun setAudioOnly(audioOnly: Boolean) = post {
+        if (this.audioOnly == audioOnly) return@post
+        this.audioOnly = audioOnly
+        if (ready) applyVideoMode()
+        else if (audioOnly) playerHost.setVideoOutputEnabled(false)
+    }
+
+    private fun applyVideoMode() {
+        if (audioOnly) playerHost.setVideoOutputEnabled(false)
+        // Without an audio track mpv needs the video clock to advance playback and subtitles.
+        // The headless output still discards all frames in that case.
+        val track = if (audioOnly && MPVLib.getPropertyInt("current-tracks/audio/id") != null) "no" else "auto"
+        if (MPVLib.getPropertyString("options/vid") != track) {
+            MPVLib.setPropertyString("file-local-options/vid", track)
+        }
+        applyMirrorFilter()
+        if (!audioOnly) playerHost.setVideoOutputEnabled(true)
+    }
+
+    private fun applyMirrorFilter() {
+        val filter = when {
+            !mirrored || audioOnly -> ""
+            // mpv applies orientation after the filter. Swap axes for quarter turns.
+            MPVLib.getPropertyInt("video-params/rotate")?.rem(180) == 90 -> "vflip"
+            else -> "hflip"
+        }
+        if (filter == mirrorFilter) return
+        // Filter the video before mpv draws subtitles.
+        MPVLib.setPropertyString("vf", filter)
+        mirrorFilter = filter
+    }
+
     fun setSubtitleFontSize(size: Int) = post {
         subtitleFontSize = size.coerceIn(PlayerPreferences.MIN_SUBTITLE_FONT_SIZE, PlayerPreferences.MAX_SUBTITLE_FONT_SIZE)
         if (initialized) applySubtitleFontSize()
@@ -274,6 +329,12 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
         MPVLib.command(arrayOf("seek", (clampPosition(position) / 1000.0).toString(), "absolute+exact"))
     }
 
+    override fun eventProperty(property: String, value: Long) = post {
+        if (property == "video-params/rotate" && ready && mirrored && !audioOnly) {
+            applyMirrorFilter()
+        }
+    }
+
     override fun eventProperty(property: String, value: Double) = post {
         if (!ready || !value.isFinite()) return@post
         when (property) {
@@ -335,6 +396,7 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
                 durationMs = secondsToMs(MPVLib.getPropertyDouble("duration/full"))
                 MPVLib.setPropertyDouble("speed", speed.toDouble())
                 MPVLib.setPropertyDouble("volume", PlayerVolumePolicy.mpvVolume(volume))
+                applyVideoMode()
                 applyAudioFilter()
                 applySubtitleFontSize()
                 val resumePosition = clampPosition(pendingSeekMs ?: 0L)

@@ -81,6 +81,8 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"
+            android:supportsPictureInPicture="true"
             android:theme="@style/Theme.SubtitleEditforAndroid.Compose">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -336,6 +338,7 @@
             android:exported="false"
             android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|smallestScreenSize"
+            android:supportsPictureInPicture="true"
             android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity

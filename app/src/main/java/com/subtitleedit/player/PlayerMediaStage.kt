@@ -2,6 +2,7 @@ package com.subtitleedit.player
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -9,7 +10,10 @@ import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import android.content.res.Configuration
 
 /**
  * The output stays mounted while the host animates between the player and its mini bar.
@@ -32,7 +36,12 @@ internal fun PlayerMediaStage(
             modifier = Modifier.fillMaxSize().then(videoModifier),
             onRelease = viewModel::detach
         )
-        if (!state.isVideo) {
+        if (state.isVideo && state.audioMode) {
+            val configuration = LocalConfiguration.current
+            val noteSize = if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
+                (configuration.screenHeightDp.dp * 0.42f).coerceIn(96.dp, 180.dp) else 300.dp
+            PlayerVideoAudioNote(audioArtworkModifier.size(noteSize))
+        } else if (!state.isVideo) {
             key(state.currentTrack?.path) {
                 PlayerAudioVisual(
                     playing = state.playing,

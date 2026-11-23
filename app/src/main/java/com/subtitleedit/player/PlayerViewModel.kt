@@ -69,6 +69,9 @@ internal data class PlayerUiState(
     val controlsLocked: Boolean = false,
     val panel: PlayerPanel = PlayerPanel.NONE,
     val isVideo: Boolean = false,
+    val muted: Boolean = false,
+    val mirrored: Boolean = false,
+    val audioMode: Boolean = false,
     val seekPreviewMs: Long? = null,
     val gestureHint: PlayerGestureHint? = null,
     val isFavorite: Boolean = false,
@@ -80,6 +83,7 @@ internal data class PlayerUiState(
     val trackContainedPlaylistIds: Set<Long> = emptySet()
 ) {
     val currentTrack: PlayerTrack? get() = playlist.getOrNull(currentIndex)
+    val showsVideo: Boolean get() = isVideo && !audioMode
     val movesBetweenQueues: Boolean get() = endBehavior.enabled && endBehavior.queueAction == PlayerQueueEndAction.NEXT_QUEUE
     val hasPrevious: Boolean get() = currentTrack != null && (positionMs > 5_000L ||
         if (movesBetweenQueues) queueSource != null || adjacentTrack(forward = false) != null
@@ -263,6 +267,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         _state.value = _state.value.copy(playlist = emptyList(), queueVersion = 0L, currentIndex = -1, queueSource = null,
             ready = false, playing = false, positionMs = 0L, durationMs = 0L, error = null,
             controlsLocked = false, lyricsVisible = false, lyricLines = emptyList(),
+            isVideo = false, muted = false, mirrored = false, audioMode = false,
             subtitleOptions = emptyList(), subtitleText = "", subtitleCueTiming = null, gestureHint = null)
     }
 
@@ -334,7 +339,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
                     playing = sample.playing && sample.error == null && !sample.ended,
                     ready = sample.ready,
                     error = sample.error,
-                    loudness = if (snapshot.showLoudnessWaveform && !volumeController.snapshot.muted) sample.loudness else 0f,
+                    loudness = if (snapshot.showLoudnessWaveform && !snapshot.muted && !volumeController.snapshot.muted)
+                        sample.loudness else 0f,
                     loudnessSampleId = sample.loudnessSampleId,
                     subtitleText = sample.subtitleText,
                     subtitleCueTiming = sample.subtitleCueTiming,
@@ -726,11 +732,12 @@ internal class PlayerViewModel @JvmOverloads constructor(
         _state.value = current.copy(
             positionMs = 0L, durationMs = 0L, ready = false, playing = false, error = null,
             isVideo = track.isVideo, subtitleText = "", subtitleCueTiming = null, selectedSubtitleId = "none",
+            muted = track.isVideo && current.muted,
             controlsLocked = current.controlsLocked && track.isVideo,
             controlsVisible = if (current.controlsLocked && !track.isVideo) true else current.controlsVisible,
             subtitleOptions = listOf(SUBTITLE_OFF) + externalSubtitles,
             lyricLines = emptyList(), lyricsLoading = false,
-            lyricsVisible = current.lyricsVisible && !track.isVideo,
+            lyricsVisible = current.lyricsVisible && (!track.isVideo || current.audioMode),
             bookmarks = bookmarkStore.load(track.path), seekPreviewMs = null,
             loudness = 0f, loudnessSampleId = 0L,
             volumeGestureActive = false,
@@ -747,7 +754,9 @@ internal class PlayerViewModel @JvmOverloads constructor(
         if (!shouldPlay) audioFocus.abandon()
         playOnAttach = shouldPlay
         session.start(File(app.filesDir, "player/config"), app.cacheDir, track.file, shouldPlay, loadId,
-            fallbackSubtitle = externalSubtitles.firstOrNull())
+            fallbackSubtitle = externalSubtitles.firstOrNull(),
+            audioOnly = track.isVideo && current.audioMode, mirrored = track.isVideo && current.mirrored,
+            muted = track.isVideo && current.muted)
         session.setSpeed(current.speed)
         session.setAudioFilter(PlayerEqualizer.afFilter(current.equalizer))
         session.setLoudnessEnabled(current.showLoudnessWaveform && !track.isVideo)
@@ -1065,6 +1074,30 @@ internal class PlayerViewModel @JvmOverloads constructor(
         applyVolume(volumeController.setVolume(percent))
     }
 
+    fun toggleMute() {
+        val current = _state.value
+        if (!current.isVideo) return
+        val muted = !current.muted
+        engine?.setMuted(muted)
+        _state.value = current.copy(muted = muted, loudness = 0f)
+    }
+
+    fun toggleMirror() {
+        val current = _state.value
+        if (!current.showsVideo) return
+        val mirrored = !current.mirrored
+        engine?.setMirrored(mirrored)
+        _state.value = current.copy(mirrored = mirrored)
+    }
+
+    fun toggleAudioMode() {
+        val current = _state.value
+        if (!current.isVideo) return
+        val audioMode = !current.audioMode
+        engine?.setAudioOnly(audioMode)
+        _state.value = current.copy(audioMode = audioMode, lyricsVisible = false)
+    }
+
     /** Read before a drag as well as periodically, so hardware keys and system sliders stay in sync. */
     fun refreshSystemVolume(resetBoost: Boolean = false): Int {
         val previous = volumeController.snapshot
@@ -1190,7 +1223,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
     }
 
     fun setLyricsVisible(visible: Boolean) {
-        if (_state.value.isVideo) return
+        if (_state.value.showsVideo) return
         _state.value = _state.value.copy(lyricsVisible = visible)
         if (visible) refreshLyricLines()
     }
