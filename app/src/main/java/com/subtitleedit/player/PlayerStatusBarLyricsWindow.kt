@@ -123,7 +123,8 @@ internal class PlayerStatusBarLyricsWindow(context: Context) {
         val position = settings.verticalPositionPercent.coerceIn(0, 100) / 100f
         overlay.params.width = width
         overlay.params.height = height
-        overlay.params.x = (size.x - width) / 2
+        // Position the narrowed window within the screen before aligning the text inside it.
+        overlay.params.x = floatingSubtitleLeftOffset(size.x - width, settings.style.leftMarginPercent)
         overlay.params.y = first + ((end - first) * position).roundToInt()
         if (overlay.view.parent != null) {
             try {

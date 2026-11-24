@@ -1,10 +1,20 @@
 package com.subtitleedit.editor
 
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.Menu
 import android.view.MenuItem
+import android.view.View
+import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.ActionMenuView
+import androidx.core.view.ViewCompat
+import com.google.android.material.progressindicator.CircularProgressIndicator
 import com.subtitleedit.R
 import com.subtitleedit.EditorEditHistory
+import com.subtitleedit.translation.FoxletPageTranslation
+import kotlin.math.roundToInt
 
 /** Owns editor menu presentation and maps menu commands to host actions. */
 internal class EditorMenuController(
@@ -24,7 +34,8 @@ internal class EditorMenuController(
         redo: EditorEditHistory.Operation?,
         sourceTransitioning: Boolean,
         showTextTranslation: Boolean = false,
-        textTranslationActive: Boolean = false
+        textTranslationActive: Boolean = false,
+        textTranslationRunning: Boolean = false
     ): Boolean {
         menu.clear()
         if (!sourceMode && selectedCount > 0) {
@@ -37,13 +48,17 @@ internal class EditorMenuController(
             menu.findItem(R.id.menu_text_translation)?.apply {
                 isVisible = sourceMode && showTextTranslation
                 if (isVisible) {
-                    isEnabled = !sourceTransitioning
-                    if (textTranslationActive) {
-                        setTitle(R.string.editor_text_translation_show_original)
-                        setIcon(R.drawable.ic_page_translation_active)
-                    }
+                    val supported = FoxletPageTranslation.isSupported
+                    isEnabled = !sourceTransitioning && supported
+                    setTitle(when {
+                        !supported -> R.string.page_translation_unsupported
+                        textTranslationActive -> R.string.editor_text_translation_show_original
+                        else -> R.string.editor_text_translation_preview
+                    })
+                    if (textTranslationActive) setIcon(R.drawable.ic_page_translation_active)
                     contentDescription = title
                     tooltipText = title
+                    if (textTranslationRunning) actionView = translationProgressAction(this)
                 }
             }
             menu.findItem(R.id.menu_undo)?.apply {
@@ -60,6 +75,30 @@ internal class EditorMenuController(
         }
         return true
     }
+
+    private fun translationProgressAction(item: MenuItem): View = FrameLayout(activity).apply {
+        val indicator = CircularProgressIndicator(activity).apply {
+            trackThickness = dp(2)
+            indicatorSize = dp(18)
+            indicatorInset = 0
+            isIndeterminate = true
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        layoutParams = ActionMenuView.LayoutParams(dp(48), dp(48))
+        addView(indicator, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.CENTER))
+        val selectable = TypedValue()
+        if (activity.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, selectable, true)) {
+            setBackgroundResource(selectable.resourceId)
+        }
+        contentDescription = item.contentDescription
+        tooltipText = item.tooltipText
+        ViewCompat.setStateDescription(this, activity.getString(R.string.editor_text_translation_loading))
+        setOnClickListener { if (item.isEnabled) handle(item) }
+        isFocusable = item.isEnabled
+        isEnabled = item.isEnabled
+    }
+
+    private fun dp(value: Int): Int = (activity.resources.displayMetrics.density * value).roundToInt()
 
     fun handle(item: MenuItem): Boolean {
         val action = when (item.itemId) {

@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.subtitleedit.AppComposeActivity
 import com.subtitleedit.R
@@ -165,7 +166,12 @@ class PlayerStatusBarLyricsSettingsActivity : AppComposeActivity() {
                             onCheckedChange = overlayPermission::onCheckedChange,
                         )
                     }
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Box(
+                        Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment { size, space, _ ->
+                            IntOffset(floatingSubtitleLeftOffset(space.width - size.width, settings.style.leftMarginPercent), 0)
+                        },
+                    ) {
                         PlayerFloatingSubtitle(
                             text = stringResource(R.string.player_status_bar_lyrics_preview),
                             style = settings.style,

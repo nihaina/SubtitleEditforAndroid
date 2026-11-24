@@ -1,10 +1,8 @@
 package com.subtitleedit.editor
 
 import android.content.Intent
-import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
-import android.widget.ProgressBar
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowInsetsCompat
@@ -35,10 +33,10 @@ internal class EditorTextTranslationPreview(
     private val showMessage: (String) -> Unit
 ) {
     private var job: Job? = null
-    private var progress: ProgressBar? = null
     private var preview: SourceEditorView? = null
     private var modelDialog: AlertDialog? = null
-    val active: Boolean get() = job != null || preview != null
+    val running: Boolean get() = job != null
+    val active: Boolean get() = running || preview != null
 
     fun start() {
         if (active) return
@@ -53,11 +51,6 @@ internal class EditorTextTranslationPreview(
         }
         source.clearFocus()
         WindowInsetsControllerCompat(activity.window, source).hide(WindowInsetsCompat.Type.ime())
-        val size = (36 * activity.resources.displayMetrics.density).toInt()
-        progress = ProgressBar(activity).apply {
-            contentDescription = activity.getString(R.string.editor_text_translation_loading)
-            container.addView(this, FrameLayout.LayoutParams(size, size, Gravity.CENTER))
-        }
         val translation = activity.lifecycleScope.launch(start = CoroutineStart.LAZY) {
             val request = coroutineContext[Job]
             try {
@@ -110,7 +103,6 @@ internal class EditorTextTranslationPreview(
             } finally {
                 if (job === request) {
                     job = null
-                    removeProgress()
                     onStateChanged()
                 }
             }
@@ -127,7 +119,6 @@ internal class EditorTextTranslationPreview(
         previousJob?.cancel()
         modelDialog?.dismiss()
         modelDialog = null
-        removeProgress()
         preview?.let {
             container.removeView(it)
             source.visibility = View.VISIBLE
@@ -135,10 +126,5 @@ internal class EditorTextTranslationPreview(
         preview = null
         if (wasActive) onStateChanged()
         return wasActive
-    }
-
-    private fun removeProgress() {
-        progress?.let(container::removeView)
-        progress = null
     }
 }

@@ -328,6 +328,18 @@ class PlayerMediaNotificationTest {
                             abs(frame.width() - screenSize.x * .6) <= 1 && abs(frame.left + frame.right - screenSize.x) <= 1
                         } == true
                     }
+                    for ((margin, expectedEdge) in listOf(0 to 0, 100 to screenSize.x)) {
+                        onMain {
+                            val settings = preferences.statusBarLyrics
+                            preferences.statusBarLyrics = settings.copy(style = settings.style.copy(leftMarginPercent = margin))
+                        }
+                        await("the 60% width window reaches the display edge at $margin% left margin") {
+                            captionWindow("PlayerStatusBarLyrics")?.let(::windowFrame)?.let { frame ->
+                                val edge = if (margin == 0) frame.left else frame.right
+                                abs(frame.width() - screenSize.x * .6) <= 1 && edge == expectedEdge
+                            } == true
+                        }
+                    }
                     onMain { preferences.statusBarLyrics = preferences.statusBarLyrics.copy(verticalPositionPercent = 100) }
                     val upperThird = screenSize.y / 3
                     var lowered: Rect? = null

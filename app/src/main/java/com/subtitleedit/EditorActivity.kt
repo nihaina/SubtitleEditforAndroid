@@ -548,7 +548,8 @@ class EditorActivity : AppCompatActivity() {
             sourceViewTransitionJob?.isActive == true || sourceHistorySyncPending ||
             sourceListHistorySyncPending,
         showTextTranslation = canPreviewTextTranslation(),
-        textTranslationActive = textTranslationPreview.active
+        textTranslationActive = textTranslationPreview.active,
+        textTranslationRunning = textTranslationPreview.running
     )
 
     private fun handleMenuClick(item: MenuItem): Boolean = editorCoordinator.handleMenu(item)

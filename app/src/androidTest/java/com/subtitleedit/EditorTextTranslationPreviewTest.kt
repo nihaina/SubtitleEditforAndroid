@@ -1,14 +1,21 @@
 package com.subtitleedit
 
 import android.content.Intent
+import android.graphics.drawable.Drawable
 import android.os.SystemClock
+import android.view.MenuItem
 import android.view.View
+import android.view.ViewGroup
 import androidx.appcompat.widget.Toolbar
+import androidx.core.graphics.drawable.toBitmap
+import androidx.core.view.ViewCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.google.android.material.progressindicator.CircularProgressIndicator
 import com.subtitleedit.editor.EditorMediaType
+import com.subtitleedit.editor.EditorMenuController
 import com.subtitleedit.translation.FoxletPageTranslation
 import com.subtitleedit.translation.PageTranslationLanguage.Companion.CHINESE
 import com.subtitleedit.translation.PageTranslationLanguage.Companion.ENGLISH
@@ -18,6 +25,7 @@ import com.subtitleedit.util.SubtitleParser.SubtitleFormat
 import com.subtitleedit.view.SourceEditorView
 import java.io.File
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -45,6 +53,67 @@ class EditorTextTranslationPreviewTest {
         withDocument(".ass", "[Script Info]\nScriptType: v4.00+\n[Events]\n") { scenario ->
             assertActionHidden(scenario, SubtitleFormat.ASS)
         }
+    }
+
+    @Test fun translationButtonShowsProgressAndCanCancelWhileTranslating() {
+        assumeTrue("Foxlet must be available", FoxletPageTranslation.isSupported)
+        withDocument(".txt", "A plain text document.\n") { scenario ->
+            scenario.onActivity { activity ->
+                val actions = mutableListOf<EditorMenuController.Action>()
+                val controller = EditorMenuController(activity) { actions.add(it) }
+                val menu = Toolbar(activity).menu
+                fun prepare(active: Boolean, running: Boolean = false, transitioning: Boolean = false): MenuItem {
+                    controller.prepare(
+                        menu = menu,
+                        sourceMode = true,
+                        selectedCount = 0,
+                        undo = null,
+                        redo = null,
+                        sourceTransitioning = transitioning,
+                        showTextTranslation = true,
+                        textTranslationActive = active,
+                        textTranslationRunning = running,
+                    )
+                    return requireNotNull(menu.findItem(R.id.menu_text_translation))
+                }
+
+                val idle = prepare(active = false)
+                assertNull(idle.actionView)
+                assertEquals(activity.getString(R.string.editor_text_translation_preview), idle.title.toString())
+                assertSameIcon(activity.getDrawable(R.drawable.ic_page_translation), idle.icon)
+
+                val running = prepare(active = true, running = true)
+                val action = requireNotNull(running.actionView as? ViewGroup)
+                val indicator = requireNotNull(action.getChildAt(0) as? CircularProgressIndicator)
+                val density = activity.resources.displayMetrics.density
+                assertTrue(indicator.isIndeterminate)
+                assertEquals((18 * density).roundToInt(), indicator.indicatorSize)
+                assertEquals((2 * density).roundToInt(), indicator.trackThickness)
+                assertEquals(activity.getString(R.string.editor_text_translation_loading),
+                    ViewCompat.getStateDescription(action).toString())
+                assertTrue(action.isEnabled)
+                assertTrue(action.performClick())
+                assertEquals(listOf(EditorMenuController.Action.TEXT_TRANSLATION), actions)
+
+                val disabled = prepare(active = true, running = true, transitioning = true)
+                assertFalse(requireNotNull(disabled.actionView).isEnabled)
+
+                val preview = prepare(active = true)
+                assertNull(preview.actionView)
+                assertEquals(activity.getString(R.string.editor_text_translation_show_original), preview.title.toString())
+                assertSameIcon(activity.getDrawable(R.drawable.ic_page_translation_active), preview.icon)
+
+                val reset = prepare(active = false)
+                assertNull(reset.actionView)
+                assertSameIcon(activity.getDrawable(R.drawable.ic_page_translation), reset.icon)
+            }
+        }
+    }
+
+    private fun assertSameIcon(expected: Drawable?, actual: Drawable?) {
+        val expectedBitmap = requireNotNull(expected).toBitmap()
+        val actualBitmap = requireNotNull(actual).toBitmap()
+        assertTrue(expectedBitmap.sameAs(actualBitmap))
     }
 
     @Test fun previewUsesUnsavedChangesAndLeavesTheSourceIntact() {
@@ -100,7 +169,9 @@ class EditorTextTranslationPreviewTest {
             val actionLocation = IntArray(2).also(action::getLocationOnScreen)
             val fileLocation = IntArray(2).also(fileMenu::getLocationOnScreen)
             assertTrue(actionLocation[0] + action.width <= fileLocation[0])
-            assertEquals(activity.getString(R.string.editor_text_translation_preview), action.contentDescription.toString())
+            val description = if (FoxletPageTranslation.isSupported) R.string.editor_text_translation_preview
+                else R.string.page_translation_unsupported
+            assertEquals(activity.getString(description), action.contentDescription.toString())
         }
     }
 

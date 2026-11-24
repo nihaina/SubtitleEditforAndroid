@@ -132,9 +132,20 @@ class PlayerSubtitleSettingsTest {
             assertTrue(statusBarEntry.fetchSemanticsNode().boundsInRoot.top < notificationToggle.fetchSemanticsNode().boundsInRoot.top)
             statusBarEntry.performScrollTo().performClick()
             compose.onNodeWithText(text(R.string.player_status_bar_lyrics_enabled)).assertIsOff()
-            compose.onNodeWithTag("player-floating-subtitle").assertIsDisplayed()
+            val preview = compose.onNodeWithTag("player-floating-subtitle").assertIsDisplayed()
             setSlider("status-bar-lyrics-vertical-position", 61f)
             setSlider("status-bar-lyrics-width", 68f)
+            preview.performScrollTo()
+            val centered = preview.fetchSemanticsNode().boundsInRoot
+            setSlider("floating-subtitle-left-margin", 0f)
+            preview.performScrollTo()
+            val leftAligned = preview.fetchSemanticsNode().boundsInRoot
+            setSlider("floating-subtitle-left-margin", 100f)
+            preview.performScrollTo()
+            val rightAligned = preview.fetchSemanticsNode().boundsInRoot
+            assertTrue(leftAligned.left < centered.left && centered.left < rightAligned.left)
+            assertEquals((leftAligned.left + rightAligned.left) / 2, centered.left, 1f)
+            assertEquals(leftAligned.width, rightAligned.width, 1f)
             setSlider("floating-subtitle-left-margin", 32f)
             compose.onNodeWithText(text(R.string.player_floating_subtitle_scroll)).performScrollTo().assertIsOff().performClick().assertIsOn()
             compose.onNodeWithText(text(R.string.player_floating_subtitle_outline_color)).performScrollTo().performClick()

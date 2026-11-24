@@ -1642,7 +1642,7 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun isShowFullFileNamesEnabled(): Boolean =
-        prefs.getBoolean(KEY_SHOW_FULL_FILE_NAMES, false)
+        prefs.getBoolean(KEY_SHOW_FULL_FILE_NAMES, true)
 
     fun setShowFullFileNamesEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_SHOW_FULL_FILE_NAMES, enabled).apply()
