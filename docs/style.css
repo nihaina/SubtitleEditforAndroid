@@ -1,0 +1,451 @@
+/* TsumugiSub 项目主页
+   配色取自 App 自身的 Material 3 主题：主色 #0E58C8，播放高亮 #FFF9C4。 */
+
+:root {
+  color-scheme: light dark;
+
+  --paper: #FBF8FD;
+  --paper-2: #F5F3F7;
+  --ink: #1B1B1F;
+  --muted: #44464F;
+  --line: #C5C6D0;
+  --blue: #0E58C8;
+  --on-blue: #FFFFFF;
+  --accent-text: #0E58C8;
+  --mist: #D9E2FF;
+  --bezel: #1B1B1F;
+  --font: "PingFang SC", "Hiragino Sans GB", "Source Han Sans SC", "Noto Sans SC",
+    "Noto Sans CJK SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  --gutter: clamp(1rem, 5vw, 2rem);
+  --wrap: 72rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #121316;
+    --paper-2: #1B1B1F;
+    --ink: #E3E2E6;
+    --muted: #C5C6D0;
+    --line: #44464F;
+    --blue: #B0C6FF;
+    --on-blue: #001945;
+    --accent-text: #B0C6FF;
+    --mist: #1B2A4A;
+    --bezel: #3A3B40;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 1rem;
+  line-height: 1.75;
+}
+
+[hidden] { display: none !important; }
+
+a { color: var(--accent-text); text-underline-offset: 0.2em; }
+
+:focus-visible {
+  outline: 3px solid var(--blue);
+  outline-offset: 3px;
+}
+
+.wrap {
+  width: 100%;
+  max-width: var(--wrap);
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+/* ---------- 顶栏 ---------- */
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 1rem;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--ink);
+  font-weight: 800;
+  font-size: 1.05rem;
+  text-decoration: none;
+}
+
+.brand svg { width: 1.75rem; height: 1.75rem; flex: none; }
+
+.site-nav { display: flex; align-items: center; gap: 1.1rem; font-size: 0.92rem; }
+.site-nav a { color: var(--muted); text-decoration: none; }
+.site-nav a:hover { color: var(--accent-text); text-decoration: underline; }
+
+.nav-extra { display: none; }
+
+@media (min-width: 36rem) {
+  .nav-extra { display: inline; }
+  .site-nav { gap: 1.5rem; }
+}
+
+/* ---------- 首屏 ---------- */
+
+.hero { padding-block: clamp(2rem, 5vw, 4.25rem); }
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(2.6rem, 9vw, 5.5rem);
+  line-height: 1.08;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+}
+
+.hero h1 span { display: block; }
+.hero h1 .sub { font-weight: 600; color: var(--muted); font-size: 0.5em; line-height: 1.4; margin-top: 0.35em; letter-spacing: 0; }
+
+.lead {
+  margin: 1.25rem 0 0;
+  max-width: 30rem;
+  font-size: clamp(1.1rem, 2.6vw, 1.3rem);
+  line-height: 1.7;
+}
+
+.actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.75rem; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 3rem;
+  padding: 0 1.6rem;
+  border: 2px solid var(--blue);
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background-color 0.15s, color 0.15s, filter 0.15s;
+}
+
+.btn svg { width: 1.15rem; height: 1.15rem; flex: none; }
+
+.btn-primary { background: var(--blue); color: var(--on-blue); }
+.btn-primary:hover { filter: brightness(1.1); }
+
+.btn-ghost { background: transparent; color: var(--accent-text); }
+.btn-ghost:hover { background: var(--mist); }
+
+.hero-note { margin: 1rem 0 0; font-size: 0.92rem; color: var(--muted); }
+#hero-ver::before { content: " · "; }
+
+.demo-caption { margin: 0.6rem 0 0; color: var(--muted); font-size: 0.88rem; }
+
+/* ---------- 通用分区 ---------- */
+
+.section { padding-block: clamp(3rem, 9vw, 6rem); }
+.section-line { border-top: 1px solid var(--line); }
+
+.section h2 {
+  margin: 0 0 clamp(1.5rem, 4vw, 2.5rem);
+  font-size: clamp(1.6rem, 4.5vw, 2.25rem);
+  line-height: 1.3;
+  font-weight: 800;
+}
+
+.section h2 + .section-intro { margin-top: calc(-1 * clamp(0.75rem, 2vw, 1.5rem)); }
+
+.section-intro { max-width: 36rem; margin: 0 0 clamp(1.5rem, 4vw, 2.5rem); color: var(--muted); }
+
+/* ---------- 界面截图 ---------- */
+
+.shots {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: min(73vw, 17rem);
+  gap: 1.25rem;
+  margin: 0;
+  padding: 0 0 0.75rem;
+  list-style: none;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+}
+
+.shots > li { scroll-snap-align: start; }
+.shots .phone:focus-visible { outline-offset: -5px; }
+
+@media (min-width: 48rem) {
+  .shots {
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+    grid-template-columns: repeat(3, minmax(0, 17rem));
+    justify-content: space-between;
+    overflow: visible;
+    padding-bottom: 0;
+  }
+}
+
+.shot { margin: 0; }
+
+.phone {
+  display: block;
+  overflow: hidden;
+  border: 5px solid var(--bezel);
+  border-radius: clamp(1rem, 4vw, 1.6rem);
+  background: var(--paper-2);
+}
+
+.phone img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.shot figcaption { margin-top: 1rem; }
+.shot h3 { margin: 0; font-size: 1.1rem; line-height: 1.4; font-weight: 700; }
+.shot p { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.95rem; line-height: 1.7; }
+
+.audio-shots .phone img {
+  aspect-ratio: 9 / 20;
+  object-fit: contain;
+  background: #f8f6fb;
+}
+
+@media (max-width: 47.99rem) {
+  .audio-shots {
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+    grid-template-columns: minmax(0, 24rem);
+    justify-content: center;
+    overflow: visible;
+    gap: 2rem;
+    padding-bottom: 0;
+  }
+}
+
+/* ---------- 功能列表 ---------- */
+
+.features { margin: 0; }
+
+.feature {
+  display: grid;
+  gap: 0.25rem;
+  padding-block: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.feature:last-child { border-bottom: 1px solid var(--line); }
+
+.feature dt { font-weight: 700; font-size: 1.05rem; }
+.feature dd { margin: 0; max-width: 40rem; }
+
+@media (min-width: 48rem) {
+  .feature { grid-template-columns: 13rem minmax(0, 1fr); gap: 2rem; padding-block: 1.5rem; }
+}
+
+/* ---------- 下载 ---------- */
+
+.dl-grid { display: grid; gap: 1rem; }
+
+@media (min-width: 48rem) {
+  .dl-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; }
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: clamp(1.25rem, 3vw, 1.75rem);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.option.preferred { border-color: var(--blue); background: var(--mist); }
+
+.option h3 { margin: 0; font-size: 1.3rem; line-height: 1.4; font-weight: 800; }
+.option p { margin: 0.5rem 0 0; }
+.option code {
+  font: 0.86em var(--mono);
+  padding: 0.1em 0.4em;
+  white-space: nowrap;
+  border-radius: 4px;
+  background: rgba(127, 127, 127, 0.16);
+}
+
+.download-action { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1.25rem; margin-top: 1.5rem; }
+.dl-note { margin: 0; color: var(--muted); font-size: 0.95rem; max-width: 37rem; }
+
+.release { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--line); }
+.release h3 { margin: 0; font-size: 1.1rem; font-weight: 700; }
+.release ul { margin: 0.75rem 0 0; padding-left: 1.25rem; max-width: 44rem; }
+.release li + li { margin-top: 0.25rem; }
+.release .more { margin: 0.75rem 0 0; font-size: 0.95rem; }
+
+/* ---------- 使用说明 ---------- */
+
+.guides { display: grid; gap: 2rem; }
+
+@media (min-width: 48rem) {
+  .guides { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2.5rem; }
+}
+
+.guide h3 { margin: 0 0 0.75rem; font-size: 1.15rem; line-height: 1.4; font-weight: 700; }
+
+.guide ol { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+
+.guide li {
+  position: relative;
+  padding-left: 2rem;
+  counter-increment: step;
+  font-size: 0.97rem;
+  line-height: 1.7;
+}
+
+.guide li + li { margin-top: 0.6rem; }
+
+.guide li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0.15rem;
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  background: var(--mist);
+  color: var(--accent-text);
+  font: 700 0.78rem/1 var(--mono);
+}
+
+.guides-more { margin: 2rem 0 0; }
+
+/* ---------- 页脚 ---------- */
+
+.site-footer {
+  padding-block: 2.5rem 3rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.site-footer p { margin: 0; max-width: 46rem; }
+.site-footer p + p { margin-top: 0.6rem; }
+.footer-links { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; margin-top: 1rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .btn { transition: none; }
+}
+
+/* ---------- 动效 ----------
+   首屏做一次完整的入场编排；其余动效要么回应操作（按钮、截图、播放），
+   要么在内容滚进视口时出现一次。减少动态效果时，下面的规则全部不生效。 */
+
+@media (prefers-reduced-motion: no-preference) {
+
+  @keyframes line-in {
+    from { opacity: 0; transform: translateY(0.45em); clip-path: inset(0 -0.2em 100% -0.2em); }
+    to   { opacity: 1; transform: none; clip-path: inset(-0.3em -0.2em -0.3em -0.2em); }
+  }
+  @keyframes soft-in  { from { opacity: 0; transform: translateY(0.9rem); } }
+  @keyframes stage-in { from { opacity: 0; transform: translateY(1.5rem) scale(0.985); } }
+  /* 首屏入场：标题逐行擦出，接着介绍、按钮，最后时间轴升起 */
+  .hero h1 span:first-child { animation: line-in 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) backwards; }
+  .hero h1 .sub { animation: line-in 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) 0.12s backwards; }
+  .lead { animation: soft-in 0.7s ease-out 0.32s backwards; }
+  .actions { animation: soft-in 0.7s ease-out 0.44s backwards; }
+  .hero-note { animation: soft-in 0.7s ease-out 0.54s backwards; }
+  .editor-demo { animation: stage-in 1s cubic-bezier(0.2, 0.7, 0.2, 1) 0.6s backwards; }
+
+  /* 按钮 */
+  .btn { transition: background-color 0.15s, color 0.15s, filter 0.15s, transform 0.15s; }
+  .btn:hover { transform: translateY(-1px); }
+  .btn:active { transform: scale(0.98); }
+  .btn-primary svg { transition: transform 0.2s ease; }
+  .btn-primary:hover svg { transform: translateY(2px); }
+
+  /* 截图：悬停或聚焦时轻轻抬起 */
+  .phone { transition: transform 0.25s ease, border-color 0.25s ease; }
+  a.phone:hover, a.phone:focus-visible { transform: translateY(-4px); border-color: var(--blue); }
+
+  /* 页面顶部的阅读进度条，只在浏览器支持滚动驱动动画时出现 */
+  @supports (animation-timeline: scroll()) {
+    @keyframes read-progress { to { transform: scaleX(1); } }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0 0 auto 0;
+      z-index: 20;
+      height: 3px;
+      background: var(--blue);
+      transform: scaleX(0);
+      transform-origin: 0 50%;
+      pointer-events: none;
+      animation: read-progress linear both;
+      animation-timeline: scroll(root block);
+    }
+  }
+
+  /* 滚动进入（homepage.js 会给页面加上 .motion 并标记元素） */
+
+  /* 截图：像屏幕被擦出一样从上往下显现 */
+  .motion .phone[data-reveal] {
+    transition: clip-path 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) var(--d, 0ms), transform 0.25s ease, border-color 0.25s ease;
+  }
+  .motion .phone[data-reveal]:not(.is-in) { clip-path: inset(0 0 100% 0); }
+  .motion .phone[data-reveal].is-in { clip-path: inset(-6px); }
+
+  /* 功能列表：先画出分隔线，再显示文字 */
+  .motion .feature[data-reveal] { position: relative; border-top-color: transparent; }
+  .motion .feature[data-reveal]:last-child { border-bottom-color: transparent; }
+  .motion .feature[data-reveal]::before,
+  .motion .feature[data-reveal]:last-child::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: var(--line);
+    transform-origin: left center;
+    transition: transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) var(--d, 0ms);
+  }
+  .motion .feature[data-reveal]::before { top: -1px; }
+  .motion .feature[data-reveal]:last-child::after { bottom: -1px; transition-delay: calc(var(--d, 0ms) + 250ms); }
+  .motion .feature[data-reveal]:not(.is-in)::before,
+  .motion .feature[data-reveal]:not(.is-in):last-child::after { transform: scaleX(0); }
+  .motion .feature[data-reveal] > * { transition: opacity 0.6s ease calc(var(--d, 0ms) + 200ms); }
+  .motion .feature[data-reveal]:not(.is-in) > * { opacity: 0; }
+
+  /* 下载选项：淡入并轻轻放大到位 */
+  .motion .option[data-reveal] {
+    transition: opacity 0.7s ease var(--d, 0ms), transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) var(--d, 0ms);
+  }
+  .motion .option[data-reveal]:not(.is-in) { opacity: 0; transform: scale(0.97); }
+
+  /* 使用说明：步骤编号依次弹出 */
+  .guide li:nth-child(1) { --n: 0; }
+  .guide li:nth-child(2) { --n: 1; }
+  .guide li:nth-child(3) { --n: 2; }
+  .guide li:nth-child(4) { --n: 3; }
+  .guide li::before {
+    transition: transform 0.5s cubic-bezier(0.3, 1.7, 0.5, 1) calc(var(--d, 0ms) + var(--n, 0) * 110ms + 150ms);
+  }
+  .motion .guide[data-reveal] h3,
+  .motion .guide[data-reveal] li {
+    transition: opacity 0.5s ease calc(var(--d, 0ms) + var(--n, 0) * 110ms + 100ms);
+  }
+  .motion .guide[data-reveal]:not(.is-in) h3,
+  .motion .guide[data-reveal]:not(.is-in) li { opacity: 0; }
+  .motion .guide[data-reveal]:not(.is-in) li::before { transform: scale(0); }
+}

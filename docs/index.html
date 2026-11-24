@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TsumugiSub · Android 字幕编辑器</title>
+  <meta name="description" content="在手机上看波形、打时间轴、把音视频转成字幕。TsumugiSub 是免费开源的 Android 字幕编辑器，支持 SRT、LRC、WebVTT，内置语音转字幕和 AI 翻译。">
+  <meta name="theme-color" content="#FBF8FD" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121316" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="TsumugiSub · Android 字幕编辑器">
+  <meta property="og:description" content="在手机上看波形、打时间轴、把音视频转成字幕。">
+  <link rel="canonical" href="https://nihaina.github.io/SubtitleEditforAndroid/">
+  <meta property="og:url" content="https://nihaina.github.io/SubtitleEditforAndroid/">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 108 108'%3E%3Crect width='108' height='108' rx='24' fill='%230E58C8'/%3E%3Ccircle cx='54' cy='54' r='30' fill='%23fff'/%3E%3Cpath fill='%230E58C8' d='M42 42h10v4h-6v16h6v4H42zM58 42h10v4h-6v16h6v4H58zM27 52h42v4H27zM69 48l12 6l-12 6z'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./editor-demo.css">
+  <script src="./homepage.js" defer></script>
+  <script src="./editor-demo.js" defer></script>
+</head>
+<body id="top">
+
+<div class="wrap">
+  <header class="site-header">
+    <a class="brand" href="#top">
+      <svg viewBox="0 0 108 108" aria-hidden="true">
+        <rect width="108" height="108" rx="24" fill="#0E58C8"/>
+        <circle cx="54" cy="54" r="30" fill="#fff"/>
+        <path fill="#0E58C8" d="M42 42h10v4h-6v16h6v4H42zM58 42h10v4h-6v16h6v4H58zM27 52h42v4H27zM69 48l12 6l-12 6z"/>
+      </svg>
+      TsumugiSub
+    </a>
+    <nav class="site-nav" aria-label="页面导航">
+      <a href="#audio-mode">音声模式</a>
+      <a class="nav-extra" href="#screens">界面</a>
+      <a class="nav-extra" href="#features">功能</a>
+      <a href="#download">下载</a>
+      <a class="nav-extra" href="#usage">说明</a>
+      <a href="https://github.com/nihaina/SubtitleEditforAndroid">GitHub</a>
+    </nav>
+  </header>
+</div>
+
+<main id="main">
+
+  <section class="hero">
+    <div class="wrap">
+      <h1>
+        <span>TsumugiSub</span>
+        <span class="sub">Android 字幕编辑器</span>
+      </h1>
+      <p class="lead">在手机上看波形、打时间轴、把音视频转成字幕。</p>
+
+      <div class="actions">
+        <a class="btn btn-primary" href="#download">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg>
+          下载 APK
+        </a>
+        <a class="btn btn-ghost" href="#usage">查看使用说明</a>
+      </div>
+      <p class="hero-note">Android 8.0 及以上 · GPL-3.0 开源<span id="hero-ver" hidden></span></p>
+
+      <section class="editor-demo" id="editor-demo" aria-label="字幕编辑器演示">
+        <header class="editor-topbar">
+          <button class="editor-icon" type="button" data-demo-action="back" aria-label="返回演示开头" title="返回演示开头">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M19 12H5m7-7-7 7 7 7"/></svg>
+          </button>
+          <div class="editor-file">
+            <strong data-demo-title>注意事项.wav</strong>
+            <small>格式：SRT | 条目数：<span data-demo-count>0</span></small>
+          </div>
+          <button class="editor-icon" type="button" data-demo-action="file" aria-label="文件" title="文件">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l5 5v13H6zM13 3v6h6"/></svg>
+          </button>
+          <button class="editor-action" type="button" data-demo-action="edit">编辑</button>
+        </header>
+        <div class="editor-panel">
+          <div class="editor-waveform">
+            <div class="editor-wave-tools" role="group" aria-label="波形工具栏">
+              <button type="button" data-demo-action="collapse" aria-controls="editor-demo-wave" aria-expanded="true" aria-label="展开或折叠波形图" title="展开或折叠波形图">▼</button>
+              <button type="button" data-demo-action="insert" aria-label="插入字幕（打轴）" title="插入字幕（打轴）">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v13m-4-4 4 4 4-4M5 17H3v4h18v-4h-2"/></svg>
+              </button>
+              <button type="button" data-demo-action="transcribe" aria-label="快速转录" title="快速转录">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11v1a7 7 0 0 0 14 0v-1m-7 8v3m-3 0h6"/></svg>
+              </button>
+              <button type="button" data-demo-action="tts" aria-label="朗读选中的字幕" title="朗读选中的字幕">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M3 9h4l5-4v14l-5-4H3zM15 9a4 4 0 0 1 0 6m3-9a8 8 0 0 1 0 12"/></svg>
+              </button>
+              <button type="button" data-demo-action="split" aria-label="快速拆分当前字幕" title="快速拆分当前字幕">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M9 5H4v14h5m6-14h5v14h-5m-3-17v3m0 2v3m0 2v3m0 2v3m0 2v1"/></svg>
+              </button>
+              <span class="editor-wave-spacer"></span>
+              <button type="button" data-demo-action="view" aria-label="切换波形或频谱" aria-pressed="false" title="切换波形或频谱">波形</button>
+              <button type="button" data-demo-action="gain-down" aria-label="缩小振幅" title="缩小振幅">−</button>
+              <button type="button" data-demo-action="gain-up" aria-label="放大振幅" title="放大振幅">+</button>
+            </div>
+            <div class="editor-timeline" id="editor-demo-wave" data-demo-wave role="slider" tabindex="0" aria-label="波形播放位置" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+              <canvas class="editor-wave" data-demo-canvas aria-hidden="true"></canvas>
+              <div class="editor-clips" data-demo-clips></div>
+              <div class="editor-playhead" data-demo-head aria-hidden="true"></div>
+            </div>
+          </div>
+          <input class="editor-scrubber" data-demo-position type="range" min="0" max="0" value="0" step="0.001" aria-label="播放进度">
+          <div class="editor-transport-line">
+            <button class="editor-icon" type="button" data-demo-action="play" data-demo-icon-text aria-label="播放" title="播放或暂停">▶</button>
+            <select class="editor-speed" data-demo-speed aria-label="播放速度" title="播放速度">
+              <option value="0.5">0.5×</option>
+              <option value="0.75">0.75×</option>
+              <option value="1" selected>1.0×</option>
+              <option value="1.25">1.25×</option>
+              <option value="1.5">1.5×</option>
+              <option value="2">2.0×</option>
+            </select>
+            <span class="editor-current" data-demo-now>00:00:00.000</span>
+            <span class="editor-duration" data-demo-total>00:00:00.000</span>
+          </div>
+        </div>
+        <ol class="editor-rows" data-demo-cues aria-label="字幕条目" role="list"></ol>
+        <p class="editor-status" data-demo-status role="status">正在加载演示素材…</p>
+        <audio data-demo-audio preload="metadata"></audio>
+        <dialog class="editor-dialog" data-demo-dialog aria-labelledby="editor-demo-dialog-title">
+          <form data-demo-form method="dialog">
+            <h2 id="editor-demo-dialog-title" data-demo-dialog-title></h2>
+            <div data-demo-dialog-body></div>
+            <div class="editor-dialog-actions">
+              <button type="submit" value="cancel" formnovalidate>关闭</button>
+              <button type="submit" value="confirm" data-demo-confirm>确定</button>
+            </div>
+          </form>
+        </dialog>
+      </section>
+      <p class="demo-caption">示例音频使用 IndexTTS2 合成。</p>
+    </div>
+  </section>
+
+  <section class="section section-line" id="audio-mode" aria-labelledby="audio-mode-title">
+    <div class="wrap">
+      <h2 id="audio-mode-title">音声模式</h2>
+      <p class="section-intro">在「目录」页开启音声模式后，点开本地音视频即可直接播放。把常听的目录加入媒体库后，可以从「分类」按文件夹或媒体标签找曲目。</p>
+      <ol class="shots audio-shots" aria-label="添加目录、自动分类与播放步骤">
+        <li>
+          <figure class="shot">
+            <a class="phone" href="./assets/audio-mode-scan.webp">
+              <img src="./assets/audio-mode-scan.webp" alt="查看媒体库的目录选择界面" width="720" height="1473" loading="lazy" decoding="async">
+            </a>
+            <figcaption>
+              <h3>1. 添加目录</h3>
+              <p>打开「媒体库 → 文件」，点右下角的「＋」。进入要加入的文件夹，再点「选择此目录」。App 会扫描该目录及子目录中的音视频文件。</p>
+            </figcaption>
+          </figure>
+        </li>
+        <li>
+          <figure class="shot">
+            <a class="phone" href="./assets/audio-mode-categories.webp">
+              <img src="./assets/audio-mode-categories.webp" alt="查看音声模式的文件夹分类与媒体数量" width="720" height="1472" loading="lazy" decoding="async">
+            </a>
+            <figcaption>
+              <h3>2. 查看自动分类</h3>
+              <p>扫描完成后打开「分类」。App 按文件里的标签整理专辑、歌手、艺术家、作曲家和流派。没有专辑标签的曲目，可在「文件夹」里按目录查找。</p>
+            </figcaption>
+          </figure>
+        </li>
+        <li>
+          <figure class="shot">
+            <a class="phone" href="./assets/audio-mode.webp">
+              <img src="./assets/audio-mode.webp" alt="查看音声模式播放器的同步字幕界面" width="617" height="1216" loading="lazy" decoding="async">
+            </a>
+            <figcaption>
+              <h3>3. 打开曲目播放</h3>
+              <p>进入一个分类或文件夹，点击曲目即可播放。有字幕时，播放器会随进度高亮当前句，也可以点字幕跳到对应位置。</p>
+            </figcaption>
+          </figure>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section section-line" id="screens" aria-labelledby="screens-title">
+    <div class="wrap">
+      <h2 id="screens-title">实际界面</h2>
+      <ul class="shots" role="list">
+        <li>
+          <figure class="shot">
+            <a class="phone" href="./assets/waveform.webp">
+              <img src="./assets/waveform.webp" alt="查看波形编辑截图原图" width="617" height="1216" loading="lazy" decoding="async">
+            </a>
+            <figcaption>
+              <h3>波形编辑</h3>
+              <p>对照音频波形调整字幕起止时间。长按快速打轴按钮，移动播放头即可插入字幕。</p>
+            </figcaption>
+          </figure>
+        </li>
+        <li>
+          <figure class="shot">
+            <a class="phone" href="./assets/asr.webp">
+              <img src="./assets/asr.webp" alt="查看 WSA 内语音转字幕截图原图" width="617" height="1216" loading="lazy" decoding="async">
+            </a>
+            <figcaption>
+              <h3>语音转字幕</h3>
+              <p>在 WSA 中使用 SenseVoice 识别日语音频并生成 SRT。</p>
+            </figcaption>
+          </figure>
+        </li>
+        <li>
+          <figure class="shot">
+            <a class="phone" href="./assets/translate.webp">
+              <img src="./assets/translate.webp" alt="查看 AI字幕处理页面截图原图" width="617" height="1216" loading="lazy" decoding="async">
+            </a>
+            <figcaption>
+              <h3>字幕翻译</h3>
+              <p>在「AI字幕处理」中添加多个字幕文件，选择「一键翻译」，批量输出译文。</p>
+            </figcaption>
+          </figure>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section section-line" id="features">
+    <div class="wrap">
+      <h2>主要功能</h2>
+      <dl class="features">
+        <div class="feature">
+          <dt>字幕编辑</dt>
+          <dd>打开 SRT、LRC、WebVTT 和 TXT，点一下就能改时间和文本。支持批量时间偏移，多选后复制、粘贴、删除，也可以直接编辑源文本。</dd>
+        </div>
+        <div class="feature">
+          <dt>波形打轴</dt>
+          <dd>打开 mp3、wav、flac 等音频，在波形上拖动字幕调整时间轴，或者长按按钮快速打轴。</dd>
+        </div>
+        <div class="feature">
+          <dt>音声模式</dt>
+          <dd>从目录直接播放本地音视频，跟随进度查看字幕，也可收藏曲目、调整倍速或设置定时关闭。 <a href="#audio-mode">查看音声模式</a></dd>
+        </div>
+        <div class="feature">
+          <dt>语音转字幕</dt>
+          <dd>支持 Whisper、SenseVoice 等 sherpa-onnx 模型。可以批量处理音频和视频，用 VAD 检测语音片段，运行中随时取消。</dd>
+        </div>
+        <div class="feature">
+          <dt>AI 翻译</dt>
+          <dd>在设置里填入自己的 API Key，选中字幕就能翻译、预览、应用。字幕按顺序发送，沿用同一段对话上下文。下载语言包后，也可离线预览文件夹名称和文本内容的翻译。</dd>
+        </div>
+        <div class="feature">
+          <dt>文稿匹配</dt>
+          <dd>提供 txt 文稿和对应的音频，一键输出带时间戳的字幕文件。</dd>
+        </div>
+        <div class="feature">
+          <dt>人声分离</dt>
+          <dd>用 HTDemucs ONNX 模型在手机上分离音轨，可输出人声、鼓、贝斯和其他。</dd>
+        </div>
+        <div class="feature">
+          <dt>音视频转换</dt>
+          <dd>在常用音频和视频格式之间转换，从视频里提取音频，也可以合并或分离视频与音轨。</dd>
+        </div>
+        <div class="feature">
+          <dt>悬浮窗与状态栏字幕</dt>
+          <dd>播放音视频时，可以将字幕显示在悬浮窗或状态栏。</dd>
+        </div>
+        <div class="feature">
+          <dt>草稿箱</dt>
+          <dd>手动保存编辑草稿，随时回来继续。</dd>
+        </div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="section section-line" id="download">
+    <div class="wrap">
+      <h2>下载</h2>
+      <p class="section-intro">需要 Android 8.0（API 26）及以上。</p>
+
+      <div class="dl-grid">
+        <div class="option preferred">
+          <h3>普通版</h3>
+          <p>适合大多数设备。现在的手机通常选 <code>arm64-v8a</code>。如果不确定处理器架构，有 <code>universal</code> 安装包时可以选它。</p>
+        </div>
+        <div class="option">
+          <h3>QNN 版</h3>
+          <p>适合在兼容的高通骁龙设备上用 NPU 运行 SenseVoice。选择文件名包含 <code>qnn</code> 的 <code>arm64-v8a</code> 安装包。</p>
+        </div>
+      </div>
+
+      <div class="download-action">
+        <a class="btn btn-primary" href="https://github.com/nihaina/SubtitleEditforAndroid/releases/latest">查看最新 APK</a>
+        <p class="dl-note">在 GitHub 版本页的 Assets 中选择 APK。首次从浏览器安装时，Android 可能会要求允许安装未知来源的应用。</p>
+      </div>
+
+      <div class="release" id="release" hidden>
+        <h3>最新版本 <span id="ver"></span></h3>
+        <ul id="notes"></ul>
+        <p class="more"><a href="https://github.com/nihaina/SubtitleEditforAndroid/releases">查看全部版本</a></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-line" id="usage">
+    <div class="wrap">
+      <h2>使用说明</h2>
+      <div class="guides">
+        <div class="guide">
+          <h3>编辑字幕</h3>
+          <ol>
+            <li>在主界面选择字幕或音频文件，点开进入编辑界面。</li>
+            <li>点击时间轴或文本进行编辑，长按字幕查看更多操作。</li>
+            <li>有音频时，在波形图里拖动字幕改时间，长按快速打轴按钮并移动播放头来打轴。</li>
+            <li>用草稿箱备份，记得及时保存。</li>
+          </ol>
+        </div>
+        <div class="guide">
+          <h3>语音转字幕</h3>
+          <ol>
+            <li>下载 <a href="https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models">sherpa-onnx ASR 模型</a>，解压到好找的文件夹。</li>
+            <li>在模型配置里选择模型文件，需要时调整 VAD 参数。</li>
+            <li>选择音频或视频文件，设置语言、格式和输出目录。</li>
+            <li>开始转换，可以看到进度和日志。</li>
+          </ol>
+        </div>
+        <div class="guide">
+          <h3>AI 翻译</h3>
+          <ol>
+            <li>在设置里配置 AI 平台、API Key 和模型。</li>
+            <li>在编辑器里选中要翻译的字幕。</li>
+            <li>长按，选择“AI 翻译”。</li>
+            <li>预览翻译结果，满意后应用。</li>
+          </ol>
+        </div>
+      </div>
+      <p class="guides-more">完整说明见 <a href="https://github.com/nihaina/SubtitleEditforAndroid#使用说明">README</a>。遇到问题或想要新功能，欢迎到 <a href="https://github.com/nihaina/SubtitleEditforAndroid/issues">Issues</a> 反馈。</p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>TsumugiSub 是开源项目，使用 GPL-3.0 协议授权。语音转字幕基于 sherpa-onnx，人声分离基于 demixr-app，部分功能参考了 Subtitle Edit。</p>
+    <div class="footer-links">
+      <a href="https://github.com/nihaina/SubtitleEditforAndroid">GitHub 仓库</a>
+      <a href="https://github.com/nihaina/SubtitleEditforAndroid/releases">Releases</a>
+      <a href="https://github.com/nihaina/SubtitleEditforAndroid/issues">Issues</a>
+      <a href="https://github.com/nihaina/SubtitleEditforAndroid/blob/main/THIRD_PARTY_NOTICES.md">第三方许可</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
