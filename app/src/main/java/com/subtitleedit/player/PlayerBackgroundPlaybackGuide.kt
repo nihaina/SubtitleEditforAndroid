@@ -41,6 +41,10 @@ internal fun PlayerBackgroundPlaybackGuide(onDismiss: (Boolean) -> Unit) {
     var showSteps by rememberSaveable { mutableStateOf(false) }
     var suppressFuturePrompts by rememberSaveable { mutableStateOf(false) }
     var settingsUnavailable by rememberSaveable { mutableStateOf(false) }
+    val openSettings: () -> Unit = {
+        if (openBackgroundPlaybackSettings(context)) onDismiss(suppressFuturePrompts)
+        else settingsUnavailable = true
+    }
 
     AppDialog(
         onDismissRequest = {
@@ -65,14 +69,10 @@ internal fun PlayerBackgroundPlaybackGuide(onDismiss: (Boolean) -> Unit) {
                                 style = MaterialTheme.typography.bodyLarge)
                         }
                     }
-                    Text(stringResource(R.string.player_background_guide_coloros))
-                    if (settingsUnavailable) {
-                        Text(stringResource(R.string.player_background_guide_settings_unavailable),
-                            color = MaterialTheme.colorScheme.error)
-                    }
+                    Text(stringResource(R.string.player_background_guide_device_settings))
                 } else {
                     Text(stringResource(R.string.player_background_guide_interrupted))
-                    AppPrimaryButton(stringResource(R.string.player_background_guide_continue), onClick = { showSteps = true })
+                    AppPrimaryButton(stringResource(R.string.player_background_guide_continue), onClick = openSettings)
                     Text(stringResource(R.string.player_background_guide_explanation))
                     Row(
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(
@@ -88,6 +88,10 @@ internal fun PlayerBackgroundPlaybackGuide(onDismiss: (Boolean) -> Unit) {
                             style = MaterialTheme.typography.bodyLarge)
                     }
                 }
+                if (settingsUnavailable) {
+                    Text(stringResource(R.string.player_background_guide_settings_unavailable),
+                        color = MaterialTheme.colorScheme.error)
+                }
             }
         },
         dismissButton = {
@@ -96,8 +100,7 @@ internal fun PlayerBackgroundPlaybackGuide(onDismiss: (Boolean) -> Unit) {
         confirmButton = {
             TextButton(onClick = {
                 if (!showSteps) showSteps = true
-                else if (openBackgroundPlaybackSettings(context)) onDismiss(suppressFuturePrompts)
-                else settingsUnavailable = true
+                else openSettings()
             }) {
                 Text(stringResource(if (showSteps) R.string.player_background_guide_open_settings
                     else R.string.player_background_guide_next))
@@ -107,8 +110,13 @@ internal fun PlayerBackgroundPlaybackGuide(onDismiss: (Boolean) -> Unit) {
 }
 
 private fun openBackgroundPlaybackSettings(context: Context): Boolean {
-    val appDetails = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
-    val actions = listOf(appDetails, Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS), Intent(Settings.ACTION_SETTINGS))
+    val appUri = Uri.fromParts("package", context.packageName, null)
+    val actions = listOf(
+        Intent(ACTION_VIEW_ADVANCED_POWER_USAGE_DETAIL, appUri),
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, appUri),
+        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+        Intent(Settings.ACTION_SETTINGS),
+    )
     for (intent in actions) {
         try {
             context.startActivity(intent)
@@ -121,3 +129,6 @@ private fun openBackgroundPlaybackSettings(context: Context): Boolean {
     }
     return false
 }
+
+// Settings exports this action on devices that provide a direct app battery page.
+private const val ACTION_VIEW_ADVANCED_POWER_USAGE_DETAIL = "android.settings.VIEW_ADVANCED_POWER_USAGE_DETAIL"

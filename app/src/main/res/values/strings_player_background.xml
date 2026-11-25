@@ -7,10 +7,10 @@
     <string name="player_background_guide_suppress">不再显示</string>
     <string name="player_background_guide_next">下一步</string>
     <string name="player_background_guide_steps_title">设置后台播放</string>
-    <string name="player_background_guide_app_path">在系统的应用信息页，打开「电池」或「应用耗电管理」。</string>
+    <string name="player_background_guide_app_path">在「应用的电池使用情况」页面，按以下步骤设置。</string>
     <string name="player_background_guide_allow_usage">1. 开启「允许后台使用」或「允许后台活动」。</string>
     <string name="player_background_guide_unrestricted">2. 将电池使用设为「不受限制」，或在「电池优化」中选择「不优化」。</string>
-    <string name="player_background_guide_coloros">ColorOS 也可从「设置 → 电池 → 应用耗电管理」找到本应用。菜单名称可能因系统版本而异。</string>
+    <string name="player_background_guide_device_settings">不同设备的设置入口存在差异，若设置未正常生效，可尝试从系统设置里开启相关选项</string>
     <string name="player_background_guide_open_settings">打开系统设置</string>
     <string name="player_background_guide_settings_unavailable">无法直接打开。请手动进入「系统设置 → 应用 → 应用管理」，找到本应用后调整电池设置。</string>
 </resources>

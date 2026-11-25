@@ -2,7 +2,7 @@
 <resources>
     <string name="player_mode_title">音声模式</string>
     <string name="player_allow_concurrent_playback">允许与其他应用同时播放</string>
-    <string name="player_usb_exclusive_title">独占 USB</string>
+    <string name="player_usb_exclusive_title">USB 独占</string>
     <string name="player_usb_exclusive_on">已开启</string>
     <string name="player_usb_exclusive_off">已关闭</string>
     <string name="player_usb_settings_title">USB DAC 独占输出</string>
