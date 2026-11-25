@@ -95,6 +95,14 @@ The minimal Android Surface and JNI integration is derived from mpv-android,
 commit `20a3fa526fac6d3fe267aee0d4c349893fee65a3`, under the MIT License. The
 license text is distributed at `assets/licenses/mpv-android-LICENSE.txt`.
 
+## libusb 1.0.29
+
+The Android direct USB audio output links [libusb 1.0.29](https://github.com/libusb/libusb/tree/v1.0.29)
+statically into libmpv. libusb is copyright its contributors and is licensed
+under LGPL-2.1-or-later. The license text is included in the runtime AAR at
+`assets/licenses/libusb-COPYING.txt`. The build uses the pinned upstream source
+archive and Android configuration described in `native/mpv/README.md`.
+
 ## FFmpegKit Next and FFmpeg
 
 FFmpegKit Next 8.1.0 is used to build FFmpeg n8.1.2 and the Java/JNI command

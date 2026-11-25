@@ -4,7 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-RUNTIME_VERSION="0.41.0-ffmpeg8.1.2-2"
+RUNTIME_VERSION="0.41.0-ffmpeg8.1.2-5"
+VERIFY_APKS="${VERIFY_APKS:-1}"
 FFMPEG_VERSION="${FFMPEG_VERSION:-8.1.0-mpv5}"
 APK_FLAVOR="${APK_FLAVOR:-standard}"
 RUNTIME_AAR="${PROJECT_ROOT}/app/libs/mpv-runtime-maven/com/subtitleedit/native/mpv-android-runtime/${RUNTIME_VERSION}/mpv-android-runtime-${RUNTIME_VERSION}.aar"
@@ -29,6 +30,10 @@ trap 'rm -rf "${VERIFY_ROOT}"' EXIT
 mkdir -p "${VERIFY_ROOT}/runtime" "${VERIFY_ROOT}/ffmpeg"
 unzip -q "${RUNTIME_AAR}" -d "${VERIFY_ROOT}/runtime"
 unzip -q "${FFMPEG_AAR}" -d "${VERIFY_ROOT}/ffmpeg"
+[[ -f "${VERIFY_ROOT}/runtime/assets/licenses/libusb-COPYING.txt" ]] || {
+    echo "error: libusb license missing from mpv runtime AAR" >&2
+    exit 1
+}
 
 abis=(armeabi-v7a arm64-v8a x86 x86_64)
 ffmpeg_libraries=(
@@ -46,6 +51,12 @@ for abi in "${abis[@]}"; do
     ffmpeg_dir="${VERIFY_ROOT}/ffmpeg/jni/${abi}"
     [[ -f "${runtime_dir}/libmpv.so" ]]
     [[ -f "${runtime_dir}/libsubtitleedit_mpv.so" ]]
+
+    if ! LC_ALL=C grep -aFq 'Android direct USB PCM output' "${runtime_dir}/libmpv.so" ||
+        grep -Eq 'Shared library: \[libusb[^]]*\]' < <(readelf -dW "${runtime_dir}/libmpv.so"); then
+        echo "error: missing built-in Android USB output or unexpected shared libusb for ${abi}" >&2
+        exit 1
+    fi
 
     if find "${runtime_dir}" -maxdepth 1 -type f \
         \( -name 'libav*.so' -o -name 'libsw*.so' \) | grep -q .; then
@@ -85,6 +96,11 @@ done < <(find \
     "${VERIFY_ROOT}/ffmpeg/jni/x86_64" \
     -type f -name '*.so' -print0)
 
+if [[ "${VERIFY_APKS}" == 0 ]]; then
+    echo "Verified AAR dependencies, USB output, licenses, and 64-bit 16 KB ELF alignment."
+    exit 0
+fi
+
 for variant in debug release; do
     apk_dir="${PROJECT_ROOT}/app/build/outputs/apk/${APK_FLAVOR}/${variant}"
     universal_apks=("${apk_dir}"/*universal*.apk)
@@ -97,7 +113,7 @@ for variant in debug release; do
     mkdir -p "${apk_root}"
     unzip -q "${universal_apks[0]}" -d "${apk_root}"
     for license in \
-        7zip-LICENSE.txt GPL-3.0.txt THIRD_PARTY_NOTICES.md mpv-android-LICENSE.txt; do
+        7zip-LICENSE.txt GPL-3.0.txt THIRD_PARTY_NOTICES.md mpv-android-LICENSE.txt libusb-COPYING.txt; do
         [[ -f "${apk_root}/assets/licenses/${license}" ]] || {
             echo "error: ${license} missing from ${variant} universal APK" >&2
             exit 1
@@ -107,6 +123,7 @@ for variant in debug release; do
     for abi in armeabi-v7a arm64-v8a x86_64; do
         [[ -f "${apk_root}/lib/${abi}/libmpv.so" ]]
         [[ -f "${apk_root}/lib/${abi}/libsubtitleedit_mpv.so" ]]
+        LC_ALL=C grep -aFq 'Android direct USB PCM output' "${apk_root}/lib/${abi}/libmpv.so"
         for library in "${ffmpeg_libraries[@]}"; do
             [[ -f "${apk_root}/lib/${abi}/${library}" ]]
         done

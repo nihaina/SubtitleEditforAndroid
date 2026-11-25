@@ -517,6 +517,10 @@ internal fun MainTopLevelPages(
                 state.settingsPage = state.settingsPage.copy(allowConcurrentPlayback = enabled)
                 PlayerPreferences.getInstance(context).allowConcurrentPlayback = enabled
             },
+            onUsbExclusiveEnabledChanged = { enabled ->
+                state.settingsPage = state.settingsPage.copy(usbExclusiveEnabled = enabled)
+                PlayerPreferences.getInstance(context).usbExclusiveEnabled = enabled
+            },
             onOpenAiSettings = { context.openActivity(AiSettingsActivity::class.java) },
             onOpenModelManagement = { context.openActivity(ModelManagementActivity::class.java) },
             onOpenPageTranslation = { context.openActivity(PageTranslationSettingsActivity::class.java) },
@@ -661,6 +665,7 @@ private fun loadSettingsPage(
         selectPlayingSubtitle = settings.isSelectPlayingSubtitleEnabled(),
         hardwareDecodingEnabled = settings.isHardwareDecodingEnabled(),
         allowConcurrentPlayback = PlayerPreferences.getInstance(context).allowConcurrentPlayback,
+        usbExclusiveEnabled = PlayerPreferences.getInstance(context).usbExclusiveEnabled,
         cacheItems = cacheItems
     )
 }

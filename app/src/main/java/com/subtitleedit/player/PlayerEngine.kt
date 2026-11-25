@@ -4,7 +4,10 @@ import android.content.res.Resources
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
+import android.widget.Toast
 import com.subtitleedit.R
 import com.subtitleedit.mpv.MPVLib
 import com.subtitleedit.mpv.MpvVideoDecoding
@@ -18,12 +21,18 @@ import java.util.UUID
 import kotlin.math.roundToLong
 
 /** Owns one player session. Commands and native callbacks are serialized on the access thread. */
-internal class PlayerEngine(private val playerHost: PlayerMpvView, private val resources: Resources) :
+internal class PlayerEngine(
+    private val playerHost: PlayerMpvView,
+    private val resources: Resources,
+    private val onUsbInterrupted: () -> Unit,
+) :
     MPVLib.EventObserver, MPVLib.LogObserver {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val accessThread = HandlerThread("player-mpv").apply { start() }
     private val accessHandler = Handler(accessThread.looper)
     private val accessLock = Any()
+    private val usbAudio = PlayerUsbAudio(playerHost.context.applicationContext, accessHandler, accessLock, ::onUsbRouteChanged)
+    private var usbWakeLock: PowerManager.WakeLock? = null
     private val released = AtomicBoolean(false)
     private val generation = AtomicLong(0L)
     private val _state = MutableStateFlow(PlayerEngineState())
@@ -36,6 +45,12 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
     private var mediaPath = ""
     private var ready = false
     private var playRequested = false
+        set(value) {
+            if (field == value) return
+            field = value
+            updateUsbPlaybackPower()
+            resetUsbProgress()
+        }
     private var completed = false
     private var pendingSeekMs: Long? = null
     private var pendingSubtitle: PlayerSubtitleOption? = null
@@ -48,6 +63,24 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
     private var durationMs = 0L
     private var speed = 1f
     private var volume = 100
+    private var usbVolume = 100
+    private var usbVolumeMode = PlayerUsbVolumeMode.SOFTWARE
+    private var usbExclusiveRequested = false
+    private var usbFailedPath: String? = null
+    @Volatile private var usbOutputDescriptor: Int? = null
+    val usesDirectUsb: Boolean get() = usbOutputDescriptor != null
+    private var usbStalled = false
+    private var usbLastPositionMs = -1L
+    private var usbProgressAt = 0L
+    private val usbProgressCheck = object : Runnable {
+        override fun run() = synchronized(accessLock) {
+            if (released.get() || !shouldWatchUsbProgress()) return@synchronized
+            if (SystemClock.elapsedRealtime() - usbProgressAt >= USB_PROGRESS_TIMEOUT_MS && canAdvancePlayback()) {
+                setUsbStalled(true)
+            }
+            accessHandler.postDelayed(this, USB_PROGRESS_INTERVAL_MS)
+        }
+    }
     private var muted = false
     private var mirrored = false
     private var mirrorFilter = ""
@@ -64,7 +97,7 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
                     MPVLib.getPropertyBoolean("paused-for-cache") != true &&
                     MPVLib.getPropertyBoolean("seeking") != true
                 val level = if (audible) {
-                    PlayerLoudness.level(MPVLib.getPropertyString(PlayerLoudness.RMS_PROPERTY), volume)
+                    PlayerLoudness.level(MPVLib.getPropertyString(PlayerLoudness.RMS_PROPERTY), outputVolume())
                 } else 0f
                 publishLoudness(level)
                 accessHandler.postDelayed(this, PlayerLoudness.SAMPLE_INTERVAL_MS)
@@ -81,14 +114,19 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
         fallbackSubtitle: PlayerSubtitleOption? = null,
         muted: Boolean = false,
         mirrored: Boolean = false,
-        audioOnly: Boolean = false
+        audioOnly: Boolean = false,
+        usbExclusive: Boolean = false,
+        usbVolumeMode: PlayerUsbVolumeMode = PlayerUsbVolumeMode.SOFTWARE,
+        volume: PlayerVolumeSnapshot,
     ) {
         if (released.get()) return
         val request = generation.incrementAndGet()
         publish(request) { PlayerEngineState(loadId = loadId) }
         post(request) {
             mediaGeneration = request
+            resetUsbProgress()
             mediaPath = file.absolutePath
+            if (usbFailedPath != mediaPath) usbFailedPath = null
             ready = false
             accessHandler.removeCallbacks(loudnessPoll)
             completed = false
@@ -104,6 +142,9 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
             this.muted = muted
             this.mirrored = mirrored
             this.audioOnly = audioOnly
+            this.volume = volume.softwarePercent
+            usbVolume = volume.percent
+            this.usbVolumeMode = usbVolumeMode
             check(file.isFile && file.canRead()) { "无法读取文件：${file.name}" }
             check(configDir.isDirectory || configDir.mkdirs()) { "无法创建播放器配置目录" }
             if (audioOnly) playerHost.setVideoOutputEnabled(false)
@@ -112,11 +153,13 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
                 MPVLib.addLogObserver(this)
                 observing = true
                 playerHost.initialize(configDir.absolutePath, cacheDir.absolutePath)
+                MPVLib.observeProperty("current-ao", MPVLib.MpvFormat.STRING)
                 initialized = true
             }
             // Prepare paused, then apply resume/seek and the latest user intent at FILE_LOADED.
             MPVLib.setPropertyBoolean("pause", true)
             MPVLib.setPropertyBoolean("mute", muted)
+            configureUsbOutput(usbExclusive)
             playerHost.playFile(mediaPath)
         }
     }
@@ -128,8 +171,9 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
                 (durationMs > 0L && secondsToMs(MPVLib.getPropertyDouble("time-pos")) >= durationMs)
             if (atEnd) seek(0L)
             completed = false
-            MPVLib.setPropertyBoolean("pause", false)
-            publish { copy(playing = true, ended = false) }
+            val playing = !usbAudio.awaitingPermission
+            MPVLib.setPropertyBoolean("pause", !playing)
+            publish { copy(playing = playing, ended = false) }
             resetLoudnessPolling()
         }
     }
@@ -149,9 +193,13 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
         pendingSubtitle = null
         activeSubtitleTiming = null
         fallbackSubtitle = null
+        mediaPath = ""
         clearEmbeddedSubtitles()
         accessHandler.removeCallbacks(loudnessPoll)
-        if (initialized) MPVLib.command(arrayOf("stop"))
+        if (initialized) {
+            MPVLib.command(arrayOf("stop"))
+            configureUsbOutput(false)
+        }
         publish { copy(ready = false, playing = false, ended = false, loudness = 0f, subtitleCueTiming = null) }
     }
 
@@ -206,9 +254,138 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
         publish { copy(loudness = level, loudnessSampleId = sampleId) }
     }
 
-    fun setVolume(percent: Int) = post {
-        volume = percent.coerceIn(0, 200)
-        if (initialized) MPVLib.setPropertyDouble("volume", PlayerVolumePolicy.mpvVolume(volume))
+    fun setVolume(snapshot: PlayerVolumeSnapshot) = post {
+        volume = snapshot.softwarePercent
+        usbVolume = snapshot.percent
+        if (initialized) applyVolume()
+    }
+
+    private fun applyVolume() {
+        MPVLib.setPropertyDouble("volume", PlayerVolumePolicy.mpvVolume(outputVolume()))
+    }
+
+    private fun outputVolume() = when {
+        !usesDirectUsb -> volume
+        usbVolumeMode == PlayerUsbVolumeMode.FIXED -> 100
+        else -> usbVolume.coerceAtMost(100)
+    }
+
+    fun setUsbVolumeMode(mode: PlayerUsbVolumeMode) = post {
+        usbVolumeMode = mode
+        if (initialized && usesDirectUsb) applyVolume()
+    }
+
+    fun setUsbExclusive(enabled: Boolean) = post {
+        if (!initialized || mediaPath.isEmpty() || usbExclusiveRequested == enabled) return@post
+        usbFailedPath = null
+        MPVLib.setPropertyBoolean("pause", true)
+        configureUsbOutput(enabled)
+        resumeAfterUsbChange()
+    }
+
+    private fun configureUsbOutput(enabled: Boolean) {
+        usbExclusiveRequested = enabled
+        val useUsb = enabled && usbFailedPath != mediaPath
+        if (useUsb) usbAudio.start()
+        setUsbOutput(usbAudio.descriptor.takeIf { useUsb })
+        if (!enabled) usbAudio.close()
+    }
+
+    private fun setUsbOutput(descriptor: Int?) {
+        if (usbOutputDescriptor == descriptor) return
+        usbOutputDescriptor = descriptor
+        updateUsbPlaybackPower()
+        resetUsbProgress()
+        if (descriptor == null) {
+            PlayerUsbDiagnostics.setActive(false)
+            MPVLib.setOptionString("android-usb-fd", "-1")
+            MPVLib.setOptionString("ao", "audiotrack,opensles")
+            applyVolume()
+        } else {
+            applyVolume()
+            val fdResult = MPVLib.setOptionString("android-usb-fd", descriptor.toString())
+            val aoResult = if (fdResult >= 0) MPVLib.setOptionString("ao", "android-usb") else fdResult
+            if (aoResult < 0) {
+                PlayerUsbDiagnostics.record("mpv rejected USB output configuration: $aoResult", failed = true)
+                setUsbOutput(null)
+                usbAudio.close()
+                notifyUsbOutput(R.string.player_usb_exclusive_failed)
+            }
+        }
+    }
+
+    private fun onUsbRouteChanged(change: UsbRouteChange) {
+        if (!initialized || released.get()) return
+        val lost = change == UsbRouteChange.DETACHED
+        if (lost) playRequested = false
+        if (usbAudio.descriptor != null) usbFailedPath = null
+        MPVLib.setPropertyBoolean("pause", true)
+        setUsbOutput(usbAudio.descriptor)
+        resumeAfterUsbChange()
+        if (lost) notifyUsbOutput(R.string.player_usb_exclusive_disconnected, interrupted = true)
+        else if (change == UsbRouteChange.PERMISSION_RESULT && usbAudio.descriptor == null) {
+            notifyUsbOutput(R.string.player_usb_exclusive_failed)
+        }
+    }
+
+    private fun resumeAfterUsbChange() {
+        if (ready) {
+            MPVLib.setPropertyBoolean("pause", !playRequested || usbAudio.awaitingPermission)
+            refreshPlaybackState()
+        }
+    }
+
+    private fun notifyUsbOutput(message: Int, interrupted: Boolean = false) {
+        val context = playerHost.context.applicationContext
+        val request = mediaGeneration
+        mainHandler.post {
+            if (!released.get() && generation.get() == request) {
+                if (interrupted) onUsbInterrupted()
+                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun updateUsbPlaybackPower() {
+        if (usesDirectUsb && playRequested && !released.get()) {
+            if (usbWakeLock == null) {
+                val power = playerHost.context.getSystemService(PowerManager::class.java) ?: return
+                usbWakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SubtitleEdit:UsbPlayback").apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+                PlayerUsbDiagnostics.record("USB playback wake lock acquired")
+            }
+        } else {
+            usbWakeLock?.let {
+                it.release()
+                usbWakeLock = null
+                PlayerUsbDiagnostics.record("USB playback wake lock released")
+            }
+        }
+    }
+
+    private fun shouldWatchUsbProgress(): Boolean =
+        ready && playRequested && usesDirectUsb && PlayerUsbDiagnostics.active.value
+
+    private fun updateUsbProgressCheck() {
+        accessHandler.removeCallbacks(usbProgressCheck)
+        if (shouldWatchUsbProgress()) accessHandler.postDelayed(usbProgressCheck, USB_PROGRESS_INTERVAL_MS)
+        else setUsbStalled(false)
+    }
+
+    private fun resetUsbProgress() {
+        usbLastPositionMs = -1L
+        usbProgressAt = SystemClock.elapsedRealtime()
+        setUsbStalled(false)
+        updateUsbProgressCheck()
+    }
+
+    private fun setUsbStalled(stalled: Boolean) {
+        if (usbStalled == stalled) return
+        usbStalled = stalled
+        PlayerUsbDiagnostics.record(if (stalled) "USB playback position stopped advancing" else "USB playback stall cleared")
+        publish { copy(usbStalled = stalled) }
     }
 
     fun setMuted(muted: Boolean) = post {
@@ -286,6 +463,9 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
                 Log.e(TAG, "Releasing libmpv failed", error)
             } finally {
                 initialized = false
+                updateUsbPlaybackPower()
+                if (usesDirectUsb) PlayerUsbDiagnostics.setActive(false)
+                usbAudio.close()
                 clearEmbeddedSubtitles()
                 accessThread.quitSafely()
             }
@@ -331,6 +511,7 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
         if (durationMs > 0L) position.coerceIn(0L, durationMs) else position.coerceAtLeast(0L)
 
     private fun seek(position: Long) {
+        if (usesDirectUsb) resetUsbProgress()
         MPVLib.command(arrayOf("seek", (clampPosition(position) / 1000.0).toString(), "absolute+exact"))
     }
 
@@ -345,6 +526,11 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
         when (property) {
             "time-pos" -> {
                 val position = secondsToMs(value)
+                if (usesDirectUsb && position != usbLastPositionMs) {
+                    usbLastPositionMs = position
+                    usbProgressAt = SystemClock.elapsedRealtime()
+                    setUsbStalled(false)
+                }
                 publish { copy(positionMs = position) }
                 // Consecutive equal-text cues may cross the old end with no sub-text event.
                 if (activeSubtitleTiming?.let { position >= it.endMs } == true) queueSubtitleRefresh()
@@ -374,6 +560,13 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
     }
 
     override fun eventProperty(property: String, value: String) = post {
+        if (property == "current-ao") {
+            val direct = usesDirectUsb && value == "android-usb"
+            if (direct && !PlayerUsbDiagnostics.active.value) PlayerUsbDiagnostics.record("USB exclusive output active")
+            PlayerUsbDiagnostics.setActive(direct)
+            resetUsbProgress()
+            return@post
+        }
         if (!ready) return@post
         when (property) {
             "sub-text" -> queueSubtitleRefresh()
@@ -385,6 +578,10 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
     }
 
     override fun eventProperty(property: String) = post {
+        if (property == "current-ao" && usesDirectUsb) {
+            PlayerUsbDiagnostics.setActive(false)
+            resetUsbProgress()
+        }
         if (!ready) return@post
         when (property) {
             "track-list" -> refreshSubtitleTracks()
@@ -400,7 +597,7 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
                 completed = false
                 durationMs = secondsToMs(MPVLib.getPropertyDouble("duration/full"))
                 MPVLib.setPropertyDouble("speed", speed.toDouble())
-                MPVLib.setPropertyDouble("volume", PlayerVolumePolicy.mpvVolume(volume))
+                applyVolume()
                 applyVideoMode()
                 applyAudioFilter()
                 applySubtitleFontSize()
@@ -420,8 +617,9 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
                 applySubtitle(PlayerSubtitleSelection.initial(explicit, internalTracks,
                     embeddedSubtitles.firstOrNull() ?: fallbackSubtitle))
                 pendingSubtitle = null
-                MPVLib.setPropertyBoolean("pause", !playRequested)
-                val playing = playRequested
+                val playing = playRequested && !usbAudio.awaitingPermission
+                MPVLib.setPropertyBoolean("pause", !playing)
+                if (usesDirectUsb) resetUsbProgress()
                 val duration = durationMs
                 publish {
                     copy(ready = true, playing = playing, durationMs = duration,
@@ -436,6 +634,7 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
             }
             MPVLib.MpvEvent.SHUTDOWN -> {
                 ready = false
+                playRequested = false
                 accessHandler.removeCallbacks(loudnessPoll)
                 publish { copy(ready = false, playing = false, ended = false, loudness = 0f,
                     subtitleCueTiming = null, error = "播放器已停止") }
@@ -444,12 +643,14 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
     }
 
     private fun refreshPlaybackState() {
-        val playing = !completed && MPVLib.getPropertyBoolean("pause") == false &&
-            MPVLib.getPropertyBoolean("paused-for-cache") != true &&
-            MPVLib.getPropertyBoolean("seeking") != true
+        val playing = !completed && canAdvancePlayback()
+        if (!playing && usesDirectUsb) resetUsbProgress()
         publish { copy(playing = playing, loudness = if (playing) loudness else 0f) }
         resetLoudnessPolling()
     }
+
+    private fun canAdvancePlayback() = MPVLib.getPropertyBoolean("pause") == false &&
+        MPVLib.getPropertyBoolean("paused-for-cache") != true && MPVLib.getPropertyBoolean("seeking") != true
 
     override fun endFileError(error: Int, message: String) = post {
         ready = false
@@ -461,6 +662,20 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
 
     override fun logMessage(prefix: String, level: Int, text: String) {
         if (!released.get() && level <= 20) Log.e(TAG, "[$prefix] ${text.trim()}")
+        if (released.get() || prefix != "ao/android-usb") return
+        PlayerUsbDiagnostics.record(text, failed = level <= 20)
+        if (text.startsWith("USB direct output failed:")) post {
+            if (!initialized || usbOutputDescriptor == null) return@post
+            usbFailedPath = mediaPath
+            playRequested = false
+            MPVLib.setPropertyBoolean("pause", true)
+            setUsbOutput(null)
+            usbAudio.releaseForRetry()
+            if (ready) refreshPlaybackState()
+            val disconnected = text.contains("device disconnected", ignoreCase = true) || text.contains("LIBUSB_ERROR_NO_DEVICE")
+            notifyUsbOutput(if (disconnected) R.string.player_usb_exclusive_disconnected else R.string.player_usb_exclusive_failed,
+                interrupted = true)
+        }
     }
 
     private fun applySubtitle(option: PlayerSubtitleOption) {
@@ -579,5 +794,9 @@ internal class PlayerEngine(private val playerHost: PlayerMpvView, private val r
     private fun secondsToMs(value: Double?): Long =
         value?.takeIf { it.isFinite() }?.let { (it * 1000.0).toLong().coerceAtLeast(0L) } ?: 0L
 
-    private companion object { const val TAG = "PlayerEngine" }
+    private companion object {
+        const val TAG = "PlayerEngine"
+        const val USB_PROGRESS_INTERVAL_MS = 1_000L
+        const val USB_PROGRESS_TIMEOUT_MS = 3_000L
+    }
 }

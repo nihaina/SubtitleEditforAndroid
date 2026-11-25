@@ -51,7 +51,7 @@ class SettingsPageLayoutTest {
 
         compose.onNodeWithText(compose.activity.getString(R.string.activity_settings_text_01)).assertIsDisplayed()
         compose.onNodeWithText(compose.activity.getString(R.string.activity_settings_text_02)).assertIsDisplayed()
-        compose.onAllNodes(hasClickAction()).assertCountEquals(5)
+        compose.onAllNodes(hasClickAction()).assertCountEquals(6)
         compose.onNodeWithText(compose.activity.getString(R.string.player_subtitle_settings_title))
             .assertIsDisplayed().performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.activity_settings_text_09)).assertIsDisplayed()
@@ -60,6 +60,21 @@ class SettingsPageLayoutTest {
         concurrentPlayback.assertIsDisplayed().assertIsOff().performClick()
         concurrentPlayback.assertIsOn().performClick()
         concurrentPlayback.assertIsOff()
+        val usbExclusive = compose.onNodeWithText(compose.activity.getString(R.string.player_usb_exclusive_title))
+        val usbSwitch = compose.onNodeWithText(compose.activity.getString(R.string.player_usb_enable))
+        usbSwitch.assertDoesNotExist()
+        usbExclusive.assertIsDisplayed().performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.player_usb_settings_title)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.file_picker_refresh)).assertIsDisplayed()
+        usbSwitch.assertIsDisplayed().assertIsOff().performClick()
+        usbSwitch.assertIsOn().performClick()
+        usbSwitch.assertIsOff()
+        compose.onNodeWithText(compose.activity.getString(R.string.player_usb_open_logs)).performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.player_usb_log_title)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.player_usb_settings_close)).performClick()
+        usbSwitch.assertIsDisplayed().assertIsOff()
+        compose.onNodeWithText(compose.activity.getString(R.string.player_usb_settings_close)).performClick()
+        usbSwitch.assertDoesNotExist()
         compose.runOnIdle { assertEquals(1, subtitleSettingsOpened) }
     }
 
@@ -81,6 +96,7 @@ class SettingsPageLayoutTest {
         compose.onNode(hasScrollAction()).performScrollToNode(hasText(hardwareDecoding))
         checkHardwareDecodingSwitch()
         compose.onNodeWithText(compose.activity.getString(R.string.player_allow_concurrent_playback)).assertDoesNotExist()
+        compose.onNodeWithText(compose.activity.getString(R.string.player_usb_exclusive_title)).assertDoesNotExist()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText(backup))
         val row = compose.onNodeWithText(backup)
         val before = row.fetchSemanticsNode().boundsInRoot
@@ -110,7 +126,7 @@ class SettingsPageLayoutTest {
     ) {
         restoration.setContent {
             SubtitleEditComposeTheme {
-                Surface(Modifier.requiredSize(360.dp, 500.dp)) {
+                Surface(Modifier.requiredSize(360.dp, if (onOpenPlayerSubtitleSettings == null) 500.dp else 560.dp)) {
                     SettingsScreen(
                         state = state.value, encodings = FileUtils.SUPPORTED_ENCODINGS,
                         showTopBar = false, useMaterial3Visuals = material,
@@ -119,6 +135,7 @@ class SettingsPageLayoutTest {
                         onLoopSelectedChanged = {}, onSelectPlayingChanged = {},
                         onHardwareDecodingChanged = { state.value = state.value.copy(hardwareDecodingEnabled = it) },
                         onAllowConcurrentPlaybackChanged = { state.value = state.value.copy(allowConcurrentPlayback = it) },
+                        onUsbExclusiveEnabledChanged = { state.value = state.value.copy(usbExclusiveEnabled = it) },
                         onOpenAiSettings = {}, onOpenModelManagement = {}, onOpenTtsSettings = {},
                         onOpenPageTranslation = { actions += "translation" },
                         onOpenLogs = {}, onOpenAbout = {}, onSelectSoftwareDirectory = {},

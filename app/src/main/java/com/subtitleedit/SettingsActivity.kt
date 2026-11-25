@@ -63,7 +63,8 @@ class SettingsActivity : AppComposeActivity() {
                     onBackup = { backupExporter.launch(getString(R.string.app_name) + ".json") },
                     onRestore = { backupImporter.launch(arrayOf("application/json", "text/plain", "*/*")) },
                     onOpenPlayerSubtitleSettings = openPlayerSubtitleSettings,
-                    onAllowConcurrentPlaybackChanged = viewModel::setAllowConcurrentPlayback
+                    onAllowConcurrentPlaybackChanged = viewModel::setAllowConcurrentPlayback,
+                    onUsbExclusiveEnabledChanged = viewModel::setUsbExclusiveEnabled
                 )
             }
         }

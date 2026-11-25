@@ -113,6 +113,7 @@ internal class MainPlayerController(
     }
 
     override fun onResume(owner: LifecycleOwner) {
+        viewModel.onPlayerWindowResumed()
         viewModel.refreshRestoredSettings()
         if (!PlayerOutputHandoff.hasExclusiveOwner) viewModel.resumeOutput()
         viewModel.refreshSystemVolume()
@@ -123,6 +124,9 @@ internal class MainPlayerController(
     }
 
     override fun onStop(owner: LifecycleOwner) {
+        if (!activity.isChangingConfigurations && !activity.isFinishing && !activity.isInPictureInPictureMode) {
+            viewModel.onPlayerWindowStopped()
+        }
         if (audioDevicesRegistered) {
             audioManager.unregisterAudioDeviceCallback(audioDevices)
             audioDevicesRegistered = false

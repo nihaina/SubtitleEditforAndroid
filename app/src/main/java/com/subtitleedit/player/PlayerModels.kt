@@ -76,6 +76,7 @@ internal data class PlayerEngineState(
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val playing: Boolean = false,
+    val usbStalled: Boolean = false,
     val ready: Boolean = false,
     val ended: Boolean = false,
     val loudness: Float = 0f,

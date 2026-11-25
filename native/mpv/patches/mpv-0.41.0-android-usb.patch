@@ -1,0 +1,58 @@
+diff --git a/audio/out/ao.c b/audio/out/ao.c
+--- a/audio/out/ao.c
++++ b/audio/out/ao.c
+@@ -37,6 +37,7 @@
+ 
+ extern const struct ao_driver audio_out_oss;
+ extern const struct ao_driver audio_out_audiotrack;
++extern const struct ao_driver audio_out_android_usb;
+ extern const struct ao_driver audio_out_audiounit;
+ extern const struct ao_driver audio_out_coreaudio;
+ extern const struct ao_driver audio_out_coreaudio_exclusive;
+@@ -105,6 +106,9 @@
+     &audio_out_sndio,
+ #endif
+     &audio_out_null,
++#if HAVE_ANDROID_USB
++    &audio_out_android_usb,
++#endif
+ #if HAVE_COREAUDIO
+     &audio_out_coreaudio_exclusive,
+ #endif
+diff --git a/meson.build b/meson.build
+--- a/meson.build
++++ b/meson.build
+@@ -866,6 +866,33 @@
+     sources += files('audio/out/ao_audiotrack.c')
+ endif
+ 
++# Android USB host access is granted by the application and passed in as a
++# file descriptor. Keep this driver out of the general audio autoprobe list.
++features += {'android-usb': features['android']}
++if features['android-usb']
++    usb_dir = 'audio/out/subtitleedit-libusb'
++    usb_source = usb_dir / 'libusb'
++    android_usb = static_library('subtitleedit-libusb',
++        files(usb_source / 'core.c', usb_source / 'descriptor.c',
++              usb_source / 'hotplug.c', usb_source / 'io.c',
++              usb_source / 'sync.c', usb_source / 'strerror.c',
++              usb_source / 'os/events_posix.c', usb_source / 'os/threads_posix.c',
++              usb_source / 'os/linux_netlink.c', usb_source / 'os/linux_usbfs.c'),
++        include_directories: include_directories(usb_dir / 'android', usb_source,
++                                                 usb_source / 'os'),
++        implicit_include_directories: false,
++        gnu_symbol_visibility: 'hidden',
++        c_args: ['-pthread'],
++        pic: true)
++    dependencies += declare_dependency(
++        link_with: android_usb,
++        include_directories: include_directories(usb_dir / 'include'),
++        dependencies: cc.find_library('log'),
++        link_args: ['-Wl,--exclude-libs,libsubtitleedit-libusb.a'])
++    sources += files('audio/out/ao_android_usb.c', 'audio/out/usb_transport.c')
++endif
++
++
+ aaudio_opt = get_option('aaudio').require(features['android'])
+ features += {'aaudio': cc.has_header_symbol('aaudio/AAudio.h',
+                                             'AAudioStream', required: aaudio_opt)}

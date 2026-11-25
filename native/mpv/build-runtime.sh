@@ -8,8 +8,10 @@ FFMPEG_KIT_DIR="${FFMPEG_KIT_DIR:-${HOME}/src/subtitleedit-ffmpeg-kit-next}"
 WORK_DIR="${SUBTITLEEDIT_MPV_WORK_DIR:-${HOME}/subtitleedit-mpv-build}"
 MPV_ANDROID_COMMIT="20a3fa526fac6d3fe267aee0d4c349893fee65a3"
 MPV_VERSION="0.41.0"
-RUNTIME_VERSION="0.41.0-ffmpeg8.1.2-2"
+RUNTIME_VERSION="0.41.0-ffmpeg8.1.2-5"
 FFMPEG_ARTIFACT_VERSION="8.1.0-mpv1"
+LIBUSB_VERSION="1.0.29"
+LIBUSB_SHA256="7c2dd39c0b2589236e48c93247c986ae272e27570942b4163cb00a060fcf1b74"
 
 require_tool() {
     command -v "$1" >/dev/null 2>&1 || {
@@ -32,12 +34,31 @@ download_source() {
     local name="$1"
     local url="$2"
     local archive_type="$3"
+    local checksum="${4:-}"
     local destination="${WORK_DIR}/sources/${name}"
-    if [[ -f "${destination}/.subtitleedit-ready" ]]; then
+    if [[ -f "${destination}/.subtitleedit-ready" ]] && \
+        [[ "$(<"${destination}/.subtitleedit-ready")" == "${checksum}" ]]; then
         return
     fi
     mkdir -p "${destination}"
     echo "Downloading ${name}"
+    if [[ -n "${checksum}" ]]; then
+        local archive
+        archive="$(mktemp)"
+        if ! curl --fail -L --retry 3 --connect-timeout 30 --max-time 300 -o "${archive}" "${url}" ||
+            ! printf '%s  %s\n' "${checksum}" "${archive}" | sha256sum --check --status; then
+            rm -f "${archive}"
+            echo "error: could not verify ${name} source archive" >&2
+            exit 1
+        fi
+        if ! tar -xz --strip-components=1 -C "${destination}" -f "${archive}"; then
+            rm -f "${archive}"
+            exit 1
+        fi
+        rm -f "${archive}"
+        printf '%s' "${checksum}" > "${destination}/.subtitleedit-ready"
+        return
+    fi
     case "${archive_type}" in
         gz) curl -L --retry 3 --connect-timeout 30 --max-time 300 "${url}" | tar -xz --strip-components=1 -C "${destination}" ;;
         xz) curl -L --retry 3 --connect-timeout 30 --max-time 300 "${url}" | tar -xJ --strip-components=1 -C "${destination}" ;;
@@ -53,6 +74,8 @@ download_source "mpv-android-${MPV_ANDROID_COMMIT}" \
     "https://codeload.github.com/mpv-android/mpv-android/tar.gz/${MPV_ANDROID_COMMIT}" gz
 download_source "mpv-${MPV_VERSION}" \
     "https://codeload.github.com/mpv-player/mpv/tar.gz/refs/tags/v${MPV_VERSION}" gz
+download_source "libusb-${LIBUSB_VERSION}" \
+    "https://codeload.github.com/libusb/libusb/tar.gz/refs/tags/v${LIBUSB_VERSION}" gz "${LIBUSB_SHA256}"
 download_source "libass-0.17.4" \
     "https://codeload.github.com/libass/libass/tar.gz/refs/tags/0.17.4" gz
 download_source "libplacebo-6.338.2" \
@@ -114,9 +137,15 @@ link_dependency fontconfig fontconfig-2.16.0
 
 MPV_SOURCE_DIR="${DEPS_DIR}/mpv"
 MPV_AUDIOTRACK_PATCH="${SCRIPT_DIR}/patches/mpv-0.41.0-audiotrack-pause.patch"
-MPV_PATCH_HASH="$(sha256sum "${MPV_AUDIOTRACK_PATCH}")"
-MPV_PATCH_FINGERPRINT="${MPV_VERSION}-${MPV_PATCH_HASH%% *}"
-MPV_SOURCE_PATCH_MARKER="${MPV_SOURCE_DIR}/.subtitleedit-audiotrack-patch"
+MPV_ANDROID_USB_PATCH="${SCRIPT_DIR}/patches/mpv-0.41.0-android-usb.patch"
+MPV_USB_FILES=(ao_android_usb.c usb_transport.c usb_transport.h)
+MPV_PATCH_HASH="$(cd "${SCRIPT_DIR}" &&
+    sha256sum "patches/$(basename "${MPV_AUDIOTRACK_PATCH}")" \
+        "patches/$(basename "${MPV_ANDROID_USB_PATCH}")" | sha256sum)"
+MPV_PATCH_FINGERPRINT="${MPV_VERSION}-${MPV_PATCH_HASH%% *}-${LIBUSB_SHA256}"
+MPV_USB_HASH="$(cd "${SCRIPT_DIR}" && sha256sum "${MPV_USB_FILES[@]/#/usb/}" | sha256sum)"
+MPV_RUNTIME_FINGERPRINT="${MPV_PATCH_FINGERPRINT}-${MPV_USB_HASH%% *}"
+MPV_SOURCE_PATCH_MARKER="${MPV_SOURCE_DIR}/.subtitleedit-mpv-patches"
 if [[ ! -f "${MPV_SOURCE_PATCH_MARKER}" ]] || \
     [[ "$(<"${MPV_SOURCE_PATCH_MARKER}")" != "${MPV_PATCH_FINGERPRINT}" ]]; then
     # Start from pinned, clean sources when a patch is added or updated.
@@ -124,12 +153,20 @@ if [[ ! -f "${MPV_SOURCE_PATCH_MARKER}" ]] || \
     mkdir -p "${MPV_SOURCE_DIR}"
     cp -a "${WORK_DIR}/sources/mpv-${MPV_VERSION}/." "${MPV_SOURCE_DIR}/"
     patch -d "${MPV_SOURCE_DIR}" -p1 --forward --batch < "${MPV_AUDIOTRACK_PATCH}"
+    patch -d "${MPV_SOURCE_DIR}" -p1 --forward --batch < "${MPV_ANDROID_USB_PATCH}"
+    LIBUSB_SOURCE_DIR="${MPV_SOURCE_DIR}/audio/out/subtitleedit-libusb"
+    mkdir -p "${LIBUSB_SOURCE_DIR}/include"
+    cp -a "${WORK_DIR}/sources/libusb-${LIBUSB_VERSION}/." \
+        "${LIBUSB_SOURCE_DIR}/"
+    cp "${LIBUSB_SOURCE_DIR}/libusb/libusb.h" "${LIBUSB_SOURCE_DIR}/include/"
     printf '%s' "mpv-${MPV_VERSION}" > "${MPV_SOURCE_DIR}/.subtitleedit-source"
     printf '%s' "${MPV_PATCH_FINGERPRINT}" > "${MPV_SOURCE_PATCH_MARKER}"
-    for arch in armv7l arm64 x86 x86_64; do
-        rm -f "${BUILD_ROOT}/buildscripts/prefix/${arch}/.subtitleedit-audiotrack-patch"
-    done
 fi
+for source in "${MPV_USB_FILES[@]}"; do
+    if ! cmp -s "${SCRIPT_DIR}/usb/${source}" "${MPV_SOURCE_DIR}/audio/out/${source}"; then
+        cp "${SCRIPT_DIR}/usb/${source}" "${MPV_SOURCE_DIR}/audio/out/${source}"
+    fi
+done
 
 rm -rf "${DEPS_DIR}/libplacebo/3rdparty/glad" \
     "${DEPS_DIR}/libplacebo/3rdparty/jinja" \
@@ -225,14 +262,21 @@ stage_ffmpeg_prefix x86_64 x86_64
 cd "${BUILD_ROOT}/buildscripts"
 for arch in armv7l arm64 x86 x86_64; do
     mpv_prefix="${BUILD_ROOT}/buildscripts/prefix/${arch}"
-    mpv_patch_marker="${mpv_prefix}/.subtitleedit-audiotrack-patch"
-    if [[ -f "${mpv_prefix}/lib/libmpv.so" && -f "${mpv_patch_marker}" ]] && \
-        [[ "$(<"${mpv_patch_marker}")" == "${MPV_PATCH_FINGERPRINT}" ]]; then
+    mpv_runtime_marker="${mpv_prefix}/.subtitleedit-mpv-runtime"
+    previous_runtime=""
+    if [[ -f "${mpv_prefix}/lib/libmpv.so" && -f "${mpv_runtime_marker}" ]]; then
+        previous_runtime="$(<"${mpv_runtime_marker}")"
+    fi
+    if [[ "${previous_runtime}" == "${MPV_RUNTIME_FINGERPRINT}" ]]; then
         echo "Reusing libmpv for ${arch}"
     else
-        rm -rf "${MPV_SOURCE_DIR}/_build_${arch}" "${mpv_prefix}/lib/libmpv.so"
-        ./buildall.sh --arch "${arch}" mpv
-        printf '%s' "${MPV_PATCH_FINGERPRINT}" > "${mpv_patch_marker}"
+        if [[ "${previous_runtime}" == "${MPV_PATCH_FINGERPRINT}-"* &&
+            -f "${MPV_SOURCE_DIR}/_build_${arch}/build.ninja" ]]; then
+            ./buildall.sh -n --arch "${arch}" mpv
+        else
+            ./buildall.sh --arch "${arch}" mpv
+        fi
+        printf '%s' "${MPV_RUNTIME_FINGERPRINT}" > "${mpv_runtime_marker}"
     fi
 done
 
@@ -257,7 +301,10 @@ RUNTIME_DIR="${MAVEN_ROOT}/com/subtitleedit/native/mpv-android-runtime/${RUNTIME
 FFMPEG_DIR="${PROJECT_ROOT}/app/libs/ffmpeg-kit-next-maven/com/arthenica/ffmpeg-kit-next/${FFMPEG_ARTIFACT_VERSION}"
 PACKAGE_ROOT="${WORK_DIR}/aar-root"
 rm -rf "${PACKAGE_ROOT}"
-mkdir -p "${PACKAGE_ROOT}/jni" "${PACKAGE_ROOT}/META-INF/com/android/build/gradle" "${PACKAGE_ROOT}/empty"
+mkdir -p "${PACKAGE_ROOT}/jni" "${PACKAGE_ROOT}/META-INF/com/android/build/gradle" \
+    "${PACKAGE_ROOT}/assets/licenses" "${PACKAGE_ROOT}/empty"
+cp "${WORK_DIR}/sources/libusb-${LIBUSB_VERSION}/COPYING" \
+    "${PACKAGE_ROOT}/assets/licenses/libusb-COPYING.txt"
 
 cat >"${PACKAGE_ROOT}/AndroidManifest.xml" <<'MANIFEST'
 <?xml version="1.0" encoding="utf-8"?>
@@ -304,6 +351,12 @@ cat >"${RUNTIME_DIR}/mpv-android-runtime-${RUNTIME_VERSION}.pom" <<POM
   </dependencies>
 </project>
 POM
+
+if [[ -f "${FFMPEG_DIR}/ffmpeg-kit-next-${FFMPEG_ARTIFACT_VERSION}.aar" &&
+    -f "${FFMPEG_DIR}/ffmpeg-kit-next-${FFMPEG_ARTIFACT_VERSION}.pom" ]]; then
+    echo "Published mpv runtime ${RUNTIME_VERSION}; reused FFmpegKit ${FFMPEG_ARTIFACT_VERSION}"
+    exit 0
+fi
 
 BASE_FFMPEG_AAR="${PROJECT_ROOT}/app/libs/ffmpeg-kit-next-maven/com/arthenica/ffmpeg-kit-next/8.1.0/ffmpeg-kit-next-8.1.0.aar"
 if [[ ! -f "${BASE_FFMPEG_AAR}" ]]; then

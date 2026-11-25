@@ -369,6 +369,9 @@ class MainActivity : AppComposeActivity() {
         )
         setContent {
             SubtitleEditComposeTheme {
+                if (playerModel.showBackgroundPlaybackGuide.collectAsState().value && screenState.playerModeEnabled) {
+                    com.subtitleedit.player.PlayerBackgroundPlaybackGuide(playerModel::dismissBackgroundPlaybackGuide)
+                }
                 CompositionLocalProvider(com.subtitleedit.ui.LocalMediaSelection provides
                     if (screenState.playerModeEnabled) stateModel.mediaSelection else null) {
                 com.subtitleedit.ui.MediaSelectionActionHost(

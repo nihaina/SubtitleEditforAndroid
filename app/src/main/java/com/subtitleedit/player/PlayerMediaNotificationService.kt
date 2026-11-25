@@ -50,6 +50,7 @@ class PlayerMediaNotificationService : Service() {
     private var notificationJob: Job? = null
     private var lastNotificationAtMs = 0L
     private var foreground = false
+    private var usbForegroundRequested = false
     private lateinit var floatingSubtitleWindow: PlayerFloatingSubtitleWindow
     private lateinit var statusBarLyricsWindow: PlayerStatusBarLyricsWindow
     private lateinit var appOps: AppOpsManager
@@ -226,6 +227,7 @@ class PlayerMediaNotificationService : Service() {
         }
         val changedTrack = current?.sessionId != state.sessionId || current?.track?.path != state.track.path
         current = state
+        updateForegroundType(state)
         mediaSession.isActive = true
         if (changedTrack) {
             details = null
@@ -254,14 +256,30 @@ class PlayerMediaNotificationService : Service() {
         if (state.ready && state.error == null) actions = actions or PlaybackState.ACTION_SEEK_TO
         val playbackState = when {
             state.error != null -> PlaybackState.STATE_ERROR
-            !state.ready -> PlaybackState.STATE_BUFFERING
+            !state.ready || state.playing && state.usbStalled -> PlaybackState.STATE_BUFFERING
             state.playing -> PlaybackState.STATE_PLAYING
             else -> PlaybackState.STATE_PAUSED
         }
         mediaSession.setPlaybackState(PlaybackState.Builder().setActions(actions)
-            .setState(playbackState, state.positionMs, if (state.playing) state.speed else 0f,
+            .setState(playbackState, state.positionMs, if (playbackState == PlaybackState.STATE_PLAYING) state.speed else 0f,
                 SystemClock.elapsedRealtime()).apply { state.error?.let(::setErrorMessage) }.build())
         publishNotification()
+    }
+
+    private fun updateForegroundType(state: PlayerMediaNotificationState) {
+        if (!foreground || Build.VERSION.SDK_INT < 29) return
+        val usb = state.usbDirect && state.playing
+        if (usb == usbForegroundRequested) return
+        usbForegroundRequested = usb
+        val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or
+            if (usb) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
+        try {
+            startForeground(PlayerMediaNotifications.NOTIFICATION_ID, buildNotification(state), type)
+            if (usb) PlayerUsbDiagnostics.record("USB connected-device foreground service active")
+        } catch (error: RuntimeException) {
+            // The DAC can be unplugged after libmpv reports the route and before Android checks its grant.
+            PlayerUsbDiagnostics.record("Android rejected USB foreground service type: ${error.message}", failed = true)
+        }
     }
 
     private var metadataKey: List<Any?>? = null
@@ -371,6 +389,7 @@ class PlayerMediaNotificationService : Service() {
         stopForeground(STOP_FOREGROUND_REMOVE)
         manager.cancel(PlayerMediaNotifications.NOTIFICATION_ID)
         foreground = false
+        usbForegroundRequested = false
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {

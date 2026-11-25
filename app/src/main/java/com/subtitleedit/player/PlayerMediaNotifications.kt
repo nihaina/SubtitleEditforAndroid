@@ -23,6 +23,8 @@ internal data class PlayerMediaNotificationState(
     val speed: Float,
     val hasPrevious: Boolean,
     val hasNext: Boolean,
+    val usbStalled: Boolean = false,
+    val usbDirect: Boolean = false,
     val lyricText: String? = null,
     val floatingSubtitleText: String? = null,
     val floatingSubtitleAvailable: Boolean = false,
@@ -145,7 +147,8 @@ internal class PlayerMediaNotificationConnection(
     private val job: Job = scope.launch {
         combine(
             model.state, model.outputSuspended, preferences.notificationLyricsChanges, model.detailedLyricsInForeground,
-        ) { _, _, showLyrics, _ -> showLyrics }.collect { showLyrics ->
+            PlayerUsbDiagnostics.active,
+        ) { _, _, showLyrics, _, usbDirect -> showLyrics to usbDirect }.collect { (showLyrics, usbDirect) ->
             val state = model.state.value
             val suspended = model.outputSuspended.value
             val track = state.currentTrack
@@ -164,6 +167,8 @@ internal class PlayerMediaNotificationConnection(
                 PlayerMediaNotificationState(sessionId, track, state.positionMs,
                     state.durationMs, state.playing, state.ready, state.error, state.speed,
                     state.hasPrevious, state.hasNext,
+                    usbStalled = state.usbStalled && usbDirect,
+                    usbDirect = usbDirect,
                     lyricText = subtitle.takeIf { showLyrics },
                     floatingSubtitleText = subtitle.takeIf { floatingSubtitleAvailable },
                     floatingSubtitleAvailable = floatingSubtitleAvailable,

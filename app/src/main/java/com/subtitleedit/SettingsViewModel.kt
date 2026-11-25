@@ -68,6 +68,7 @@ internal class SettingsViewModel(
                 selectPlayingSubtitle = settingsManager.isSelectPlayingSubtitleEnabled(),
                 hardwareDecodingEnabled = settingsManager.isHardwareDecodingEnabled(),
                 allowConcurrentPlayback = playerPreferences.allowConcurrentPlayback,
+                usbExclusiveEnabled = playerPreferences.usbExclusiveEnabled,
                 cacheItems = cacheItems
             )
         }
@@ -114,6 +115,11 @@ internal class SettingsViewModel(
     fun setAllowConcurrentPlayback(enabled: Boolean) {
         setState { copy(allowConcurrentPlayback = enabled) }
         playerPreferences.allowConcurrentPlayback = enabled
+    }
+
+    fun setUsbExclusiveEnabled(enabled: Boolean) {
+        setState { copy(usbExclusiveEnabled = enabled) }
+        playerPreferences.usbExclusiveEnabled = enabled
     }
 
     fun exportBackup(uri: Uri) {

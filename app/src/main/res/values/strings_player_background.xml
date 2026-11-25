@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_background_guide_title">后台播放中断</string>
+    <string name="player_background_guide_interrupted">检测到播放在退到后台后中断，可能受到系统电池优化或后台运行限制。</string>
+    <string name="player_background_guide_continue">允许后台播放</string>
+    <string name="player_background_guide_explanation">调整应用的电池设置，帮助在熄屏或切换到其他应用时继续播放。</string>
+    <string name="player_background_guide_suppress">不再显示</string>
+    <string name="player_background_guide_next">下一步</string>
+    <string name="player_background_guide_steps_title">设置后台播放</string>
+    <string name="player_background_guide_app_path">在系统的应用信息页，打开「电池」或「应用耗电管理」。</string>
+    <string name="player_background_guide_allow_usage">1. 开启「允许后台使用」或「允许后台活动」。</string>
+    <string name="player_background_guide_unrestricted">2. 将电池使用设为「不受限制」，或在「电池优化」中选择「不优化」。</string>
+    <string name="player_background_guide_coloros">ColorOS 也可从「设置 → 电池 → 应用耗电管理」找到本应用。菜单名称可能因系统版本而异。</string>
+    <string name="player_background_guide_open_settings">打开系统设置</string>
+    <string name="player_background_guide_settings_unavailable">无法直接打开。请手动进入「系统设置 → 应用 → 应用管理」，找到本应用后调整电池设置。</string>
+</resources>

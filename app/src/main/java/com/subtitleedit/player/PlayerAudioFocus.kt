@@ -9,15 +9,19 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import androidx.core.content.ContextCompat
 
-/** Manages audio focus and stops playback on headphone disconnect in either playback mode. */
-internal class PlayerAudioFocus(context: Context, private val onInterrupted: () -> Unit) {
+/** Manages audio focus and stops system-routed playback on headphone disconnect. */
+internal class PlayerAudioFocus(
+    context: Context,
+    private val onInterrupted: () -> Unit,
+    private val usesDirectUsb: () -> Boolean = { false },
+) {
     private val app = context.applicationContext
     private val audio = app.getSystemService(AudioManager::class.java)
     private var focusRequest: AudioFocusRequest? = null
     private var registered = false
     private val noisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) onInterrupted()
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY && !usesDirectUsb()) onInterrupted()
         }
     }
     private val attributes = AudioAttributes.Builder()

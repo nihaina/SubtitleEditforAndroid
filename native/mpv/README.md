@@ -37,6 +37,8 @@ Pinned inputs:
 - mpv-android wrapper commit `20a3fa526fac6d3fe267aee0d4c349893fee65a3`
 - libass 0.17.4
 - libplacebo v6.338.2
+- libusb 1.0.29, linked statically from the upstream Android source files. The
+  source archive is checked against the SHA-256 in `build-runtime.sh`.
 
 The FFmpegKit prefix used by this runtime is built with the media-conversion
 codecs `libmp3lame`, `libx264`, `libvpx`, `libvorbis` and `libopus` enabled,
@@ -53,7 +55,7 @@ publishing, so the existing mpv runtime can keep using those shared libraries.
 The commands below describe rebuilding the original mpv/FFmpeg baseline;
 run `../ffmpeg/rebuild-codecs.sh` afterwards to produce the current codec AAR.
 
-The patched runtime is published locally as `0.41.0-ffmpeg8.1.2-2`.
+The patched runtime is published locally as `0.41.0-ffmpeg8.1.2-5`.
 
 The runtime build applies `patches/mpv-0.41.0-audiotrack-pause.patch`. This
 adds a real pause callback to mpv's Android `audiotrack` output: user pause and
@@ -63,9 +65,19 @@ Interrupted writes retain their unwritten PCM tail and retry it before reading
 more samples. Resume rejects AudioTrack timestamps captured before playback
 restarted, so paused time cannot be extrapolated into the playback position.
 
-The patch is applied automatically by `build-runtime.sh`. The script invalidates
-old per-ABI mpv outputs when the patch contents change, so an existing work
-directory cannot silently reuse an unpatched `libmpv.so`.
+`patches/mpv-0.41.0-android-usb.patch` registers the `android-usb` audio output
+compiled from `usb/`. The application must explicitly select it with a device
+file descriptor authorized by Android USB Host. Audio output autodetection
+continues to use the platform outputs. The runtime AAR includes the libusb
+license in `assets/licenses/libusb-COPYING.txt`.
+
+The USB worker keeps up to eight short isochronous transfers in flight, giving
+the host about 32 ms of scheduling headroom at typical service intervals. It
+requests Android audio thread priority and continues at the priority granted
+by the system.
+
+`build-runtime.sh` invalidates old per-ABI mpv outputs when either patch, the
+USB sources, or the libusb source digest changes.
 
 Build both standard APK variants, then verify the AARs and APKs with `readelf`:
 

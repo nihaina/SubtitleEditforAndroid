@@ -77,6 +77,8 @@ internal val PlayerFloatingSubtitleStyle.multilineAlignment: PlayerSubtitleAlign
     }
 
 /** Player-only preferences, kept in their own file so the player stays self-contained. */
+internal enum class PlayerUsbVolumeMode { SOFTWARE, FIXED }
+
 internal class PlayerPreferences(private val prefs: SharedPreferences) : SettingsSnapshotStore {
 
     /** Opt in explicitly; a fresh installation uses the editor for media files. */
@@ -273,6 +275,23 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) : Setting
 
     val allowConcurrentPlaybackChanges = observe(setOf(KEY_ALLOW_CONCURRENT_PLAYBACK)) { allowConcurrentPlayback }
 
+    var usbExclusiveEnabled: Boolean
+        get() = prefs.getBoolean(KEY_USB_EXCLUSIVE, false)
+        set(value) = prefs.edit().putBoolean(KEY_USB_EXCLUSIVE, value).apply()
+
+    val usbExclusiveEnabledChanges = observe(setOf(KEY_USB_EXCLUSIVE)) { usbExclusiveEnabled }
+
+    var usbVolumeMode: PlayerUsbVolumeMode
+        get() = PlayerUsbVolumeMode.entries.firstOrNull { it.name == prefs.getString(KEY_USB_VOLUME_MODE, null) }
+            ?: PlayerUsbVolumeMode.SOFTWARE
+        set(value) = prefs.edit().putString(KEY_USB_VOLUME_MODE, value.name).apply()
+
+    val usbVolumeModeChanges = observe(setOf(KEY_USB_VOLUME_MODE)) { usbVolumeMode }
+
+    var hideBackgroundPlaybackGuide: Boolean
+        get() = prefs.getBoolean(KEY_HIDE_BACKGROUND_PLAYBACK_GUIDE, false)
+        set(value) = prefs.edit().putBoolean(KEY_HIDE_BACKGROUND_PLAYBACK_GUIDE, value).apply()
+
     var showLoudnessWaveform: Boolean
         get() = prefs.getBoolean(KEY_LOUDNESS_WAVEFORM, true)
         set(value) = prefs.edit().putBoolean(KEY_LOUDNESS_WAVEFORM, value).apply()
@@ -323,6 +342,8 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) : Setting
             KEY_NOTIFICATION_LYRICS to notificationsShowLyrics,
             KEY_RESUME to resumePlayback,
             KEY_ALLOW_CONCURRENT_PLAYBACK to allowConcurrentPlayback,
+            KEY_USB_EXCLUSIVE to usbExclusiveEnabled,
+            KEY_USB_VOLUME_MODE to usbVolumeMode.name,
             KEY_LOUDNESS_WAVEFORM to showLoudnessWaveform
         )
     }
@@ -378,6 +399,9 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) : Setting
         private const val KEY_NOTIFICATION_LYRICS = "notification_lyrics"
         private const val KEY_RESUME = "resume_playback"
         private const val KEY_ALLOW_CONCURRENT_PLAYBACK = "allow_concurrent_playback"
+        private const val KEY_USB_EXCLUSIVE = "usb_exclusive_enabled"
+        private const val KEY_USB_VOLUME_MODE = "usb_volume_mode"
+        private const val KEY_HIDE_BACKGROUND_PLAYBACK_GUIDE = "hide_background_playback_guide"
         private const val KEY_LOUDNESS_WAVEFORM = "show_loudness_waveform"
         private const val KEY_LAST_POS = "last_position_"
 

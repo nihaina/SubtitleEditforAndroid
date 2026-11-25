@@ -11,6 +11,7 @@ import com.subtitleedit.library.PlayerTrackDetails
 import com.subtitleedit.library.PlayerTrackMetadataReader
 import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.RuntimeLogManager
 import com.subtitleedit.util.SettingsBackupManager
 import com.subtitleedit.util.SettingsManager
 import kotlinx.coroutines.Job
@@ -38,6 +39,7 @@ internal data class PlayerUiState(
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val playing: Boolean = false,
+    val usbStalled: Boolean = false,
     val ready: Boolean = false,
     val error: String? = null,
     val speed: Float = 1f,
@@ -132,10 +134,38 @@ internal class PlayerViewModel @JvmOverloads constructor(
     val detailedLyricsInForeground = _detailedLyricsInForeground.asStateFlow()
     private val _outputGeneration = MutableStateFlow(0L)
     val outputGeneration: StateFlow<Long> = _outputGeneration.asStateFlow()
+    private val backgroundPlayback = PlayerBackgroundPlaybackMonitor()
+    private val _showBackgroundPlaybackGuide = MutableStateFlow(false)
+    val showBackgroundPlaybackGuide = _showBackgroundPlaybackGuide.asStateFlow()
     private var mediaNotifications: PlayerMediaNotificationConnection? = null
     private var mainPlayerConnected = false
     private var mainSessionStore: MainPlayerSessionStore? = null
     private var savedMainSession: MainPlayerSession? = null
+
+    fun onPlayerWindowStopped() {
+        if (preferences.hideBackgroundPlaybackGuide) return
+        backgroundPlayback.enterBackground(SystemClock.elapsedRealtime(), backgroundPlaybackState())
+    }
+
+    fun onPlayerWindowResumed() {
+        if (backgroundPlayback.returnToForeground(SystemClock.elapsedRealtime(), backgroundPlaybackState()) &&
+            !preferences.hideBackgroundPlaybackGuide) {
+            RuntimeLogManager.i("PlayerBackground", "Playback heartbeat and position stalled while the player window was stopped")
+            _showBackgroundPlaybackGuide.value = true
+        }
+    }
+
+    fun dismissBackgroundPlaybackGuide(hideAgain: Boolean) {
+        if (hideAgain) preferences.hideBackgroundPlaybackGuide = true
+        _showBackgroundPlaybackGuide.value = false
+    }
+
+    private fun backgroundPlaybackState(): PlayerBackgroundPlaybackMonitor.Playback? {
+        val current = _state.value
+        if (!preferences.playerModeEnabled || !current.ready || !current.playing || current.error != null ||
+            _outputSuspended.value || trackEnded) return null
+        return PlayerBackgroundPlaybackMonitor.Playback(loadId, current.positionMs, current.durationMs, current.speed)
+    }
 
     fun connectMainPlayer() {
         if (mainPlayerConnected) return
@@ -144,6 +174,17 @@ internal class PlayerViewModel @JvmOverloads constructor(
         viewModelScope.launch {
             preferences.allowConcurrentPlaybackChanges.collect {
                 audioFocus.updatePolicy(preferences.allowConcurrentPlayback)
+            }
+        }
+        viewModelScope.launch {
+            PlayerUsbDeviceMonitor.get(getApplication()).attachments.collect { device ->
+                if (preferences.playerModeEnabled && preferences.usbExclusiveEnabled) {
+                    val name = device.usbLabel()
+                    PlayerUsbDiagnostics.record("DAC attached: $name")
+                    val app = getApplication<Application>()
+                    android.widget.Toast.makeText(app, app.getString(R.string.player_usb_dac_attached, name),
+                        android.widget.Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -179,7 +220,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
     private val listening = PlayerListeningTracker()
     private data class HistoryProgress(val playbackId: String, val positionMs: Long, val durationMs: Long)
     private var lastHistoryProgress: HistoryProgress? = null
-    private val audioFocus = PlayerAudioFocus(application, ::pause)
+    private val audioFocus = PlayerAudioFocus(application, ::pause) { engine?.usesDirectUsb == true }
 
     private fun requestPlaybackAudioFocus(): Boolean =
         audioFocus.request(mainPlayerConnected && preferences.allowConcurrentPlayback)
@@ -194,6 +235,14 @@ internal class PlayerViewModel @JvmOverloads constructor(
     )
 
     init {
+        viewModelScope.launch {
+            preferences.usbExclusiveEnabledChanges.collect { enabled ->
+                engine?.setUsbExclusive(enabled && preferences.playerModeEnabled)
+            }
+        }
+        viewModelScope.launch {
+            preferences.usbVolumeModeChanges.collect { engine?.setUsbVolumeMode(it) }
+        }
         viewModelScope.launch {
             SettingsManager.getInstance(application).hardwareDecodingChanges.collect {
                 engine?.refreshHardwareDecoding()
@@ -300,6 +349,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
 
     /** Leaving audio mode must not leave an invisible player or its timers running. */
     fun closeSession(preserveForRestore: Boolean = false) {
+        backgroundPlayback.resetPlayback()
         appendGeneration++
         mediaNotifications?.invalidate()
         cancelNextQueue()
@@ -331,6 +381,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
 
     /** Release the global mpv context before an editor Activity claims it. */
     fun suspendOutput() {
+        backgroundPlayback.resetPlayback()
         mediaNotifications?.invalidate()
         _outputSuspended.value = true
         host?.let(::detach)
@@ -380,7 +431,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         if (host === view) return
         host?.let(::detach)
         host = view
-        val session = PlayerEngine(view, view.resources)
+        val session = PlayerEngine(view, view.resources, ::pause)
         engine = session
         refreshSystemVolume()
         engineJob = viewModelScope.launch {
@@ -389,12 +440,13 @@ internal class PlayerViewModel @JvmOverloads constructor(
                 val snapshot = _state.value
                 if (sample.error != null) rememberPosition()
                 val previouslyPlayed = listening.hasPlayed
-                updateListening(sample.ready && sample.playing && sample.error == null && !sample.ended &&
+                updateListening(sample.ready && sample.playing && !sample.usbStalled && sample.error == null && !sample.ended &&
                     playOnAttach && tagEditResume == null)
                 _state.value = snapshot.copy(
                     positionMs = sample.positionMs,
                     durationMs = sample.durationMs,
                     playing = sample.playing && sample.error == null && !sample.ended,
+                    usbStalled = sample.usbStalled,
                     ready = sample.ready,
                     error = sample.error,
                     loudness = if (snapshot.showLoudnessWaveform && !snapshot.muted && !volumeController.snapshot.muted)
@@ -430,9 +482,10 @@ internal class PlayerViewModel @JvmOverloads constructor(
             var lastSave = SystemClock.elapsedRealtime()
             while (isActive) {
                 delay(250)
+                val now = SystemClock.elapsedRealtime()
+                if (backgroundPlayback.isInBackground) backgroundPlayback.recordHeartbeat(now, backgroundPlaybackState())
                 refreshSystemVolume()
                 tickTimers()
-                val now = SystemClock.elapsedRealtime()
                 if (now - lastSave >= 5_000L) {
                     rememberPosition()
                     flushListeningStats()
@@ -491,17 +544,19 @@ internal class PlayerViewModel @JvmOverloads constructor(
     }
 
     fun pause() {
+        backgroundPlayback.resetPlayback()
         cancelNextQueue()
         playOnAttach = false
         stopListening()
         engine?.pause()
-        _state.value = _state.value.copy(playing = false, loudness = 0f)
+        _state.value = _state.value.copy(playing = false, usbStalled = false, loudness = 0f)
         audioFocus.abandon()
         rememberPosition()
     }
 
     /** A drag is only a preview; one seek is sent on commit. */
     fun seekTo(positionMs: Long, fromGesture: Boolean = false) {
+        backgroundPlayback.resetPlayback()
         cancelNextQueue()
         val current = _state.value
         if (current.currentTrack == null) return
@@ -722,7 +777,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         externalSubtitles = emptyList()
         _state.value = _state.value.copy(
             playlist = edit.playlist, currentIndex = edit.currentIndex, shuffleOrder = edit.shuffleOrder,
-            positionMs = 0L, durationMs = 0L, ready = false, playing = false, error = null,
+            positionMs = 0L, durationMs = 0L, ready = false, playing = false, usbStalled = false, error = null,
             isVideo = replacement?.isVideo == true, bookmarks = emptyList(), isFavorite = false,
             seekPreviewMs = null, loudness = 0f, loudnessSampleId = 0L,
             lyricLines = emptyList(), lyricsLoading = false, subtitleOptions = emptyList(),
@@ -795,7 +850,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         lyricLoadJob?.cancel()
         lyricRequest = null
         _state.value = current.copy(
-            positionMs = 0L, durationMs = 0L, ready = false, playing = false, error = null,
+            positionMs = 0L, durationMs = 0L, ready = false, playing = false, usbStalled = false, error = null,
             isVideo = track.isVideo, subtitleText = "", subtitleCueTiming = null, selectedSubtitleId = "none",
             muted = track.isVideo && current.muted,
             controlsLocked = current.controlsLocked && track.isVideo,
@@ -821,12 +876,14 @@ internal class PlayerViewModel @JvmOverloads constructor(
         saveMainSession(saved)
         session.start(File(app.filesDir, "player/config"), app.cacheDir, track.file, shouldPlay, loadId,
             fallbackSubtitle = externalSubtitles.firstOrNull(),
-            audioOnly = track.isVideo && current.audioMode, mirrored = track.isVideo && current.mirrored,
-            muted = track.isVideo && current.muted)
+            audioOnly = !track.isVideo || current.audioMode, mirrored = track.isVideo && current.mirrored,
+            muted = track.isVideo && current.muted,
+            usbExclusive = preferences.playerModeEnabled && preferences.usbExclusiveEnabled,
+            usbVolumeMode = preferences.usbVolumeMode,
+            volume = volumeController.snapshot)
         session.setSpeed(current.speed)
         session.setAudioFilter(PlayerEqualizer.afFilter(current.equalizer))
         session.setLoudnessEnabled(current.showLoudnessWaveform && !track.isVideo)
-        session.setVolume(volumeController.snapshot.softwarePercent)
         session.setSubtitleFontSize(current.subtitleFontSize)
         if (saved > 0L) session.seekTo(saved)
         val restoredSubtitle = subtitle?.takeIf {
@@ -1197,7 +1254,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
     }
 
     private fun applyVolume(volume: PlayerVolumeSnapshot) {
-        engine?.setVolume(volume.softwarePercent)
+        engine?.setVolume(volume)
         _state.value = _state.value.copy(
             volumePercent = volume.percent,
             loudness = if (volume.muted) 0f else _state.value.loudness

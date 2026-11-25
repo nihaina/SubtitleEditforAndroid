@@ -86,7 +86,8 @@ data class SettingsPageState(
     val selectPlayingSubtitle: Boolean = false,
     val cacheItems: List<SettingsCacheItem> = emptyList(),
     val hardwareDecodingEnabled: Boolean = true,
-    val allowConcurrentPlayback: Boolean = false
+    val allowConcurrentPlayback: Boolean = false,
+    val usbExclusiveEnabled: Boolean = false
 )
 
 data class SettingsCacheItem(
@@ -134,22 +135,31 @@ fun SettingsScreen(
     onBackup: () -> Unit,
     onRestore: () -> Unit,
     onOpenPlayerSubtitleSettings: (() -> Unit)? = null,
-    onAllowConcurrentPlaybackChanged: (Boolean) -> Unit = {}
+    onAllowConcurrentPlaybackChanged: (Boolean) -> Unit = {},
+    onUsbExclusiveEnabledChanged: (Boolean) -> Unit = {}
 ) {
     val isPlayerSettings = onOpenPlayerSubtitleSettings != null
     var showEncodingDialog by rememberSaveable { mutableStateOf(false) }
     var showThemeDialog by rememberSaveable { mutableStateOf(false) }
     var showCacheDialog by rememberSaveable { mutableStateOf(false) }
     var showBackupWarning by rememberSaveable { mutableStateOf(false) }
+    var showUsbExclusiveSettings by rememberSaveable { mutableStateOf(false) }
     var pendingCacheKey by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun LazyListScope.playbackSettings() {
         item(key = "editor-heading", contentType = "heading") {
             SectionHeader(stringResource(R.string.activity_settings_text_09), Modifier.padding(bottom = AppSpacing.CardGap))
         }
-        val count = if (isPlayerSettings) 2 else 3
-        settingsGroupItems("editor", count, useMaterial3Visuals) { index ->
+        settingsGroupItems("editor", 3, useMaterial3Visuals) { index ->
             when {
+                isPlayerSettings && index == 2 -> SettingsPageRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
+                    title = stringResource(R.string.player_usb_exclusive_title),
+                    value = stringResource(if (state.usbExclusiveEnabled) R.string.player_usb_exclusive_on
+                        else R.string.player_usb_exclusive_off),
+                    showArrow = true,
+                    onClick = { showUsbExclusiveSettings = true }
+                )
                 isPlayerSettings && index == 1 -> SettingsPageSwitchRow(
                     useMaterial3Visuals = useMaterial3Visuals,
                     title = stringResource(R.string.player_allow_concurrent_playback),
@@ -366,6 +376,15 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    if (isPlayerSettings && showUsbExclusiveSettings) {
+        PlayerUsbSettingsDialog(
+            enabled = state.usbExclusiveEnabled,
+            onEnabledChange = onUsbExclusiveEnabledChanged,
+            onDismiss = { showUsbExclusiveSettings = false },
+            onOpenLogs = onOpenLogs,
+        )
     }
 
     if (!isPlayerSettings && showBackupWarning) {
