@@ -5,14 +5,20 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "usb_transport.h"
+#include "usb_volume.h"
+
+// Private diagnostic supplied by the bundled Android libusb backend.
+int subtitleedit_usbfs_iso_status(struct libusb_transfer *transfer);
 
 #include <fcntl.h>
+#include <math.h>
 #include <libusb.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/resource.h>
 #include <unistd.h>
 
@@ -30,9 +36,12 @@ enum {
     CLOCK_SELECTOR = 0x0b,
     CLOCK_MULTIPLIER = 0x0c,
     CONTROL_TIMEOUT_MS = 500,
-    // Budget around 32 ms in flight at the usual USB service intervals.
-    NUM_OUTPUT_TRANSFERS = 8,
+    DEFAULT_OUTPUT_TRANSFERS = 16,
+    MAX_OUTPUT_TRANSFERS = 64,
     OUTPUT_TRANSFER_US = 4000,
+    UA2_PLUS_TRANSFER_US = 1000,
+    UA2_PLUS_VID = 0x20b1,
+    UA2_PLUS_PID = 0x3028,
     MAX_CANDIDATES = 64,
     MAX_CONSECUTIVE_USB_ERRORS = 8,
 };
@@ -71,8 +80,17 @@ struct usb_transport {
 
     struct usb_transport_format format;
     struct stream_candidate output;
-    struct usb_transfer slots[NUM_OUTPUT_TRANSFERS];
+    struct usb_hardware_volume volume;
+    pthread_mutex_t volume_mutex;
+    pthread_cond_t volume_condition;
+    pthread_t volume_thread;
+    bool volume_worker_started, volume_stop, volume_pending, volume_supported;
+    bool volume_transfer_pending;
+    float volume_percent, volume_target;
+    char volume_issue[sizeof(((struct usb_hardware_volume *)0)->issue)];
+    struct usb_transfer slots[MAX_OUTPUT_TRANSFERS];
     struct usb_transfer feedback;
+    int output_transfer_count;
     int packets_per_transfer;
     double nominal_frames;
     double feedback_frames;
@@ -91,7 +109,9 @@ struct usb_transport {
     unsigned int output_error_streak;
     unsigned int submit_error_streak;
     unsigned int transfer_errors;
+    unsigned int packet_errors;
     unsigned int rejected_feedback;
+    uint64_t padded_frames;
     char issue[sizeof(((struct usb_transport_state *)0)->issue)];
     int32_t *queue;
     int capacity;
@@ -484,6 +504,9 @@ static int negotiate(struct usb_transport *session, int rate, int channels, int 
     for (int i = 0; i < count; i++) {
         result = claim_stream(session, &candidates[i], rate);
         if (result == 0) {
+            const struct stream_candidate *selected = &candidates[i];
+            usb_volume_select(&session->volume, selected->control, selected->uac2,
+                              selected->terminal, channels);
             session->output = candidates[i];
             session->output.stream = NULL;
             session->output.control = NULL;
@@ -559,8 +582,8 @@ static void LIBUSB_CALL transfer_finished(struct libusb_transfer *transfer)
     struct usb_transfer *slot = transfer->user_data;
     struct usb_transport *session = slot->session;
     enum libusb_transfer_status status = transfer->status;
-    slot->submitted = false;
     pthread_mutex_lock(&session->mutex);
+    slot->submitted = false;
     session->in_flight -= slot->frames;
     slot->frames = 0;
     bool active = !session->closing && !session->resetting && !session->failed;
@@ -572,11 +595,15 @@ static void LIBUSB_CALL transfer_finished(struct libusb_transfer *transfer)
             handle_feedback(session, slot);
         } else {
             int bad_packet = -1;
+            bool packet_fatal = false;
             for (int i = 0; i < transfer->num_iso_packets; i++) {
                 const struct libusb_iso_packet_descriptor *packet = &transfer->iso_packet_desc[i];
                 if (packet->status != LIBUSB_TRANSFER_COMPLETED || packet->actual_length != packet->length) {
-                    bad_packet = i;
-                    break;
+                    if (bad_packet < 0)
+                        bad_packet = i;
+                    session->packet_errors++;
+                    packet_fatal |= packet->status == LIBUSB_TRANSFER_NO_DEVICE ||
+                                    packet->status == LIBUSB_TRANSFER_STALL;
                 }
             }
             if (status == LIBUSB_TRANSFER_COMPLETED && bad_packet < 0) {
@@ -586,15 +613,16 @@ static void LIBUSB_CALL transfer_finished(struct libusb_transfer *transfer)
                 const struct libusb_iso_packet_descriptor *packet = bad_packet >= 0
                     ? &transfer->iso_packet_desc[bad_packet] : NULL;
                 bool fatal = ++session->output_error_streak >= MAX_CONSECUTIVE_USB_ERRORS ||
-                    status == LIBUSB_TRANSFER_STALL ||
-                    (packet && (packet->status == LIBUSB_TRANSFER_NO_DEVICE ||
-                                packet->status == LIBUSB_TRANSFER_STALL));
+                    status == LIBUSB_TRANSFER_STALL || packet_fatal;
+                int pending = 0;
+                for (int i = 0; i < session->output_transfer_count; i++)
+                    pending += session->slots[i].submitted;
                 set_issue(session, fatal,
-                          "OUT 0x%02x: %s (%d), packet %d: %s (%d), bytes %u/%u, consecutive errors %u",
-                          transfer->endpoint, transfer_status_name(status), status, bad_packet,
+                          "OUT 0x%02x: %s, packet %d: %s, bytes %u/%u, usbfs %d, pending %d/%d, consecutive %u",
+                          transfer->endpoint, transfer_status_name(status), bad_packet,
                           packet ? transfer_status_name(packet->status) : "n/a",
-                          packet ? (int)packet->status : -1,
                           packet ? packet->actual_length : 0, packet ? packet->length : 0,
+                          subtitleedit_usbfs_iso_status(transfer), pending, session->output_transfer_count,
                           session->output_error_streak);
             }
         }
@@ -673,6 +701,7 @@ static int submit_output(struct usb_transport *session, struct usb_transfer *slo
     session->head = index;
     session->queued -= filled;
     session->in_flight += filled;
+    session->padded_frames += frames - filled;
     return 0;
 }
 
@@ -680,7 +709,7 @@ static bool has_pending(const struct usb_transport *session)
 {
     if (session->feedback.submitted)
         return true;
-    for (int i = 0; i < NUM_OUTPUT_TRANSFERS; i++) {
+    for (int i = 0; i < session->output_transfer_count; i++) {
         if (session->slots[i].submitted)
             return true;
     }
@@ -691,7 +720,7 @@ static void cancel_pending(struct usb_transport *session)
 {
     if (session->feedback.submitted)
         libusb_cancel_transfer(session->feedback.transfer);
-    for (int i = 0; i < NUM_OUTPUT_TRANSFERS; i++) {
+    for (int i = 0; i < session->output_transfer_count; i++) {
         if (session->slots[i].submitted)
             libusb_cancel_transfer(session->slots[i].transfer);
     }
@@ -711,7 +740,7 @@ static int submit_available(struct usb_transport *session, unsigned char *failed
         feedback->submitted = true;
     }
 
-    for (int i = 0; i < NUM_OUTPUT_TRANSFERS && session->queued; i++) {
+    for (int i = 0; i < session->output_transfer_count && session->queued; i++) {
         if (!session->slots[i].submitted) {
             int status = submit_output(session, &session->slots[i]);
             if (status < 0) {
@@ -771,7 +800,7 @@ static void *stream_worker(void *argument)
         }
 
         bool notify = session->failed != was_failed;
-        if (has_pending(session) || notify || retry) {
+        if (has_pending(session) || session->volume_transfer_pending || notify || retry) {
             pthread_mutex_unlock(&session->mutex);
             if (notify && session->wakeup)
                 session->wakeup(session->wakeup_data);
@@ -796,10 +825,127 @@ static void *stream_worker(void *argument)
     return NULL;
 }
 
+struct volume_transfer {
+    struct usb_transport *session;
+    int result;
+};
+
+static void LIBUSB_CALL finish_volume_transfer(struct libusb_transfer *transfer)
+{
+    struct volume_transfer *request = transfer->user_data;
+    struct usb_transport *session = request->session;
+    pthread_mutex_lock(&session->mutex);
+    switch (transfer->status) {
+    case LIBUSB_TRANSFER_COMPLETED: request->result = transfer->actual_length; break;
+    case LIBUSB_TRANSFER_TIMED_OUT: request->result = LIBUSB_ERROR_TIMEOUT; break;
+    case LIBUSB_TRANSFER_STALL: request->result = LIBUSB_ERROR_PIPE; break;
+    case LIBUSB_TRANSFER_NO_DEVICE: request->result = LIBUSB_ERROR_NO_DEVICE; break;
+    case LIBUSB_TRANSFER_OVERFLOW: request->result = LIBUSB_ERROR_OVERFLOW; break;
+    default: request->result = LIBUSB_ERROR_IO; break;
+    }
+    session->volume_transfer_pending = false;
+    pthread_cond_broadcast(&session->condition);
+    pthread_mutex_unlock(&session->mutex);
+}
+
+// The volume worker waits for completion without competing with the audio
+// worker for libusb's event lock. The audio worker dispatches all completions.
+static int submit_volume_transfer(void *context, uint8_t type, uint8_t request,
+                                  uint16_t value, uint16_t index, uint8_t *data,
+                                  uint16_t length, unsigned int timeout)
+{
+    struct usb_transport *session = context;
+    uint8_t buffer[LIBUSB_CONTROL_SETUP_SIZE + 2 + 6 * USB_VOLUME_MAX_RANGES];
+    if (length > sizeof(buffer) - LIBUSB_CONTROL_SETUP_SIZE)
+        return LIBUSB_ERROR_INVALID_PARAM;
+    struct libusb_transfer *transfer = libusb_alloc_transfer(0);
+    if (!transfer)
+        return LIBUSB_ERROR_NO_MEM;
+    struct volume_transfer pending = {.session = session};
+    libusb_fill_control_setup(buffer, type, request, value, index, length);
+    if (!(type & LIBUSB_ENDPOINT_IN))
+        memcpy(buffer + LIBUSB_CONTROL_SETUP_SIZE, data, length);
+    libusb_fill_control_transfer(transfer, session->handle, buffer,
+                                 finish_volume_transfer, &pending, timeout);
+
+    pthread_mutex_lock(&session->mutex);
+    int status = session->closing || session->failed
+        ? LIBUSB_ERROR_NO_DEVICE : libusb_submit_transfer(transfer);
+    if (status == 0) {
+        session->volume_transfer_pending = true;
+        pthread_cond_broadcast(&session->condition);
+        while (session->volume_transfer_pending)
+            pthread_cond_wait(&session->condition, &session->mutex);
+        status = pending.result;
+    }
+    pthread_mutex_unlock(&session->mutex);
+
+    if (status > 0 && status <= length && (type & LIBUSB_ENDPOINT_IN))
+        memcpy(data, buffer + LIBUSB_CONTROL_SETUP_SIZE, status);
+    libusb_free_transfer(transfer);
+    return status;
+}
+
+static void *volume_worker(void *argument)
+{
+    struct usb_transport *session = argument;
+    const struct usb_volume_io io = {.context = session, .transfer = submit_volume_transfer};
+    float actual = 0;
+    bool supported = false;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (usb_volume_get(&session->volume, &io, &actual)) {
+            supported = true;
+            break;
+        }
+        if (attempt < 2) {
+            const struct timespec delay = {.tv_nsec = 50000000};
+            nanosleep(&delay, NULL);
+        }
+        pthread_mutex_lock(&session->volume_mutex);
+        bool stopped = session->volume_stop;
+        pthread_mutex_unlock(&session->volume_mutex);
+        if (stopped)
+            return NULL;
+    }
+    pthread_mutex_lock(&session->volume_mutex);
+    while (!session->volume_stop) {
+        session->volume_supported = supported;
+        session->volume_percent = actual;
+        snprintf(session->volume_issue, sizeof(session->volume_issue), "%s",
+                 supported ? "" : session->volume.issue);
+        while (!session->volume_stop && !session->volume_pending)
+            pthread_cond_wait(&session->volume_condition, &session->volume_mutex);
+        if (session->volume_stop)
+            break;
+        float target = session->volume_target;
+        session->volume_pending = false;
+        pthread_mutex_unlock(&session->volume_mutex);
+        supported = usb_volume_set(&session->volume, &io, target) &&
+                     usb_volume_get(&session->volume, &io, &actual);
+        pthread_mutex_lock(&session->volume_mutex);
+    }
+    pthread_mutex_unlock(&session->volume_mutex);
+    return NULL;
+}
+
+static void start_volume_worker(struct usb_transport *session)
+{
+    if (!session->volume.channel_count || pthread_mutex_init(&session->volume_mutex, NULL) != 0)
+        return;
+    if (pthread_cond_init(&session->volume_condition, NULL) == 0) {
+        if (pthread_create(&session->volume_thread, NULL, volume_worker, session) == 0) {
+            session->volume_worker_started = true;
+            return;
+        }
+        pthread_cond_destroy(&session->volume_condition);
+    }
+    pthread_mutex_destroy(&session->volume_mutex);
+}
+
 /* Only use after the event thread has returned all outstanding transfers. */
 static void free_session(struct usb_transport *session)
 {
-    for (int i = 0; i < NUM_OUTPUT_TRANSFERS; i++) {
+    for (int i = 0; i < session->output_transfer_count; i++) {
         libusb_free_transfer(session->slots[i].transfer);
         free(session->slots[i].data);
     }
@@ -864,22 +1010,36 @@ struct usb_transport *usb_transport_open(
         free_session(session);
         return NULL;
     }
-    session->format = (struct usb_transport_format){
-        rate, channels, session->output.valid_bits, session->output.subslot_bytes,
-    };
     session->wakeup = wakeup;
     session->wakeup_data = wakeup_data;
     session->capacity = rate / 10;
     session->queue = calloc((size_t)session->capacity * channels, sizeof(*session->queue));
-    session->packets_per_transfer = OUTPUT_TRANSFER_US / session->output.interval_us;
+    struct libusb_device_descriptor device = {0};
+    libusb_get_device_descriptor(libusb_get_device(session->handle), &device);
+    // Match the UA2 Plus's 1 ms explicit-feedback interval, as ALSA does
+    // when sizing playback URBs, without reducing the prequeued time.
+    bool short_transfers = session->output.high_speed && device.idVendor == UA2_PLUS_VID &&
+                           device.idProduct == UA2_PLUS_PID &&
+                           session->output.interval_us <= UA2_PLUS_TRANSFER_US;
+    session->output_transfer_count = short_transfers ? MAX_OUTPUT_TRANSFERS : DEFAULT_OUTPUT_TRANSFERS;
+    unsigned int transfer_us = short_transfers ? UA2_PLUS_TRANSFER_US : OUTPUT_TRANSFER_US;
+    session->packets_per_transfer = transfer_us / session->output.interval_us;
     if (session->packets_per_transfer == 0)
         session->packets_per_transfer = 1;
+    session->format = (struct usb_transport_format){
+        .rate = rate,
+        .channels = channels,
+        .valid_bits = session->output.valid_bits,
+        .subslot_bytes = session->output.subslot_bytes,
+        .packets_per_transfer = session->packets_per_transfer,
+        .transfer_count = session->output_transfer_count,
+    };
     session->nominal_frames = rate * (double)session->output.interval_us / 1000000.0;
     session->max_packet_frames = session->output.max_packet /
         (channels * session->format.subslot_bytes);
 
     status = session->queue ? 0 : LIBUSB_ERROR_NO_MEM;
-    for (int i = 0; i < NUM_OUTPUT_TRANSFERS && !status; i++) {
+    for (int i = 0; i < session->output_transfer_count && !status; i++) {
         status = allocate_transfer(session, &session->slots[i], session->packets_per_transfer,
                                    session->output.max_packet, false);
     }
@@ -909,6 +1069,7 @@ struct usb_transport *usb_transport_open(
         free_session(session);
         return NULL;
     }
+    start_volume_worker(session);
     *format = session->format;
     return session;
 }
@@ -943,11 +1104,44 @@ void usb_transport_get_state(struct usb_transport *session, struct usb_transport
         .free_frames = session->failed || session->resetting ? 0 : session->capacity - session->queued,
         .failed = session->failed,
         .transfer_errors = session->transfer_errors,
+        .packet_errors = session->packet_errors,
         .rejected_feedback = session->rejected_feedback,
+        .padded_frames = session->padded_frames,
     };
     if (session->failed || session->transfer_errors || session->rejected_feedback)
         memcpy(state->issue, session->issue, sizeof(state->issue));
     pthread_mutex_unlock(&session->mutex);
+}
+
+bool usb_transport_get_volume(struct usb_transport *session, float *percent,
+                              char *issue, size_t issue_size)
+{
+    if (!session->volume_worker_started) {
+        snprintf(issue, issue_size, "%s", session->volume.channel_count
+                 ? "Could not start USB volume worker" : "No writable Feature Unit on the selected playback path");
+        return false;
+    }
+    pthread_mutex_lock(&session->volume_mutex);
+    bool result = session->volume_supported;
+    *percent = session->volume_percent;
+    snprintf(issue, issue_size, "%s", session->volume_issue);
+    pthread_mutex_unlock(&session->volume_mutex);
+    return result;
+}
+
+bool usb_transport_set_volume(struct usb_transport *session, float percent)
+{
+    if (!session->volume_worker_started || !isfinite(percent) || percent < 0 || percent > 100)
+        return false;
+    pthread_mutex_lock(&session->volume_mutex);
+    bool result = session->volume_supported;
+    if (result) {
+        session->volume_target = percent;
+        session->volume_pending = true;
+        pthread_cond_signal(&session->volume_condition);
+    }
+    pthread_mutex_unlock(&session->volume_mutex);
+    return result;
 }
 
 void usb_transport_set_running(struct usb_transport *session, bool running)
@@ -973,6 +1167,15 @@ void usb_transport_close(struct usb_transport *session)
 {
     if (!session)
         return;
+    if (session->volume_worker_started) {
+        pthread_mutex_lock(&session->volume_mutex);
+        session->volume_stop = true;
+        pthread_cond_signal(&session->volume_condition);
+        pthread_mutex_unlock(&session->volume_mutex);
+        pthread_join(session->volume_thread, NULL);
+        pthread_cond_destroy(&session->volume_condition);
+        pthread_mutex_destroy(&session->volume_mutex);
+    }
     pthread_mutex_lock(&session->mutex);
     session->closing = true;
     pthread_cond_signal(&session->condition);

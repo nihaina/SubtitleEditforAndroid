@@ -55,7 +55,7 @@ publishing, so the existing mpv runtime can keep using those shared libraries.
 The commands below describe rebuilding the original mpv/FFmpeg baseline;
 run `../ffmpeg/rebuild-codecs.sh` afterwards to produce the current codec AAR.
 
-The patched runtime is published locally as `0.41.0-ffmpeg8.1.2-5`.
+The patched runtime is published locally as `0.41.0-ffmpeg8.1.2-9`.
 
 The runtime build applies `patches/mpv-0.41.0-audiotrack-pause.patch`. This
 adds a real pause callback to mpv's Android `audiotrack` output: user pause and
@@ -71,13 +71,20 @@ file descriptor authorized by Android USB Host. Audio output autodetection
 continues to use the platform outputs. The runtime AAR includes the libusb
 license in `assets/licenses/libusb-COPYING.txt`.
 
-The USB worker keeps up to eight short isochronous transfers in flight, giving
-the host about 32 ms of scheduling headroom at typical service intervals. It
-requests Android audio thread priority and continues at the priority granted
-by the system.
+The USB worker keeps up to sixteen 4 ms isochronous transfers in flight. At
+high speed, the Shanling UA2 Plus uses up to thirty-two 2 ms transfers with
+the same nominal 64 ms of scheduling headroom. The worker requests Android
+audio thread priority and continues at the priority granted by the system.
+The bundled libusb patch preserves the first failed packet's raw usbfs status
+for diagnostics.
 
-`build-runtime.sh` invalidates old per-ABI mpv outputs when either patch, the
-USB sources, or the libusb source digest changes.
+`patches/mpv-0.41.0-android-usb-source-bits.patch` passes the source PCM
+precision to the USB output, so decoded 24-bit PCM held in a 32-bit sample
+container can still prefer a 24-bit DAC format. USB Feature Unit volume is
+handled by `usb/usb_volume.c` for compatible playback interfaces.
+
+`build-runtime.sh` invalidates old per-ABI mpv outputs when a patch, the USB
+sources, or the libusb source digest changes.
 
 Build both standard APK variants, then verify the AARs and APKs with `readelf`:
 

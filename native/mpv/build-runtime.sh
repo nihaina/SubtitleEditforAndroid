@@ -8,7 +8,7 @@ FFMPEG_KIT_DIR="${FFMPEG_KIT_DIR:-${HOME}/src/subtitleedit-ffmpeg-kit-next}"
 WORK_DIR="${SUBTITLEEDIT_MPV_WORK_DIR:-${HOME}/subtitleedit-mpv-build}"
 MPV_ANDROID_COMMIT="20a3fa526fac6d3fe267aee0d4c349893fee65a3"
 MPV_VERSION="0.41.0"
-RUNTIME_VERSION="0.41.0-ffmpeg8.1.2-5"
+RUNTIME_VERSION="0.41.0-ffmpeg8.1.2-9"
 FFMPEG_ARTIFACT_VERSION="8.1.0-mpv1"
 LIBUSB_VERSION="1.0.29"
 LIBUSB_SHA256="7c2dd39c0b2589236e48c93247c986ae272e27570942b4163cb00a060fcf1b74"
@@ -138,13 +138,18 @@ link_dependency fontconfig fontconfig-2.16.0
 MPV_SOURCE_DIR="${DEPS_DIR}/mpv"
 MPV_AUDIOTRACK_PATCH="${SCRIPT_DIR}/patches/mpv-0.41.0-audiotrack-pause.patch"
 MPV_ANDROID_USB_PATCH="${SCRIPT_DIR}/patches/mpv-0.41.0-android-usb.patch"
-MPV_USB_FILES=(ao_android_usb.c usb_transport.c usb_transport.h)
+MPV_ANDROID_USB_SOURCE_BITS_PATCH="${SCRIPT_DIR}/patches/mpv-0.41.0-android-usb-source-bits.patch"
+LIBUSB_USBFS_ISO_STATUS_PATCH="${SCRIPT_DIR}/patches/libusb-1.0.29-usbfs-iso-status.patch"
+MPV_USB_FILES=(ao_android_usb.c usb_transport.c usb_transport.h usb_volume.c usb_volume.h)
 MPV_PATCH_HASH="$(cd "${SCRIPT_DIR}" &&
     sha256sum "patches/$(basename "${MPV_AUDIOTRACK_PATCH}")" \
-        "patches/$(basename "${MPV_ANDROID_USB_PATCH}")" | sha256sum)"
+        "patches/$(basename "${MPV_ANDROID_USB_PATCH}")" \
+        "patches/$(basename "${MPV_ANDROID_USB_SOURCE_BITS_PATCH}")" | sha256sum)"
 MPV_PATCH_FINGERPRINT="${MPV_VERSION}-${MPV_PATCH_HASH%% *}-${LIBUSB_SHA256}"
+LIBUSB_PATCH_HASH="$(sha256sum "${LIBUSB_USBFS_ISO_STATUS_PATCH}")"
+LIBUSB_PATCH_FINGERPRINT="${LIBUSB_SHA256}-${LIBUSB_PATCH_HASH%% *}"
 MPV_USB_HASH="$(cd "${SCRIPT_DIR}" && sha256sum "${MPV_USB_FILES[@]/#/usb/}" | sha256sum)"
-MPV_RUNTIME_FINGERPRINT="${MPV_PATCH_FINGERPRINT}-${MPV_USB_HASH%% *}"
+MPV_RUNTIME_FINGERPRINT="${MPV_PATCH_FINGERPRINT}-${LIBUSB_PATCH_HASH%% *}-${MPV_USB_HASH%% *}"
 MPV_SOURCE_PATCH_MARKER="${MPV_SOURCE_DIR}/.subtitleedit-mpv-patches"
 if [[ ! -f "${MPV_SOURCE_PATCH_MARKER}" ]] || \
     [[ "$(<"${MPV_SOURCE_PATCH_MARKER}")" != "${MPV_PATCH_FINGERPRINT}" ]]; then
@@ -154,13 +159,21 @@ if [[ ! -f "${MPV_SOURCE_PATCH_MARKER}" ]] || \
     cp -a "${WORK_DIR}/sources/mpv-${MPV_VERSION}/." "${MPV_SOURCE_DIR}/"
     patch -d "${MPV_SOURCE_DIR}" -p1 --forward --batch < "${MPV_AUDIOTRACK_PATCH}"
     patch -d "${MPV_SOURCE_DIR}" -p1 --forward --batch < "${MPV_ANDROID_USB_PATCH}"
-    LIBUSB_SOURCE_DIR="${MPV_SOURCE_DIR}/audio/out/subtitleedit-libusb"
+    patch -d "${MPV_SOURCE_DIR}" -p1 --forward --batch < "${MPV_ANDROID_USB_SOURCE_BITS_PATCH}"
+    printf '%s' "mpv-${MPV_VERSION}" > "${MPV_SOURCE_DIR}/.subtitleedit-source"
+    printf '%s' "${MPV_PATCH_FINGERPRINT}" > "${MPV_SOURCE_PATCH_MARKER}"
+fi
+LIBUSB_SOURCE_DIR="${MPV_SOURCE_DIR}/audio/out/subtitleedit-libusb"
+LIBUSB_SOURCE_PATCH_MARKER="${LIBUSB_SOURCE_DIR}/.subtitleedit-libusb-patches"
+if [[ ! -f "${LIBUSB_SOURCE_PATCH_MARKER}" ]] || \
+    [[ "$(<"${LIBUSB_SOURCE_PATCH_MARKER}")" != "${LIBUSB_PATCH_FINGERPRINT}" ]]; then
+    rm -rf "${LIBUSB_SOURCE_DIR:?}"
     mkdir -p "${LIBUSB_SOURCE_DIR}/include"
     cp -a "${WORK_DIR}/sources/libusb-${LIBUSB_VERSION}/." \
         "${LIBUSB_SOURCE_DIR}/"
+    patch -d "${LIBUSB_SOURCE_DIR}" -p1 --forward --batch < "${LIBUSB_USBFS_ISO_STATUS_PATCH}"
     cp "${LIBUSB_SOURCE_DIR}/libusb/libusb.h" "${LIBUSB_SOURCE_DIR}/include/"
-    printf '%s' "mpv-${MPV_VERSION}" > "${MPV_SOURCE_DIR}/.subtitleedit-source"
-    printf '%s' "${MPV_PATCH_FINGERPRINT}" > "${MPV_SOURCE_PATCH_MARKER}"
+    printf '%s' "${LIBUSB_PATCH_FINGERPRINT}" > "${LIBUSB_SOURCE_PATCH_MARKER}"
 fi
 for source in "${MPV_USB_FILES[@]}"; do
     if ! cmp -s "${SCRIPT_DIR}/usb/${source}" "${MPV_SOURCE_DIR}/audio/out/${source}"; then

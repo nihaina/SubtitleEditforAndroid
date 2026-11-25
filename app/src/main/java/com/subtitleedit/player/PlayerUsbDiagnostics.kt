@@ -13,9 +13,16 @@ internal object PlayerUsbDiagnostics {
     val lines = _lines.asStateFlow()
     private val _active = MutableStateFlow(false)
     val active = _active.asStateFlow()
+    private val _hardwareVolumeSupported = MutableStateFlow<Boolean?>(null)
+    val hardwareVolumeSupported = _hardwareVolumeSupported.asStateFlow()
 
     fun setActive(active: Boolean) {
+        if (!active) _hardwareVolumeSupported.value = null
         _active.value = active
+    }
+
+    fun setHardwareVolumeSupported(supported: Boolean?) {
+        _hardwareVolumeSupported.value = supported
     }
 
     fun record(message: String, failed: Boolean = false) {

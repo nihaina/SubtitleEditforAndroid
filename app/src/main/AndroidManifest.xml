@@ -349,6 +349,11 @@
             android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
+            android:name=".ui.settings.PlayerUsbSettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
+
+        <activity
             android:name=".player.PlayerFloatingSubtitleSettingsActivity"
             android:exported="false"
             android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />

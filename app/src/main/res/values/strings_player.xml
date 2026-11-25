@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="player_usb_hardware_volume_level">DAC 音量 %1$d%%</string>
     <string name="player_mode_title">音声模式</string>
     <string name="player_allow_concurrent_playback">允许与其他应用同时播放</string>
     <string name="player_usb_exclusive_title">USB 独占</string>
@@ -19,9 +20,18 @@
     <string name="player_usb_volume_title">音频音量控制</string>
     <string name="player_usb_volume_software">应用软件音量</string>
     <string name="player_usb_volume_software_help">通过播放器调节输出音量。</string>
+    <string name="player_usb_volume_hardware">通过 DAC 进行硬件音量调节</string>
+    <string name="player_usb_volume_hardware_help">使用应用内音量条调节 DAC 的硬件音量。需要设备支持。</string>
+    <string name="player_usb_volume_hardware_unsupported">当前 DAC 未提供受支持的硬件音量控制。</string>
+    <string name="player_usb_volume_hardware_fallback">当前无法调节 DAC 硬件音量，已使用应用软件音量。</string>
     <string name="player_usb_volume_fixed">固定音量输出</string>
     <string name="player_usb_volume_fixed_help">以满幅音量输出，由 DAC 或外部功放调节音量。</string>
     <string name="player_usb_volume_fixed_warning">切换后会以满幅音量输出。请先调低 DAC 或外部功放的音量。</string>
+    <string name="player_usb_bit_depth_title">首选输出位深</string>
+    <string name="player_usb_bit_depth_auto">自动检测最佳选项</string>
+    <string name="player_usb_bit_depth_32">32 位 PCM</string>
+    <string name="player_usb_bit_depth_16">16 位 PCM</string>
+    <string name="player_usb_bit_depth_help">自动优先匹配源位深，设备不支持时尝试更高位深。提高位深保留原有精度，较高位深的音频以 16 位输出会降低精度。</string>
     <string name="player_usb_exclusive_disconnected">USB DAC 已断开，播放已暂停</string>
     <string name="player_usb_dac_attached">已检测到 %1$s，播放时将尝试启用 USB 独占</string>
     <string name="player_usb_exclusive_failed">无法通过 USB DAC 独占输出</string>

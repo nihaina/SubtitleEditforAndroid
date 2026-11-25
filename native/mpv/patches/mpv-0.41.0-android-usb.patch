@@ -22,7 +22,7 @@ diff --git a/audio/out/ao.c b/audio/out/ao.c
 diff --git a/meson.build b/meson.build
 --- a/meson.build
 +++ b/meson.build
-@@ -866,6 +866,33 @@
+@@ -866,6 +866,35 @@
      sources += files('audio/out/ao_audiotrack.c')
  endif
  
@@ -49,7 +49,9 @@ diff --git a/meson.build b/meson.build
 +        include_directories: include_directories(usb_dir / 'include'),
 +        dependencies: cc.find_library('log'),
 +        link_args: ['-Wl,--exclude-libs,libsubtitleedit-libusb.a'])
-+    sources += files('audio/out/ao_android_usb.c', 'audio/out/usb_transport.c')
++    sources += files('audio/out/ao_android_usb.c',
++                     'audio/out/usb_transport.c',
++                     'audio/out/usb_volume.c')
 +endif
 +
 +

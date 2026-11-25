@@ -2,6 +2,7 @@ package com.subtitleedit.player
 
 import android.app.Application
 import android.os.SystemClock
+import android.view.KeyEvent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.subtitleedit.R
@@ -22,6 +23,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -48,6 +50,7 @@ internal data class PlayerUiState(
     val queueSource: PlayerQueueSource? = null,
     val showEndBehaviorDialog: Boolean = false,
     val volumePercent: Int = 100,
+    val usbHardwareVolume: Boolean = false,
     val volumeGestureActive: Boolean = false,
     val equalizer: PlayerEqualizerState = PlayerEqualizerState(),
     val showLoudnessWaveform: Boolean = true,
@@ -107,6 +110,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
     systemVolume: PlayerSystemVolume = AndroidPlayerSystemVolume(application)
 ) : AndroidViewModel(application) {
     private val preferences = PlayerPreferences.getInstance(application)
+    private val usbDevices by lazy { PlayerUsbDeviceMonitor.get(application) }
     private var settingsRevision = SettingsBackupManager.playerSettingsRevision.value
     private val bookmarkStore = PlayerBookmarkStore.create(application.filesDir)
     private val volumeController = PlayerVolumeController(systemVolume)
@@ -134,6 +138,9 @@ internal class PlayerViewModel @JvmOverloads constructor(
     val detailedLyricsInForeground = _detailedLyricsInForeground.asStateFlow()
     private val _outputGeneration = MutableStateFlow(0L)
     val outputGeneration: StateFlow<Long> = _outputGeneration.asStateFlow()
+    private val _hardwareVolumeBar = MutableStateFlow(false)
+    val hardwareVolumeBar = _hardwareVolumeBar.asStateFlow()
+    private var hardwareVolumeBarJob: Job? = null
     private val backgroundPlayback = PlayerBackgroundPlaybackMonitor()
     private val _showBackgroundPlaybackGuide = MutableStateFlow(false)
     val showBackgroundPlaybackGuide = _showBackgroundPlaybackGuide.asStateFlow()
@@ -142,14 +149,21 @@ internal class PlayerViewModel @JvmOverloads constructor(
     private var mainSessionStore: MainPlayerSessionStore? = null
     private var savedMainSession: MainPlayerSession? = null
 
+    private val canShowBackgroundPlaybackGuide: Boolean
+        get() = !preferences.hideBackgroundPlaybackGuide &&
+            !(preferences.usbExclusiveEnabled && usbDevices.devices.value.isNotEmpty())
+
     fun onPlayerWindowStopped() {
         if (preferences.hideBackgroundPlaybackGuide) return
+        if (preferences.usbExclusiveEnabled) usbDevices.refresh()
         backgroundPlayback.enterBackground(SystemClock.elapsedRealtime(), backgroundPlaybackState())
     }
 
     fun onPlayerWindowResumed() {
+        if (preferences.usbExclusiveEnabled) usbDevices.refresh()
+        if (!canShowBackgroundPlaybackGuide) _showBackgroundPlaybackGuide.value = false
         if (backgroundPlayback.returnToForeground(SystemClock.elapsedRealtime(), backgroundPlaybackState()) &&
-            !preferences.hideBackgroundPlaybackGuide) {
+            canShowBackgroundPlaybackGuide) {
             RuntimeLogManager.i("PlayerBackground", "Playback heartbeat and position stalled while the player window was stopped")
             _showBackgroundPlaybackGuide.value = true
         }
@@ -162,7 +176,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
 
     private fun backgroundPlaybackState(): PlayerBackgroundPlaybackMonitor.Playback? {
         val current = _state.value
-        if (!preferences.playerModeEnabled || !current.ready || !current.playing || current.error != null ||
+        if (!canShowBackgroundPlaybackGuide || !preferences.playerModeEnabled ||
+            !current.ready || !current.playing || current.error != null ||
             _outputSuspended.value || trackEnded) return null
         return PlayerBackgroundPlaybackMonitor.Playback(loadId, current.positionMs, current.durationMs, current.speed)
     }
@@ -177,7 +192,17 @@ internal class PlayerViewModel @JvmOverloads constructor(
             }
         }
         viewModelScope.launch {
-            PlayerUsbDeviceMonitor.get(getApplication()).attachments.collect { device ->
+            combine(preferences.usbExclusiveEnabledChanges, usbDevices.devices) { exclusive, devices ->
+                exclusive && devices.isNotEmpty()
+            }.collect { suppress ->
+                if (suppress) {
+                    backgroundPlayback.resetPlayback()
+                    _showBackgroundPlaybackGuide.value = false
+                }
+            }
+        }
+        viewModelScope.launch {
+            usbDevices.attachments.collect { device ->
                 if (preferences.playerModeEnabled && preferences.usbExclusiveEnabled) {
                     val name = device.usbLabel()
                     PlayerUsbDiagnostics.record("DAC attached: $name")
@@ -242,6 +267,9 @@ internal class PlayerViewModel @JvmOverloads constructor(
         }
         viewModelScope.launch {
             preferences.usbVolumeModeChanges.collect { engine?.setUsbVolumeMode(it) }
+        }
+        viewModelScope.launch {
+            preferences.usbBitDepthChanges.collect { engine?.setUsbBitDepth(it) }
         }
         viewModelScope.launch {
             SettingsManager.getInstance(application).hardwareDecodingChanges.collect {
@@ -447,9 +475,12 @@ internal class PlayerViewModel @JvmOverloads constructor(
                     durationMs = sample.durationMs,
                     playing = sample.playing && sample.error == null && !sample.ended,
                     usbStalled = sample.usbStalled,
+                    usbHardwareVolume = sample.usbHardwareVolume != null,
+                    volumePercent = sample.usbHardwareVolume ?: volumeController.snapshot.percent,
                     ready = sample.ready,
                     error = sample.error,
-                    loudness = if (snapshot.showLoudnessWaveform && !snapshot.muted && !volumeController.snapshot.muted)
+                    loudness = if (snapshot.showLoudnessWaveform && !snapshot.muted &&
+                        (sample.usbHardwareVolume?.let { it > 0 } ?: !volumeController.snapshot.muted))
                         sample.loudness else 0f,
                     loudnessSampleId = sample.loudnessSampleId,
                     subtitleText = sample.subtitleText,
@@ -485,6 +516,9 @@ internal class PlayerViewModel @JvmOverloads constructor(
                 val now = SystemClock.elapsedRealtime()
                 if (backgroundPlayback.isInBackground) backgroundPlayback.recordHeartbeat(now, backgroundPlaybackState())
                 refreshSystemVolume()
+                if (PlayerUsbDiagnostics.active.value) {
+                    session.readUsbVolume()
+                }
                 tickTimers()
                 if (now - lastSave >= 5_000L) {
                     rememberPosition()
@@ -513,7 +547,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         host = null
         audioFocus.abandon()
         _state.value = _state.value.copy(ready = false, playing = false, loudness = 0f, seekPreviewMs = null,
-            volumeGestureActive = false, subtitleCueTiming = null)
+            volumeGestureActive = false, usbHardwareVolume = false, subtitleCueTiming = null)
     }
 
     fun togglePlay() { if (_state.value.playing) pause() else play() }
@@ -880,6 +914,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
             muted = track.isVideo && current.muted,
             usbExclusive = preferences.playerModeEnabled && preferences.usbExclusiveEnabled,
             usbVolumeMode = preferences.usbVolumeMode,
+            usbBitDepth = preferences.usbBitDepth,
             volume = volumeController.snapshot)
         session.setSpeed(current.speed)
         session.setAudioFilter(PlayerEqualizer.afFilter(current.equalizer))
@@ -1214,7 +1249,34 @@ internal class PlayerViewModel @JvmOverloads constructor(
 
     fun setVolume(percent: Int) {
         volumeGesture.reset()
-        applyVolume(volumeController.setVolume(percent))
+        if (_state.value.usbHardwareVolume) setHardwareVolume(percent)
+        else applyVolume(volumeController.setVolume(percent))
+    }
+
+    fun handleHardwareVolumeKey(event: KeyEvent): Boolean {
+        val current = _state.value
+        if (!current.usbHardwareVolume || current.currentTrack == null) return false
+        val percent = when (event.keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> current.volumePercent + 5
+            KeyEvent.KEYCODE_VOLUME_DOWN -> current.volumePercent - 5
+            KeyEvent.KEYCODE_VOLUME_MUTE -> if (current.volumePercent == 0) 5 else 0
+            else -> return false
+        }
+        if (event.action == KeyEvent.ACTION_DOWN) setHardwareVolume(percent)
+        return true
+    }
+
+    private fun setHardwareVolume(percent: Int): Int {
+        val level = percent.coerceIn(0, 100)
+        engine?.setUsbHardwareVolume(level)
+        _state.value = _state.value.copy(volumePercent = level)
+        _hardwareVolumeBar.value = true
+        hardwareVolumeBarJob?.cancel()
+        hardwareVolumeBarJob = viewModelScope.launch {
+            delay(2_500L)
+            _hardwareVolumeBar.value = false
+        }
+        return level
     }
 
     fun toggleMute() {
@@ -1244,6 +1306,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
 
     /** Read before a drag as well as periodically, so hardware keys and system sliders stay in sync. */
     fun refreshSystemVolume(resetBoost: Boolean = false): Int {
+        if (_state.value.usbHardwareVolume) return _state.value.volumePercent
         val previous = volumeController.snapshot
         val current = if (resetBoost) volumeController.resetBoost() else volumeController.refresh()
         if (resetBoost || current != previous) volumeGesture.reset()
@@ -1274,11 +1337,14 @@ internal class PlayerViewModel @JvmOverloads constructor(
     fun adjustVolumeGesture(deltaPercent: Float): PlayerVolumeGestureResult {
         _state.value = _state.value.copy(volumeGestureActive = true)
         val result = volumeGesture.adjust(deltaPercent, _state.value.volumePercent) { requested ->
-            val accepted = volumeController.setVolume(requested)
-            applyVolume(accepted)
-            accepted.percent
+            if (_state.value.usbHardwareVolume) setHardwareVolume(requested)
+            else {
+                val accepted = volumeController.setVolume(requested)
+                applyVolume(accepted)
+                accepted.percent
+            }
         }
-        if (result.blockedAtUnity) {
+        if (result.blockedAtUnity && !_state.value.usbHardwareVolume) {
             val text = applicationText(R.string.player_volume_boost_warning)
             if (_state.value.gestureHint?.text != text) {
                 _state.value = _state.value.copy(gestureHint = PlayerGestureHint(text, ++hintToken, R.drawable.ic_player_volume))

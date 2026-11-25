@@ -117,11 +117,6 @@ internal class SettingsViewModel(
         playerPreferences.allowConcurrentPlayback = enabled
     }
 
-    fun setUsbExclusiveEnabled(enabled: Boolean) {
-        setState { copy(usbExclusiveEnabled = enabled) }
-        playerPreferences.usbExclusiveEnabled = enabled
-    }
-
     fun exportBackup(uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {

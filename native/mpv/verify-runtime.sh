@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-RUNTIME_VERSION="0.41.0-ffmpeg8.1.2-5"
+RUNTIME_VERSION="0.41.0-ffmpeg8.1.2-9"
 VERIFY_APKS="${VERIFY_APKS:-1}"
 FFMPEG_VERSION="${FFMPEG_VERSION:-8.1.0-mpv5}"
 APK_FLAVOR="${APK_FLAVOR:-standard}"
@@ -53,8 +53,9 @@ for abi in "${abis[@]}"; do
     [[ -f "${runtime_dir}/libsubtitleedit_mpv.so" ]]
 
     if ! LC_ALL=C grep -aFq 'Android direct USB PCM output' "${runtime_dir}/libmpv.so" ||
+        ! LC_ALL=C grep -aFq 'source %d bits, %d valid bits' "${runtime_dir}/libmpv.so" ||
         grep -Eq 'Shared library: \[libusb[^]]*\]' < <(readelf -dW "${runtime_dir}/libmpv.so"); then
-        echo "error: missing built-in Android USB output or unexpected shared libusb for ${abi}" >&2
+        echo "error: missing Android USB output or source-depth support, or unexpected shared libusb for ${abi}" >&2
         exit 1
     fi
 
@@ -124,6 +125,7 @@ for variant in debug release; do
         [[ -f "${apk_root}/lib/${abi}/libmpv.so" ]]
         [[ -f "${apk_root}/lib/${abi}/libsubtitleedit_mpv.so" ]]
         LC_ALL=C grep -aFq 'Android direct USB PCM output' "${apk_root}/lib/${abi}/libmpv.so"
+        LC_ALL=C grep -aFq 'source %d bits, %d valid bits' "${apk_root}/lib/${abi}/libmpv.so"
         for library in "${ffmpeg_libraries[@]}"; do
             [[ -f "${apk_root}/lib/${abi}/${library}" ]]
         done

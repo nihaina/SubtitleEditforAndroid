@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.UUID
 import kotlin.math.roundToLong
+import kotlin.math.roundToInt
 
 /** Owns one player session. Commands and native callbacks are serialized on the access thread. */
 internal class PlayerEngine(
@@ -65,6 +66,11 @@ internal class PlayerEngine(
     private var volume = 100
     private var usbVolume = 100
     private var usbVolumeMode = PlayerUsbVolumeMode.SOFTWARE
+    private var usbBitDepth = PlayerUsbBitDepth.AUTO
+    private var usbHardwareVolume: Int? = null
+    private var usbHardwareCeiling: Int? = null
+    private var usbHardwareCeilingDeadlineMs = 0L
+    private var usbHardwareTarget: Int? = null
     private var usbExclusiveRequested = false
     private var usbFailedPath: String? = null
     @Volatile private var usbOutputDescriptor: Int? = null
@@ -117,6 +123,7 @@ internal class PlayerEngine(
         audioOnly: Boolean = false,
         usbExclusive: Boolean = false,
         usbVolumeMode: PlayerUsbVolumeMode = PlayerUsbVolumeMode.SOFTWARE,
+        usbBitDepth: PlayerUsbBitDepth = PlayerUsbBitDepth.AUTO,
         volume: PlayerVolumeSnapshot,
     ) {
         if (released.get()) return
@@ -145,6 +152,7 @@ internal class PlayerEngine(
             this.volume = volume.softwarePercent
             usbVolume = volume.percent
             this.usbVolumeMode = usbVolumeMode
+            this.usbBitDepth = usbBitDepth
             check(file.isFile && file.canRead()) { "无法读取文件：${file.name}" }
             check(configDir.isDirectory || configDir.mkdirs()) { "无法创建播放器配置目录" }
             if (audioOnly) playerHost.setVideoOutputEnabled(false)
@@ -159,6 +167,7 @@ internal class PlayerEngine(
             // Prepare paused, then apply resume/seek and the latest user intent at FILE_LOADED.
             MPVLib.setPropertyBoolean("pause", true)
             MPVLib.setPropertyBoolean("mute", muted)
+            MPVLib.setOptionString("android-usb-depth", usbBitDepth.option)
             configureUsbOutput(usbExclusive)
             playerHost.playFile(mediaPath)
         }
@@ -266,13 +275,93 @@ internal class PlayerEngine(
 
     private fun outputVolume() = when {
         !usesDirectUsb -> volume
+        usbHardwareVolume != null -> if (usbHardwareVolume == 0) 0 else 100
         usbVolumeMode == PlayerUsbVolumeMode.FIXED -> 100
         else -> usbVolume.coerceAtMost(100)
     }
 
     fun setUsbVolumeMode(mode: PlayerUsbVolumeMode) = post {
+        if (usbVolumeMode == mode) return@post
         usbVolumeMode = mode
-        if (initialized && usesDirectUsb) applyVolume()
+        resetUsbHardwareVolume()
+        if (initialized && usesDirectUsb) {
+            applyVolume()
+            if (PlayerUsbDiagnostics.active.value) readUsbHardwareVolume()
+        }
+    }
+
+    fun setUsbBitDepth(depth: PlayerUsbBitDepth) = post {
+        if (usbBitDepth == depth) return@post
+        usbBitDepth = depth
+        if (!initialized) return@post
+        MPVLib.setOptionString("android-usb-depth", depth.option)
+        if (!usesDirectUsb && usbExclusiveRequested && usbFailedPath == mediaPath) {
+            usbFailedPath = null
+            configureUsbOutput(true)
+        }
+    }
+
+    fun readUsbVolume() = post {
+        if (PlayerUsbDiagnostics.active.value) readUsbHardwareVolume()
+    }
+
+    fun setUsbHardwareVolume(percent: Int) = post {
+        if (usbHardwareVolume == null || usbVolumeMode != PlayerUsbVolumeMode.HARDWARE ||
+            MPVLib.getPropertyString("current-ao") != "android-usb") return@post
+        val target = percent.coerceIn(0, 100)
+        if (target == (usbHardwareTarget ?: usbHardwareVolume)) return@post
+        usbHardwareTarget = target
+        MPVLib.setPropertyDouble("ao-volume", target.toDouble())
+        publish { copy(usbHardwareVolume = target) }
+    }
+
+    private fun readUsbHardwareVolume() {
+        if (MPVLib.getPropertyString("current-ao") != "android-usb") return
+        val percent = MPVLib.getPropertyDouble("ao-volume")?.takeIf { it.isFinite() }?.roundToInt()?.coerceIn(0, 100)
+        if (usbVolumeMode != PlayerUsbVolumeMode.HARDWARE) {
+            PlayerUsbDiagnostics.setHardwareVolumeSupported(percent != null)
+            return
+        }
+        if (percent == null) {
+            PlayerUsbDiagnostics.setHardwareVolumeSupported(false)
+            if (usbHardwareVolume != null) {
+                resetUsbHardwareVolume()
+                applyVolume()
+                PlayerUsbDiagnostics.record("DAC hardware volume unavailable; using software volume")
+            }
+            return
+        }
+        if (usbHardwareVolume == null) {
+            // Keep software attenuation until the DAC has read back a safe initial setting.
+            val ceiling = usbHardwareCeiling ?: usbVolume.coerceIn(0, 100).also {
+                usbHardwareCeiling = it
+                usbHardwareCeilingDeadlineMs = SystemClock.elapsedRealtime() + USB_HARDWARE_VOLUME_TIMEOUT_MS
+                if (percent > it) MPVLib.setPropertyDouble("ao-volume", it.toDouble())
+            }
+            if (percent > ceiling + 1) {
+                val timedOut = SystemClock.elapsedRealtime() >= usbHardwareCeilingDeadlineMs
+                if (timedOut && PlayerUsbDiagnostics.hardwareVolumeSupported.value != false) {
+                    PlayerUsbDiagnostics.record("DAC hardware volume handoff timed out; using software volume")
+                }
+                PlayerUsbDiagnostics.setHardwareVolumeSupported(if (timedOut) false else null)
+                return
+            }
+        }
+        PlayerUsbDiagnostics.setHardwareVolumeSupported(true)
+        usbHardwareTarget = percent
+        if (usbHardwareVolume != percent) {
+            usbHardwareVolume = percent
+            applyVolume()
+        }
+        publish { copy(usbHardwareVolume = percent) }
+    }
+
+    private fun resetUsbHardwareVolume() {
+        usbHardwareVolume = null
+        usbHardwareTarget = null
+        usbHardwareCeiling = null
+        usbHardwareCeilingDeadlineMs = 0L
+        publish { copy(usbHardwareVolume = null) }
     }
 
     fun setUsbExclusive(enabled: Boolean) = post {
@@ -294,15 +383,18 @@ internal class PlayerEngine(
     private fun setUsbOutput(descriptor: Int?) {
         if (usbOutputDescriptor == descriptor) return
         usbOutputDescriptor = descriptor
+        resetUsbHardwareVolume()
         updateUsbPlaybackPower()
         resetUsbProgress()
         if (descriptor == null) {
             PlayerUsbDiagnostics.setActive(false)
             MPVLib.setOptionString("android-usb-fd", "-1")
             MPVLib.setOptionString("ao", "audiotrack,opensles")
+            MPVLib.setOptionString("gapless-audio", "weak")
             applyVolume()
         } else {
             applyVolume()
+            MPVLib.setOptionString("gapless-audio", "no")
             val fdResult = MPVLib.setOptionString("android-usb-fd", descriptor.toString())
             val aoResult = if (fdResult >= 0) MPVLib.setOptionString("ao", "android-usb") else fdResult
             if (aoResult < 0) {
@@ -564,6 +656,7 @@ internal class PlayerEngine(
             val direct = usesDirectUsb && value == "android-usb"
             if (direct && !PlayerUsbDiagnostics.active.value) PlayerUsbDiagnostics.record("USB exclusive output active")
             PlayerUsbDiagnostics.setActive(direct)
+            if (direct) readUsbHardwareVolume() else resetUsbHardwareVolume()
             resetUsbProgress()
             return@post
         }
@@ -580,6 +673,7 @@ internal class PlayerEngine(
     override fun eventProperty(property: String) = post {
         if (property == "current-ao" && usesDirectUsb) {
             PlayerUsbDiagnostics.setActive(false)
+            resetUsbHardwareVolume()
             resetUsbProgress()
         }
         if (!ready) return@post
@@ -798,5 +892,6 @@ internal class PlayerEngine(
         const val TAG = "PlayerEngine"
         const val USB_PROGRESS_INTERVAL_MS = 1_000L
         const val USB_PROGRESS_TIMEOUT_MS = 3_000L
+        const val USB_HARDWARE_VOLUME_TIMEOUT_MS = 1_500L
     }
 }

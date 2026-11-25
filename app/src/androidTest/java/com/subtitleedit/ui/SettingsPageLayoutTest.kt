@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
@@ -17,10 +18,16 @@ import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.subtitleedit.R
+import com.subtitleedit.player.PlayerPreferences
+import com.subtitleedit.player.PlayerUsbBitDepth
+import com.subtitleedit.player.PlayerUsbDiagnostics
+import com.subtitleedit.player.PlayerUsbVolumeMode
+import com.subtitleedit.ui.settings.PlayerUsbSettingsPage
 import com.subtitleedit.ui.settings.SettingsPageState
 import com.subtitleedit.ui.settings.SettingsScreen
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
@@ -41,12 +48,14 @@ class SettingsPageLayoutTest {
 
     @Test fun audioModeShowsAppearanceSubtitleAndPlaybackSettings() {
         var subtitleSettingsOpened = 0
+        var usbSettingsOpened = 0
         showSettingsPage(
             state = mutableStateOf(SettingsPageState()),
             material = true,
             restoration = StateRestorationTester(compose),
             actions = mutableListOf(),
             onOpenPlayerSubtitleSettings = { subtitleSettingsOpened++ },
+            onOpenPlayerUsbSettings = { usbSettingsOpened++ },
         )
 
         compose.onNodeWithText(compose.activity.getString(R.string.activity_settings_text_01)).assertIsDisplayed()
@@ -64,18 +73,67 @@ class SettingsPageLayoutTest {
         val usbSwitch = compose.onNodeWithText(compose.activity.getString(R.string.player_usb_enable))
         usbSwitch.assertDoesNotExist()
         usbExclusive.assertIsDisplayed().performClick()
-        compose.onNodeWithText(compose.activity.getString(R.string.player_usb_settings_title)).assertIsDisplayed()
-        compose.onNodeWithText(compose.activity.getString(R.string.file_picker_refresh)).assertIsDisplayed()
-        usbSwitch.assertIsDisplayed().assertIsOff().performClick()
-        usbSwitch.assertIsOn().performClick()
-        usbSwitch.assertIsOff()
-        compose.onNodeWithText(compose.activity.getString(R.string.player_usb_open_logs)).performClick()
-        compose.onNodeWithText(compose.activity.getString(R.string.player_usb_log_title)).assertIsDisplayed()
-        compose.onNodeWithText(compose.activity.getString(R.string.player_usb_settings_close)).performClick()
-        usbSwitch.assertIsDisplayed().assertIsOff()
-        compose.onNodeWithText(compose.activity.getString(R.string.player_usb_settings_close)).performClick()
         usbSwitch.assertDoesNotExist()
-        compose.runOnIdle { assertEquals(1, subtitleSettingsOpened) }
+        compose.runOnIdle {
+            assertEquals(1, subtitleSettingsOpened)
+            assertEquals(1, usbSettingsOpened)
+        }
+    }
+
+    @Test fun usbSettingsPageShowsAndPersistsHardwareVolumeAndBitDepth() {
+        val preferences = PlayerPreferences.getInstance(compose.activity)
+        val originalEnabled = preferences.usbExclusiveEnabled
+        val originalVolume = preferences.usbVolumeMode
+        val originalBits = preferences.usbBitDepth
+        val originalUsbActive = PlayerUsbDiagnostics.active.value
+        val originalHardwareSupported = PlayerUsbDiagnostics.hardwareVolumeSupported.value
+        try {
+            PlayerUsbDiagnostics.setActive(false)
+            preferences.usbExclusiveEnabled = false
+            preferences.usbVolumeMode = PlayerUsbVolumeMode.SOFTWARE
+            preferences.usbBitDepth = PlayerUsbBitDepth.AUTO
+            compose.setContent {
+                SubtitleEditComposeTheme { PlayerUsbSettingsPage(onBack = {}, onOpenLogs = {}) }
+            }
+
+            compose.onNodeWithText(compose.activity.getString(R.string.player_usb_settings_title)).assertIsDisplayed()
+            compose.onNodeWithText(compose.activity.getString(R.string.file_picker_refresh)).assertIsDisplayed()
+            compose.onNodeWithText(compose.activity.getString(R.string.player_usb_enable)).assertIsOff().performClick()
+            val hardwareVolume = compose.onNodeWithText(compose.activity.getString(R.string.player_usb_volume_hardware))
+            hardwareVolume.performScrollTo().performClick().assertIsSelected()
+            compose.runOnIdle {
+                PlayerUsbDiagnostics.setActive(true)
+                PlayerUsbDiagnostics.setHardwareVolumeSupported(false)
+            }
+            compose.onNodeWithText(compose.activity.getString(R.string.player_usb_volume_software))
+                .performScrollTo().assertIsSelected()
+            compose.onNodeWithText(compose.activity.getString(R.string.player_usb_volume_hardware_fallback))
+                .performScrollTo().assertIsDisplayed()
+            compose.runOnIdle {
+                assertEquals(PlayerUsbVolumeMode.HARDWARE, preferences.usbVolumeMode)
+                PlayerUsbDiagnostics.setHardwareVolumeSupported(true)
+            }
+            hardwareVolume.performScrollTo().assertIsSelected()
+            compose.onNodeWithText(compose.activity.getString(R.string.player_usb_bit_depth_auto))
+                .performScrollTo().assertIsSelected()
+            compose.onNodeWithText(compose.activity.getString(R.string.player_usb_bit_depth_32))
+                .performScrollTo().performClick().assertIsSelected()
+            compose.onNodeWithText(compose.activity.getString(R.string.player_usb_bit_depth_16))
+                .performScrollTo().performClick().assertIsSelected()
+            compose.onNodeWithText(compose.activity.getString(R.string.player_usb_open_logs)).performScrollTo().performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.player_usb_log_title)).assertIsDisplayed()
+            compose.onNodeWithText(compose.activity.getString(R.string.player_usb_settings_close)).performClick()
+            compose.runOnIdle {
+                assertEquals(PlayerUsbVolumeMode.HARDWARE, preferences.usbVolumeMode)
+                assertEquals(PlayerUsbBitDepth.BIT_16, preferences.usbBitDepth)
+            }
+        } finally {
+            preferences.usbExclusiveEnabled = originalEnabled
+            preferences.usbVolumeMode = originalVolume
+            preferences.usbBitDepth = originalBits
+            PlayerUsbDiagnostics.setActive(originalUsbActive)
+            PlayerUsbDiagnostics.setHardwareVolumeSupported(originalHardwareSupported)
+        }
     }
 
     private fun checkLayout(material: Boolean) {
@@ -123,6 +181,7 @@ class SettingsPageLayoutTest {
         restoration: StateRestorationTester,
         actions: MutableList<String>,
         onOpenPlayerSubtitleSettings: (() -> Unit)? = null,
+        onOpenPlayerUsbSettings: () -> Unit = {},
     ) {
         restoration.setContent {
             SubtitleEditComposeTheme {
@@ -135,7 +194,7 @@ class SettingsPageLayoutTest {
                         onLoopSelectedChanged = {}, onSelectPlayingChanged = {},
                         onHardwareDecodingChanged = { state.value = state.value.copy(hardwareDecodingEnabled = it) },
                         onAllowConcurrentPlaybackChanged = { state.value = state.value.copy(allowConcurrentPlayback = it) },
-                        onUsbExclusiveEnabledChanged = { state.value = state.value.copy(usbExclusiveEnabled = it) },
+                        onOpenPlayerUsbSettings = onOpenPlayerUsbSettings,
                         onOpenAiSettings = {}, onOpenModelManagement = {}, onOpenTtsSettings = {},
                         onOpenPageTranslation = { actions += "translation" },
                         onOpenLogs = {}, onOpenAbout = {}, onSelectSoftwareDirectory = {},

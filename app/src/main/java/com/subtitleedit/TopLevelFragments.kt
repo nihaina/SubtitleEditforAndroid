@@ -41,6 +41,7 @@ import com.subtitleedit.ui.ToolsScreen
 import com.subtitleedit.ui.settings.SettingsCacheItem
 import com.subtitleedit.ui.settings.SettingsPageState
 import com.subtitleedit.ui.settings.SettingsScreen
+import com.subtitleedit.ui.settings.PlayerUsbSettingsActivity
 import com.subtitleedit.util.AppThemeMode
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.DraftManager
@@ -517,10 +518,7 @@ internal fun MainTopLevelPages(
                 state.settingsPage = state.settingsPage.copy(allowConcurrentPlayback = enabled)
                 PlayerPreferences.getInstance(context).allowConcurrentPlayback = enabled
             },
-            onUsbExclusiveEnabledChanged = { enabled ->
-                state.settingsPage = state.settingsPage.copy(usbExclusiveEnabled = enabled)
-                PlayerPreferences.getInstance(context).usbExclusiveEnabled = enabled
-            },
+            onOpenPlayerUsbSettings = { context.openActivity(PlayerUsbSettingsActivity::class.java) },
             onOpenAiSettings = { context.openActivity(AiSettingsActivity::class.java) },
             onOpenModelManagement = { context.openActivity(ModelManagementActivity::class.java) },
             onOpenPageTranslation = { context.openActivity(PageTranslationSettingsActivity::class.java) },

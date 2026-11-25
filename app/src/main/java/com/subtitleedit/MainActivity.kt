@@ -27,6 +27,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import android.view.WindowManager
+import android.view.KeyEvent
 import com.subtitleedit.player.MainPlayerController
 import com.subtitleedit.player.PlayerMediaNotifications
 import com.subtitleedit.player.MainPlayerHost
@@ -556,6 +557,11 @@ class MainActivity : AppComposeActivity() {
         lifecycleCoordinator.onResume()
         refreshPlayerModeNavigation()
         topLevelPageRefreshVersion++
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (playerModel.handleHardwareVolumeKey(event)) return true
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onPause() {

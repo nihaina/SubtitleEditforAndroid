@@ -216,6 +216,7 @@ internal fun MainPlayerHost(
                     viewModel::previous, viewModel::next,
                     modifier = Modifier.offset { IntOffset(0, sheet.top.roundToInt()) },
                     contentAlpha = (1f - progress * 3f).coerceIn(0f, 1f))
+                if (!inPictureInPicture) PlayerHardwareVolumeBar(viewModel)
             }
         }
     }

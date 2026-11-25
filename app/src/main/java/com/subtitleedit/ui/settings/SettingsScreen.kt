@@ -87,7 +87,7 @@ data class SettingsPageState(
     val cacheItems: List<SettingsCacheItem> = emptyList(),
     val hardwareDecodingEnabled: Boolean = true,
     val allowConcurrentPlayback: Boolean = false,
-    val usbExclusiveEnabled: Boolean = false
+    val usbExclusiveEnabled: Boolean = true
 )
 
 data class SettingsCacheItem(
@@ -136,14 +136,13 @@ fun SettingsScreen(
     onRestore: () -> Unit,
     onOpenPlayerSubtitleSettings: (() -> Unit)? = null,
     onAllowConcurrentPlaybackChanged: (Boolean) -> Unit = {},
-    onUsbExclusiveEnabledChanged: (Boolean) -> Unit = {}
+    onOpenPlayerUsbSettings: () -> Unit = {}
 ) {
     val isPlayerSettings = onOpenPlayerSubtitleSettings != null
     var showEncodingDialog by rememberSaveable { mutableStateOf(false) }
     var showThemeDialog by rememberSaveable { mutableStateOf(false) }
     var showCacheDialog by rememberSaveable { mutableStateOf(false) }
     var showBackupWarning by rememberSaveable { mutableStateOf(false) }
-    var showUsbExclusiveSettings by rememberSaveable { mutableStateOf(false) }
     var pendingCacheKey by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun LazyListScope.playbackSettings() {
@@ -158,7 +157,7 @@ fun SettingsScreen(
                     value = stringResource(if (state.usbExclusiveEnabled) R.string.player_usb_exclusive_on
                         else R.string.player_usb_exclusive_off),
                     showArrow = true,
-                    onClick = { showUsbExclusiveSettings = true }
+                    onClick = onOpenPlayerUsbSettings
                 )
                 isPlayerSettings && index == 1 -> SettingsPageSwitchRow(
                     useMaterial3Visuals = useMaterial3Visuals,
@@ -376,15 +375,6 @@ fun SettingsScreen(
                 }
             }
         }
-    }
-
-    if (isPlayerSettings && showUsbExclusiveSettings) {
-        PlayerUsbSettingsDialog(
-            enabled = state.usbExclusiveEnabled,
-            onEnabledChange = onUsbExclusiveEnabledChanged,
-            onDismiss = { showUsbExclusiveSettings = false },
-            onOpenLogs = onOpenLogs,
-        )
     }
 
     if (!isPlayerSettings && showBackupWarning) {

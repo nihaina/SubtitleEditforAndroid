@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.WindowManager
+import android.view.KeyEvent
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.activity.result.contract.ActivityResultContracts
@@ -117,6 +118,7 @@ class PlayerActivity : AppComposeActivity() {
                         inPictureInPicture = inPictureInPicture
                     )
                     if (!inPictureInPicture) {
+                        PlayerHardwareVolumeBar(viewModel)
                         StandaloneMediaSelectionHost(
                             model = selectionModel,
                             player = viewModel,
@@ -127,6 +129,11 @@ class PlayerActivity : AppComposeActivity() {
                 }
             }
         }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (viewModel.handleHardwareVolumeKey(event)) return true
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {

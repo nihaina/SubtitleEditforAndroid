@@ -1,0 +1,109 @@
+--- a/audio/out/ao.h
++++ b/audio/out/ao.h
+@@ -86,7 +86,8 @@
+                         int init_flags,
+                         void (*wakeup_cb)(void *ctx), void *wakeup_ctx,
+                         struct encode_lavc_context *encode_lavc_ctx,
+-                        int samplerate, int format, struct mp_chmap channels);
++                        int samplerate, int format, struct mp_chmap channels,
++                        int source_bits);
+ void ao_uninit(struct ao *ao);
+ void ao_get_format(struct ao *ao,
+                    int *samplerate, int *format, struct mp_chmap *channels);
+--- a/audio/out/internal.h
++++ b/audio/out/internal.h
+@@ -28,6 +28,7 @@
+     int samplerate;
+     struct mp_chmap channels;
+     int format;                 // one of AF_FORMAT_...
++    int source_bits;            // 0 when the source precision is unspecified
+     int64_t bps;                // bytes per second (per plane)
+     int sstride;                // size of a sample on each plane
+                                 // (format_size*num_channels/num_planes)
+--- a/audio/out/ao.c
++++ b/audio/out/ao.c
+@@ -203,7 +203,7 @@
+                           void (*wakeup_cb)(void *ctx), void *wakeup_ctx,
+                           struct encode_lavc_context *encode_lavc_ctx, int flags,
+                           int samplerate, int format, struct mp_chmap channels,
+-                          char *dev, char *name)
++                          int source_bits, char *dev, char *name)
+ {
+     struct ao *ao = ao_alloc(probing, global, wakeup_cb, wakeup_ctx, name);
+     if (!ao)
+@@ -211,6 +211,7 @@
+     ao->samplerate = samplerate;
+     ao->channels = channels;
+     ao->format = format;
++    ao->source_bits = source_bits;
+     ao->encode_lavc_ctx = encode_lavc_ctx;
+     ao->init_flags = flags;
+     if (ao->driver->encode != !!ao->encode_lavc_ctx)
+@@ -235,7 +236,7 @@
+             ao_uninit(ao);
+             return ao_init(probing, global, wakeup_cb, wakeup_ctx,
+                            encode_lavc_ctx, flags, samplerate, format, channels,
+-                           rdevice, redirect);
++                           source_bits, rdevice, redirect);
+         }
+         goto fail;
+     }
+@@ -292,7 +293,8 @@
+                         int init_flags,
+                         void (*wakeup_cb)(void *ctx), void *wakeup_ctx,
+                         struct encode_lavc_context *encode_lavc_ctx,
+-                        int samplerate, int format, struct mp_chmap channels)
++                        int samplerate, int format, struct mp_chmap channels,
++                        int source_bits)
+ {
+     void *tmp = talloc_new(NULL);
+     struct ao_opts *opts = mp_get_config_group(tmp, global, &ao_conf);
+@@ -347,7 +349,8 @@
+             mp_verbose(log, "Using preferred device '%s'\n", dev);
+         }
+         ao = ao_init(probing, global, wakeup_cb, wakeup_ctx, encode_lavc_ctx,
+-                     init_flags, samplerate, format, channels, dev, entry->name);
++                     init_flags, samplerate, format, channels, source_bits,
++                     dev, entry->name);
+         if (ao)
+             break;
+         if (!probing)
+--- a/player/audio.c
++++ b/player/audio.c
+@@ -21,6 +21,8 @@
+ #include <limits.h>
+ #include <math.h>
+ #include <assert.h>
++#include <libavcodec/codec_par.h>
++#include <libavcodec/codec_id.h>
+ 
+ #include "mpv_talloc.h"
+ 
+@@ -443,9 +445,26 @@
+ 
+     mpctx->ao_filter_fmt = out_fmt;
+ 
++    // An S32 decoded frame may carry 20 or 24 valid bits. The demuxer's PCM
++    // precision describes that source even if a filter changed the container.
++    struct track *source_audio = mpctx->current_track[0][STREAM_AUDIO];
++    struct mp_codec_params *source_codec = source_audio && source_audio->stream
++                                         ? source_audio->stream->codec : NULL;
++    int source_bits = 0;
++    if (source_codec && source_codec->lav_codecpar) {
++        const AVCodecParameters *par = source_codec->lav_codecpar;
++        source_bits = par->bits_per_raw_sample;
++        if (!source_bits)
++            source_bits = av_get_exact_bits_per_sample(par->codec_id);
++    }
++    if (!source_bits && source_codec && source_codec->codec &&
++        (strncmp(source_codec->codec, "pcm_", 4) == 0 ||
++         strcmp(source_codec->codec, "flac") == 0))
++        source_bits = source_codec->bits_per_coded_sample;
++
+     mpctx->ao = ao_init_best(mpctx->global, ao_flags, mp_wakeup_core_cb,
+                              mpctx, mpctx->encode_lavc_ctx, out_rate,
+-                             out_format, out_channels);
++                             out_format, out_channels, source_bits);
+ 
+     int ao_rate = 0;
+     int ao_format = 0;

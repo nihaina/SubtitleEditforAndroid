@@ -1,0 +1,43 @@
+--- a/libusb/os/linux_usbfs.c
++++ b/libusb/os/linux_usbfs.c
+@@ -165,6 +165,7 @@
+ 
+ 	/* next iso packet in user-supplied transfer to be populated */
+ 	int iso_packet_offset;
++	int iso_packet_status;
+ };
+ 
+ static int dev_has_config0(struct libusb_device *dev)
+@@ -2145,6 +2146,7 @@
+ 	tpriv->num_retired = 0;
+ 	tpriv->reap_action = NORMAL;
+ 	tpriv->iso_packet_offset = 0;
++	tpriv->iso_packet_status = 0;
+ 
+ 	/* allocate + initialize each URB with the correct number of packets */
+ 	num_packets_remaining = num_packets;
+@@ -2489,6 +2491,15 @@
+ 		usbi_handle_transfer_completion(itransfer, tpriv->reap_status);
+ }
+ 
++/* Used by the in-process audio driver during its completion callback. */
++int subtitleedit_usbfs_iso_status(struct libusb_transfer *transfer);
++int subtitleedit_usbfs_iso_status(struct libusb_transfer *transfer)
++{
++	struct usbi_transfer *itransfer = LIBUSB_TRANSFER_TO_USBI_TRANSFER(transfer);
++	struct linux_transfer_priv *tpriv = usbi_get_transfer_priv(itransfer);
++	return tpriv->iso_packet_status;
++}
++
+ static int handle_iso_completion(struct usbi_transfer *itransfer,
+ 	struct usbfs_urb *urb)
+ {
+@@ -2523,6 +2534,8 @@
+ 		struct libusb_iso_packet_descriptor *lib_desc =
+ 			&transfer->iso_packet_desc[tpriv->iso_packet_offset++];
+ 
++		if (!tpriv->iso_packet_status && urb_desc->status)
++			tpriv->iso_packet_status = (int)urb_desc->status;
+ 		lib_desc->status = LIBUSB_TRANSFER_COMPLETED;
+ 		switch (urb_desc->status) {
+ 		case 0:

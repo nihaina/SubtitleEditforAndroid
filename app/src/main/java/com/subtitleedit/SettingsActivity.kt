@@ -10,6 +10,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import com.subtitleedit.player.PlayerPreferences
 import com.subtitleedit.player.PlayerSubtitleSettingsActivity
+import com.subtitleedit.ui.settings.PlayerUsbSettingsActivity
 import com.subtitleedit.ui.settings.SettingsScreen
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.FileUtils
@@ -64,7 +65,7 @@ class SettingsActivity : AppComposeActivity() {
                     onRestore = { backupImporter.launch(arrayOf("application/json", "text/plain", "*/*")) },
                     onOpenPlayerSubtitleSettings = openPlayerSubtitleSettings,
                     onAllowConcurrentPlaybackChanged = viewModel::setAllowConcurrentPlayback,
-                    onUsbExclusiveEnabledChanged = viewModel::setUsbExclusiveEnabled
+                    onOpenPlayerUsbSettings = { open(PlayerUsbSettingsActivity::class.java) }
                 )
             }
         }
