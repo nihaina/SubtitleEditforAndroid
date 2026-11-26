@@ -29,6 +29,7 @@ import com.subtitleedit.player.PlayerQueueEndAction
 import com.subtitleedit.player.PlayerStatusBarLyricsSettings
 import com.subtitleedit.player.PlayerSubtitleAlignment
 import com.subtitleedit.player.PlayerTrackEndAction
+import com.subtitleedit.player.PlayerUsbSampleRate
 import com.subtitleedit.player.PlayerUsbVolumeMode
 import com.subtitleedit.player.PlayerViewModel
 import com.subtitleedit.mpv.MPVLib
@@ -105,7 +106,7 @@ class AudioModeSettingsBackupTest {
 
         val backup = exportAudioSettings()
         assertEquals(setOf("player", "albums", "singers", "artists", "composers", "genres"), backup.keySet())
-        assertEquals(38, backup.getJSONObject("player").length())
+        assertEquals(39, backup.getJSONObject("player").length())
         listOf("albums", "singers", "artists", "composers", "genres").forEach {
             assertEquals(9, backup.getJSONObject(it).length())
         }
@@ -113,6 +114,7 @@ class AudioModeSettingsBackupTest {
         assertEquals("boolean", backup.getJSONObject("player").getJSONObject("allow_concurrent_playback").getString("type"))
         assertEquals(true, backup.value("player", "allow_concurrent_playback"))
         assertEquals(false, backup.value("player", "usb_exclusive_enabled"))
+        assertEquals(96_000, backup.value("player", "usb_sample_rate"))
         assertFalse(backup.toString().contains("last_position_"))
         assertFalse(backup.toString().contains("floating_subtitle_position_"))
         preferenceNames.forEach { assertTrue(prefs(it).edit().clear().commit()) }
@@ -134,6 +136,7 @@ class AudioModeSettingsBackupTest {
         assertEquals(false, defaults.value("player", "player_mode_enabled"))
         assertEquals(false, defaults.value("player", "allow_concurrent_playback"))
         assertEquals(true, defaults.value("player", "usb_exclusive_enabled"))
+        assertEquals(0, defaults.value("player", "usb_sample_rate"))
         assertEquals(true, defaults.value("player", "resume_playback"))
         assertEquals(true, defaults.value("player", "show_loudness_waveform"))
         assertEquals(1.0, defaults.getJSONObject("player").getJSONObject("default_speed").getDouble("value"), 0.0)
@@ -167,6 +170,7 @@ class AudioModeSettingsBackupTest {
         assertFalse(player.playerModeEnabled)
         assertFalse(player.allowConcurrentPlayback)
         assertTrue(player.usbExclusiveEnabled)
+        assertEquals(PlayerUsbSampleRate.AUTO, player.usbSampleRate)
         assertEquals(PlayerUsbVolumeMode.SOFTWARE, player.usbVolumeMode)
         assertEquals(PlayerPlayMode.REPEAT_ALL, player.defaultPlayMode)
         assertEquals(PlayerEndBehavior(), player.endBehavior)
@@ -337,6 +341,7 @@ class AudioModeSettingsBackupTest {
         player.allowConcurrentPlayback = true
         player.usbExclusiveEnabled = false
         player.usbVolumeMode = PlayerUsbVolumeMode.FIXED
+        player.usbSampleRate = PlayerUsbSampleRate.HZ_96000
         player.savePlaybackBehavior(PlayerPlayMode.SHUFFLE, PlayerEndBehavior(
             enabled = true, trackAction = PlayerTrackEndAction.LOAD_NEXT_PAUSED,
             queueAction = PlayerQueueEndAction.NEXT_QUEUE, wrapQueues = true, reshuffle = false
@@ -360,6 +365,7 @@ class AudioModeSettingsBackupTest {
         assertTrue(player.allowConcurrentPlayback)
         assertFalse(player.usbExclusiveEnabled)
         assertEquals(PlayerUsbVolumeMode.FIXED, player.usbVolumeMode)
+        assertEquals(PlayerUsbSampleRate.HZ_96000, player.usbSampleRate)
         assertEquals(PlayerPlayMode.SHUFFLE, player.defaultPlayMode)
         assertEquals(PlayerEndBehavior(true, PlayerTrackEndAction.LOAD_NEXT_PAUSED,
             PlayerQueueEndAction.NEXT_QUEUE, true, false), player.endBehavior)

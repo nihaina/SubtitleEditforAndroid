@@ -79,6 +79,20 @@ internal val PlayerFloatingSubtitleStyle.multilineAlignment: PlayerSubtitleAlign
 /** Player-only preferences, kept in their own file so the player stays self-contained. */
 internal enum class PlayerUsbVolumeMode { SOFTWARE, HARDWARE, FIXED }
 
+internal enum class PlayerUsbSampleRate(val hz: Int) {
+    AUTO(0),
+    HZ_44100(44_100),
+    HZ_48000(48_000),
+    HZ_88200(88_200),
+    HZ_96000(96_000),
+    HZ_176400(176_400),
+    HZ_192000(192_000),
+    HZ_352800(352_800),
+    HZ_384000(384_000),
+    HZ_705600(705_600),
+    HZ_768000(768_000),
+}
+
 internal enum class PlayerUsbBitDepth(val option: String) {
     AUTO("auto"), BIT_32("32"), BIT_16("16")
 }
@@ -292,6 +306,15 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) : Setting
 
     val usbVolumeModeChanges = observe(setOf(KEY_USB_VOLUME_MODE)) { usbVolumeMode }
 
+    var usbSampleRate: PlayerUsbSampleRate
+        get() {
+            val hz = prefs.getInt(KEY_USB_SAMPLE_RATE, 0)
+            return PlayerUsbSampleRate.entries.firstOrNull { it.hz == hz } ?: PlayerUsbSampleRate.AUTO
+        }
+        set(value) = prefs.edit().putInt(KEY_USB_SAMPLE_RATE, value.hz).apply()
+
+    val usbSampleRateChanges = observe(setOf(KEY_USB_SAMPLE_RATE)) { usbSampleRate }
+
     var usbBitDepth: PlayerUsbBitDepth
         get() = PlayerUsbBitDepth.entries.firstOrNull { it.name == prefs.getString(KEY_USB_BIT_DEPTH, null) }
             ?: PlayerUsbBitDepth.AUTO
@@ -355,6 +378,7 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) : Setting
             KEY_ALLOW_CONCURRENT_PLAYBACK to allowConcurrentPlayback,
             KEY_USB_EXCLUSIVE to usbExclusiveEnabled,
             KEY_USB_VOLUME_MODE to usbVolumeMode.name,
+            KEY_USB_SAMPLE_RATE to usbSampleRate.hz,
             KEY_USB_BIT_DEPTH to usbBitDepth.name,
             KEY_LOUDNESS_WAVEFORM to showLoudnessWaveform
         )
@@ -413,6 +437,7 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) : Setting
         private const val KEY_ALLOW_CONCURRENT_PLAYBACK = "allow_concurrent_playback"
         private const val KEY_USB_EXCLUSIVE = "usb_exclusive_enabled"
         private const val KEY_USB_VOLUME_MODE = "usb_volume_mode"
+        private const val KEY_USB_SAMPLE_RATE = "usb_sample_rate"
         private const val KEY_USB_BIT_DEPTH = "usb_bit_depth"
         private const val KEY_HIDE_BACKGROUND_PLAYBACK_GUIDE = "hide_background_playback_guide"
         private const val KEY_LOUDNESS_WAVEFORM = "show_loudness_waveform"

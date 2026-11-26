@@ -26,6 +26,7 @@ import com.subtitleedit.R
 import com.subtitleedit.player.PlayerPreferences
 import com.subtitleedit.player.PlayerUsbBitDepth
 import com.subtitleedit.player.PlayerUsbDiagnostics
+import com.subtitleedit.player.PlayerUsbSampleRate
 import com.subtitleedit.player.PlayerUsbVolumeMode
 import com.subtitleedit.ui.settings.PlayerUsbSettingsPage
 import com.subtitleedit.ui.settings.SettingsPageState
@@ -80,10 +81,11 @@ class SettingsPageLayoutTest {
         }
     }
 
-    @Test fun usbSettingsPageShowsAndPersistsHardwareVolumeAndBitDepth() {
+    @Test fun usbSettingsPagePersistsHardwareVolumeSampleRateAndBitDepth() {
         val preferences = PlayerPreferences.getInstance(compose.activity)
         val originalEnabled = preferences.usbExclusiveEnabled
         val originalVolume = preferences.usbVolumeMode
+        val originalRate = preferences.usbSampleRate
         val originalBits = preferences.usbBitDepth
         val originalUsbActive = PlayerUsbDiagnostics.active.value
         val originalHardwareSupported = PlayerUsbDiagnostics.hardwareVolumeSupported.value
@@ -91,6 +93,7 @@ class SettingsPageLayoutTest {
             PlayerUsbDiagnostics.setActive(false)
             preferences.usbExclusiveEnabled = false
             preferences.usbVolumeMode = PlayerUsbVolumeMode.SOFTWARE
+            preferences.usbSampleRate = PlayerUsbSampleRate.AUTO
             preferences.usbBitDepth = PlayerUsbBitDepth.AUTO
             compose.setContent {
                 SubtitleEditComposeTheme { PlayerUsbSettingsPage(onBack = {}, onOpenLogs = {}) }
@@ -114,6 +117,11 @@ class SettingsPageLayoutTest {
                 PlayerUsbDiagnostics.setHardwareVolumeSupported(true)
             }
             hardwareVolume.performScrollTo().assertIsSelected()
+            val adaptiveRate = compose.activity.getString(R.string.player_usb_sample_rate_auto)
+            val fixedRate = compose.activity.getString(R.string.player_usb_sample_rate_khz, "96")
+            compose.onNodeWithText(adaptiveRate).performScrollTo().performClick()
+            compose.onNodeWithText(fixedRate).performScrollTo().performClick()
+            compose.onNodeWithText(fixedRate).assertIsDisplayed()
             compose.onNodeWithText(compose.activity.getString(R.string.player_usb_bit_depth_auto))
                 .performScrollTo().assertIsSelected()
             compose.onNodeWithText(compose.activity.getString(R.string.player_usb_bit_depth_32))
@@ -125,11 +133,13 @@ class SettingsPageLayoutTest {
             compose.onNodeWithText(compose.activity.getString(R.string.player_usb_settings_close)).performClick()
             compose.runOnIdle {
                 assertEquals(PlayerUsbVolumeMode.HARDWARE, preferences.usbVolumeMode)
+                assertEquals(PlayerUsbSampleRate.HZ_96000, preferences.usbSampleRate)
                 assertEquals(PlayerUsbBitDepth.BIT_16, preferences.usbBitDepth)
             }
         } finally {
             preferences.usbExclusiveEnabled = originalEnabled
             preferences.usbVolumeMode = originalVolume
+            preferences.usbSampleRate = originalRate
             preferences.usbBitDepth = originalBits
             PlayerUsbDiagnostics.setActive(originalUsbActive)
             PlayerUsbDiagnostics.setHardwareVolumeSupported(originalHardwareSupported)

@@ -66,6 +66,8 @@ internal class PlayerEngine(
     private var volume = 100
     private var usbVolume = 100
     private var usbVolumeMode = PlayerUsbVolumeMode.SOFTWARE
+    private var usbSampleRate = PlayerUsbSampleRate.AUTO
+    private var appliedUsbSampleRate = PlayerUsbSampleRate.AUTO
     private var usbBitDepth = PlayerUsbBitDepth.AUTO
     private var usbHardwareVolume: Int? = null
     private var usbHardwareCeiling: Int? = null
@@ -123,6 +125,7 @@ internal class PlayerEngine(
         audioOnly: Boolean = false,
         usbExclusive: Boolean = false,
         usbVolumeMode: PlayerUsbVolumeMode = PlayerUsbVolumeMode.SOFTWARE,
+        usbSampleRate: PlayerUsbSampleRate = PlayerUsbSampleRate.AUTO,
         usbBitDepth: PlayerUsbBitDepth = PlayerUsbBitDepth.AUTO,
         volume: PlayerVolumeSnapshot,
     ) {
@@ -152,6 +155,7 @@ internal class PlayerEngine(
             this.volume = volume.softwarePercent
             usbVolume = volume.percent
             this.usbVolumeMode = usbVolumeMode
+            this.usbSampleRate = usbSampleRate
             this.usbBitDepth = usbBitDepth
             check(file.isFile && file.canRead()) { "无法读取文件：${file.name}" }
             check(configDir.isDirectory || configDir.mkdirs()) { "无法创建播放器配置目录" }
@@ -290,11 +294,31 @@ internal class PlayerEngine(
         }
     }
 
+    fun setUsbSampleRate(rate: PlayerUsbSampleRate) = post {
+        if (usbSampleRate == rate) return@post
+        usbSampleRate = rate
+        if (!initialized) return@post
+        applyUsbSampleRate()
+        retryFailedUsbOutput()
+    }
+
+    private fun applyUsbSampleRate() {
+        val rate = if (usesDirectUsb) usbSampleRate else PlayerUsbSampleRate.AUTO
+        if (appliedUsbSampleRate == rate) return
+        val result = MPVLib.setOptionString("audio-samplerate", rate.hz.toString())
+        if (result >= 0) appliedUsbSampleRate = rate
+        else PlayerUsbDiagnostics.record("mpv rejected USB output sample rate ${rate.hz} Hz: $result", failed = true)
+    }
+
     fun setUsbBitDepth(depth: PlayerUsbBitDepth) = post {
         if (usbBitDepth == depth) return@post
         usbBitDepth = depth
         if (!initialized) return@post
         MPVLib.setOptionString("android-usb-depth", depth.option)
+        retryFailedUsbOutput()
+    }
+
+    private fun retryFailedUsbOutput() {
         if (!usesDirectUsb && usbExclusiveRequested && usbFailedPath == mediaPath) {
             usbFailedPath = null
             configureUsbOutput(true)
@@ -381,7 +405,10 @@ internal class PlayerEngine(
     }
 
     private fun setUsbOutput(descriptor: Int?) {
-        if (usbOutputDescriptor == descriptor) return
+        if (usbOutputDescriptor == descriptor) {
+            applyUsbSampleRate()
+            return
+        }
         usbOutputDescriptor = descriptor
         resetUsbHardwareVolume()
         updateUsbPlaybackPower()
@@ -390,11 +417,16 @@ internal class PlayerEngine(
             PlayerUsbDiagnostics.setActive(false)
             MPVLib.setOptionString("android-usb-fd", "-1")
             MPVLib.setOptionString("ao", "audiotrack,opensles")
+            applyUsbSampleRate()
+            MPVLib.setOptionString("audio-fallback-to-null", "no")
             MPVLib.setOptionString("gapless-audio", "weak")
             applyVolume()
         } else {
             applyVolume()
             MPVLib.setOptionString("gapless-audio", "no")
+            // Keep the audio track selected until the USB failure handler can switch outputs.
+            MPVLib.setOptionString("audio-fallback-to-null", "yes")
+            applyUsbSampleRate()
             val fdResult = MPVLib.setOptionString("android-usb-fd", descriptor.toString())
             val aoResult = if (fdResult >= 0) MPVLib.setOptionString("ao", "android-usb") else fdResult
             if (aoResult < 0) {

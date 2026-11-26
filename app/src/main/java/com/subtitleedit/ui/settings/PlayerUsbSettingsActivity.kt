@@ -46,9 +46,12 @@ import com.subtitleedit.player.PlayerPreferences
 import com.subtitleedit.player.PlayerUsbBitDepth
 import com.subtitleedit.player.PlayerUsbDeviceMonitor
 import com.subtitleedit.player.PlayerUsbDiagnostics
+import com.subtitleedit.player.PlayerUsbSampleRate
 import com.subtitleedit.player.PlayerUsbVolumeMode
 import com.subtitleedit.player.usbLabel
 import com.subtitleedit.ui.components.AppDialog
+import com.subtitleedit.ui.components.AppOption
+import com.subtitleedit.ui.components.AppOptionSelector
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 
 class PlayerUsbSettingsActivity : AppComposeActivity() {
@@ -73,6 +76,7 @@ internal fun PlayerUsbSettingsPage(onBack: () -> Unit, onOpenLogs: () -> Unit) {
     val devices by monitor.devices.collectAsStateWithLifecycle()
     val enabled by preferences.usbExclusiveEnabledChanges.collectAsStateWithLifecycle(preferences.usbExclusiveEnabled)
     val volumeMode by preferences.usbVolumeModeChanges.collectAsStateWithLifecycle(preferences.usbVolumeMode)
+    val sampleRate by preferences.usbSampleRateChanges.collectAsStateWithLifecycle(preferences.usbSampleRate)
     val bitDepth by preferences.usbBitDepthChanges.collectAsStateWithLifecycle(preferences.usbBitDepth)
     val active by PlayerUsbDiagnostics.active.collectAsStateWithLifecycle()
     val hardwareVolumeSupported by PlayerUsbDiagnostics.hardwareVolumeSupported.collectAsStateWithLifecycle()
@@ -147,6 +151,26 @@ internal fun PlayerUsbSettingsPage(onBack: () -> Unit, onOpenLogs: () -> Unit) {
                     enabled = enabled,
                 ) { confirmFixedVolume = volumeMode != PlayerUsbVolumeMode.FIXED }
             }
+        }
+
+        OutlinedCard(Modifier.fillMaxWidth()) {
+            val options = PlayerUsbSampleRate.entries.map { option ->
+                val label = if (option == PlayerUsbSampleRate.AUTO) {
+                    stringResource(R.string.player_usb_sample_rate_auto)
+                } else {
+                    val khz = (option.hz / 1000.0).toString().removeSuffix(".0")
+                    stringResource(R.string.player_usb_sample_rate_khz, khz)
+                }
+                AppOption(option, label)
+            }
+            AppOptionSelector(
+                label = stringResource(R.string.player_usb_sample_rate_title),
+                value = options.first { it.id == sampleRate },
+                options = options,
+                enabled = enabled,
+                onSelected = { preferences.usbSampleRate = it },
+                modifier = Modifier.padding(12.dp),
+            )
         }
 
         OutlinedCard(Modifier.fillMaxWidth()) {

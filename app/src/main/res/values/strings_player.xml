@@ -27,6 +27,9 @@
     <string name="player_usb_volume_fixed">固定音量输出</string>
     <string name="player_usb_volume_fixed_help">以满幅音量输出，由 DAC 或外部功放调节音量。</string>
     <string name="player_usb_volume_fixed_warning">切换后会以满幅音量输出。请先调低 DAC 或外部功放的音量。</string>
+    <string name="player_usb_sample_rate_title">输出采样率</string>
+    <string name="player_usb_sample_rate_auto">自适应（推荐）</string>
+    <string name="player_usb_sample_rate_khz">%1$s kHz</string>
     <string name="player_usb_bit_depth_title">首选输出位深</string>
     <string name="player_usb_bit_depth_auto">自动检测最佳选项</string>
     <string name="player_usb_bit_depth_32">32 位 PCM</string>

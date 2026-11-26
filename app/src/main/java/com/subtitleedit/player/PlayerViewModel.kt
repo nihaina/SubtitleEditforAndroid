@@ -269,6 +269,9 @@ internal class PlayerViewModel @JvmOverloads constructor(
             preferences.usbVolumeModeChanges.collect { engine?.setUsbVolumeMode(it) }
         }
         viewModelScope.launch {
+            preferences.usbSampleRateChanges.collect { engine?.setUsbSampleRate(it) }
+        }
+        viewModelScope.launch {
             preferences.usbBitDepthChanges.collect { engine?.setUsbBitDepth(it) }
         }
         viewModelScope.launch {
@@ -914,6 +917,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
             muted = track.isVideo && current.muted,
             usbExclusive = preferences.playerModeEnabled && preferences.usbExclusiveEnabled,
             usbVolumeMode = preferences.usbVolumeMode,
+            usbSampleRate = preferences.usbSampleRate,
             usbBitDepth = preferences.usbBitDepth,
             volume = volumeController.snapshot)
         session.setSpeed(current.speed)
