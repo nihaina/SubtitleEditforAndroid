@@ -4,6 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PlayerVolumeGestureTest {
+    @Test fun dacDragAccumulatesWhileItsReadbackIsDelayedOrQuantized() {
+        val gesture = PlayerVolumeGesture()
+        val requests = mutableListOf<Int>()
+        gesture.adjust(5f, 28, synchronizeWithActual = false) { it.also(requests::add) }
+        gesture.adjust(1f, 28, synchronizeWithActual = false) { it.also(requests::add) }
+        gesture.adjust(1f, 32, synchronizeWithActual = false) { it.also(requests::add) }
+        assertEquals(listOf(33, 34, 35), requests)
+    }
+
     private class Gesture(var actual: Int) {
         val policy = PlayerVolumeGesture()
         var acceptedMaximum = 200

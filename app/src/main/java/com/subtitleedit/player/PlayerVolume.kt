@@ -79,3 +79,46 @@ internal object PlayerVolumePolicy {
     fun mpvVolume(linearPercent: Int): Double =
         100.0 * (linearPercent.coerceIn(0, 200) / 100.0).pow(1.0 / 3.0)
 }
+
+/** The DAC readback drives playback and UI. Pending writes only accumulate consecutive key presses. */
+internal class PlayerUsbHardwareVolume {
+    var confirmedPercent: Int? = null
+        private set
+    private var requestedPercent: Int? = null
+    private var requestDeadlineMs = 0L
+
+    fun request(nowMs: Long, adjust: (Int) -> Int): Int? {
+        val confirmed = confirmedPercent ?: return null
+        val baseline = requestedPercent?.takeIf { nowMs < requestDeadlineMs } ?: confirmed
+        val target = adjust(baseline).coerceIn(0, 100)
+        if (target == baseline) return null
+        requestedPercent = target
+        requestDeadlineMs = nowMs + WRITE_TIMEOUT_MS
+        return target
+    }
+
+    fun readBack(percent: Int, nowMs: Long): Int? {
+        val previous = confirmedPercent
+        confirmedPercent = percent
+        val request = requestedPercent ?: return null
+        // The cached value can match a reversal request before the DAC applies it.
+        val changedToRequest = percent != previous && percent == request
+        if (!changedToRequest && nowMs < requestDeadlineMs) return null
+        clearRequest()
+        return request
+    }
+
+    fun clearRequest() {
+        requestedPercent = null
+        requestDeadlineMs = 0L
+    }
+
+    fun reset() {
+        confirmedPercent = null
+        clearRequest()
+    }
+
+    private companion object {
+        const val WRITE_TIMEOUT_MS = 1_500L
+    }
+}

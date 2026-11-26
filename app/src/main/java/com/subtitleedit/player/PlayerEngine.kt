@@ -69,10 +69,9 @@ internal class PlayerEngine(
     private var usbSampleRate = PlayerUsbSampleRate.AUTO
     private var appliedUsbSampleRate = PlayerUsbSampleRate.AUTO
     private var usbBitDepth = PlayerUsbBitDepth.AUTO
-    private var usbHardwareVolume: Int? = null
+    private val usbHardwareVolume = PlayerUsbHardwareVolume()
     private var usbHardwareCeiling: Int? = null
     private var usbHardwareCeilingDeadlineMs = 0L
-    private var usbHardwareTarget: Int? = null
     private var usbExclusiveRequested = false
     private var usbFailedPath: String? = null
     @Volatile private var usbOutputDescriptor: Int? = null
@@ -134,6 +133,7 @@ internal class PlayerEngine(
         publish(request) { PlayerEngineState(loadId = loadId) }
         post(request) {
             mediaGeneration = request
+            usbHardwareVolume.clearRequest()
             resetUsbProgress()
             mediaPath = file.absolutePath
             if (usbFailedPath != mediaPath) usbFailedPath = null
@@ -279,7 +279,7 @@ internal class PlayerEngine(
 
     private fun outputVolume() = when {
         !usesDirectUsb -> volume
-        usbHardwareVolume != null -> if (usbHardwareVolume == 0) 0 else 100
+        usbHardwareVolume.confirmedPercent != null -> if (usbHardwareVolume.confirmedPercent == 0) 0 else 100
         usbVolumeMode == PlayerUsbVolumeMode.FIXED -> 100
         else -> usbVolume.coerceAtMost(100)
     }
@@ -329,33 +329,34 @@ internal class PlayerEngine(
         if (PlayerUsbDiagnostics.active.value) readUsbHardwareVolume()
     }
 
-    fun setUsbHardwareVolume(percent: Int) = post {
-        if (usbHardwareVolume == null || usbVolumeMode != PlayerUsbVolumeMode.HARDWARE ||
+    fun setUsbHardwareVolume(percent: Int) = adjustUsbHardwareVolume { percent }
+
+    fun adjustUsbHardwareVolume(adjust: (Int) -> Int) = post {
+        if (usbVolumeMode != PlayerUsbVolumeMode.HARDWARE || usbHardwareVolume.confirmedPercent == null ||
             MPVLib.getPropertyString("current-ao") != "android-usb") return@post
-        val target = percent.coerceIn(0, 100)
-        if (target == (usbHardwareTarget ?: usbHardwareVolume)) return@post
-        usbHardwareTarget = target
+        val target = usbHardwareVolume.request(SystemClock.elapsedRealtime(), adjust) ?: return@post
         MPVLib.setPropertyDouble("ao-volume", target.toDouble())
-        publish { copy(usbHardwareVolume = target) }
     }
 
     private fun readUsbHardwareVolume() {
         if (MPVLib.getPropertyString("current-ao") != "android-usb") return
-        val percent = MPVLib.getPropertyDouble("ao-volume")?.takeIf { it.isFinite() }?.roundToInt()?.coerceIn(0, 100)
+        val rawPercent = MPVLib.getPropertyDouble("ao-volume")?.takeIf { it.isFinite() }
         if (usbVolumeMode != PlayerUsbVolumeMode.HARDWARE) {
-            PlayerUsbDiagnostics.setHardwareVolumeSupported(percent != null)
+            PlayerUsbDiagnostics.setHardwareVolumeSupported(rawPercent != null)
             return
         }
-        if (percent == null) {
+        val previous = usbHardwareVolume.confirmedPercent
+        if (rawPercent == null) {
             PlayerUsbDiagnostics.setHardwareVolumeSupported(false)
-            if (usbHardwareVolume != null) {
+            if (previous != null) {
                 resetUsbHardwareVolume()
                 applyVolume()
                 PlayerUsbDiagnostics.record("DAC hardware volume unavailable; using software volume")
             }
             return
         }
-        if (usbHardwareVolume == null) {
+        val percent = rawPercent.roundToInt().coerceIn(0, 100)
+        if (previous == null) {
             // Keep software attenuation until the DAC has read back a safe initial setting.
             val ceiling = usbHardwareCeiling ?: usbVolume.coerceIn(0, 100).also {
                 usbHardwareCeiling = it
@@ -372,17 +373,19 @@ internal class PlayerEngine(
             }
         }
         PlayerUsbDiagnostics.setHardwareVolumeSupported(true)
-        usbHardwareTarget = percent
-        if (usbHardwareVolume != percent) {
-            usbHardwareVolume = percent
+        val settledRequest = usbHardwareVolume.readBack(percent, SystemClock.elapsedRealtime())
+        if (previous != percent) {
             applyVolume()
+        }
+        if (previous == null || settledRequest != null) {
+            val requested = settledRequest?.let { ", requested $it%" }.orEmpty()
+            PlayerUsbDiagnostics.record("DAC volume: readback $rawPercent%, displayed $percent%$requested")
         }
         publish { copy(usbHardwareVolume = percent) }
     }
 
     private fun resetUsbHardwareVolume() {
-        usbHardwareVolume = null
-        usbHardwareTarget = null
+        usbHardwareVolume.reset()
         usbHardwareCeiling = null
         usbHardwareCeilingDeadlineMs = 0L
         publish { copy(usbHardwareVolume = null) }

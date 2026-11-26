@@ -26,25 +26,32 @@ internal class PlayerVolumeGesture {
         warned = false
     }
 
-    fun adjust(delta: Float, actualPercent: Int, apply: (Int) -> Int): PlayerVolumeGestureResult {
+    fun adjust(
+        delta: Float,
+        actualPercent: Int,
+        synchronizeWithActual: Boolean = true,
+        apply: (Int) -> Int,
+    ): PlayerVolumeGestureResult {
         if (!active) begin(actualPercent)
         if (!delta.isFinite() || delta == 0f) return PlayerVolumeGestureResult()
-        if (actualPercent != lastApplied) {
+        if (synchronizeWithActual && actualPercent != lastApplied) {
             // A system key or a route change invalidates an earlier warning acknowledgement.
             reset()
             begin(actualPercent)
         }
+        // Asynchronous DAC readbacks can arrive during a drag without changing its accumulated target.
+        val previousPercent = lastApplied
         var target = (value + delta).coerceIn(0f, 200f)
         if (!allowBoost && target > 100f) {
             target = 100f
-            if (actualPercent == 100) {
+            if (previousPercent == 100) {
                 value = 100f
                 warned = true
                 return PlayerVolumeGestureResult(blockedAtUnity = true)
             }
         }
         // A fast movement must still land on the unity boundary before going below it.
-        if (actualPercent > 100 && target < 100f) target = 100f
+        if (previousPercent > 100 && target < 100f) target = 100f
         val accepted = apply(target.roundToInt()).coerceIn(0, 200)
         value = target
         lastApplied = accepted
@@ -52,12 +59,12 @@ internal class PlayerVolumeGesture {
             allowBoost = false
             warned = false
             if (target >= 100f) value = accepted.toFloat() // Android rejected maximum volume.
-        } else if (accepted == 100 && actualPercent > 100) {
+        } else if (accepted == 100 && previousPercent > 100) {
             allowBoost = false
             warned = false
         }
         val feedback = when {
-            accepted == actualPercent -> PlayerVolumeFeedback.NONE
+            accepted == previousPercent -> PlayerVolumeFeedback.NONE
             accepted in BOUNDARIES -> PlayerVolumeFeedback.BOUNDARY
             else -> PlayerVolumeFeedback.LIGHT
         }

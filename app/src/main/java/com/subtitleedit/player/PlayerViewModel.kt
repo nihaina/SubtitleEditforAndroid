@@ -469,6 +469,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
             session.state.collect { sample ->
                 if (loadId == 0L || sample.loadId != loadId || engine !== session || _state.value.currentTrack == null) return@collect
                 val snapshot = _state.value
+                val hardwareVolume = sample.usbHardwareVolume != null
+                if (hardwareVolume != snapshot.usbHardwareVolume) volumeGesture.reset()
                 if (sample.error != null) rememberPosition()
                 val previouslyPlayed = listening.hasPlayed
                 updateListening(sample.ready && sample.playing && !sample.usbStalled && sample.error == null && !sample.ended &&
@@ -478,7 +480,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
                     durationMs = sample.durationMs,
                     playing = sample.playing && sample.error == null && !sample.ended,
                     usbStalled = sample.usbStalled,
-                    usbHardwareVolume = sample.usbHardwareVolume != null,
+                    usbHardwareVolume = hardwareVolume,
                     volumePercent = sample.usbHardwareVolume ?: volumeController.snapshot.percent,
                     ready = sample.ready,
                     error = sample.error,
@@ -1260,27 +1262,35 @@ internal class PlayerViewModel @JvmOverloads constructor(
     fun handleHardwareVolumeKey(event: KeyEvent): Boolean {
         val current = _state.value
         if (!current.usbHardwareVolume || current.currentTrack == null) return false
-        val percent = when (event.keyCode) {
-            KeyEvent.KEYCODE_VOLUME_UP -> current.volumePercent + 5
-            KeyEvent.KEYCODE_VOLUME_DOWN -> current.volumePercent - 5
-            KeyEvent.KEYCODE_VOLUME_MUTE -> if (current.volumePercent == 0) 5 else 0
+        val session = engine ?: return false
+        val adjust: (Int) -> Int = when (event.keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> { level -> level + 5 }
+            KeyEvent.KEYCODE_VOLUME_DOWN -> { level -> level - 5 }
+            KeyEvent.KEYCODE_VOLUME_MUTE -> { level -> if (level == 0) 5 else 0 }
             else -> return false
         }
-        if (event.action == KeyEvent.ACTION_DOWN) setHardwareVolume(percent)
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            volumeGesture.reset()
+            session.adjustUsbHardwareVolume(adjust)
+            showHardwareVolumeBar()
+        }
         return true
     }
 
     private fun setHardwareVolume(percent: Int): Int {
         val level = percent.coerceIn(0, 100)
         engine?.setUsbHardwareVolume(level)
-        _state.value = _state.value.copy(volumePercent = level)
+        showHardwareVolumeBar()
+        return level
+    }
+
+    private fun showHardwareVolumeBar() {
         _hardwareVolumeBar.value = true
         hardwareVolumeBarJob?.cancel()
         hardwareVolumeBarJob = viewModelScope.launch {
             delay(2_500L)
             _hardwareVolumeBar.value = false
         }
-        return level
     }
 
     fun toggleMute() {
@@ -1339,16 +1349,21 @@ internal class PlayerViewModel @JvmOverloads constructor(
     }
 
     fun adjustVolumeGesture(deltaPercent: Float): PlayerVolumeGestureResult {
-        _state.value = _state.value.copy(volumeGestureActive = true)
-        val result = volumeGesture.adjust(deltaPercent, _state.value.volumePercent) { requested ->
-            if (_state.value.usbHardwareVolume) setHardwareVolume(requested)
+        val current = _state.value
+        _state.value = current.copy(volumeGestureActive = true)
+        val result = volumeGesture.adjust(
+            deltaPercent,
+            current.volumePercent,
+            synchronizeWithActual = !current.usbHardwareVolume,
+        ) { requested ->
+            if (current.usbHardwareVolume) setHardwareVolume(requested)
             else {
                 val accepted = volumeController.setVolume(requested)
                 applyVolume(accepted)
                 accepted.percent
             }
         }
-        if (result.blockedAtUnity && !_state.value.usbHardwareVolume) {
+        if (result.blockedAtUnity && !current.usbHardwareVolume) {
             val text = applicationText(R.string.player_volume_boost_warning)
             if (_state.value.gestureHint?.text != text) {
                 _state.value = _state.value.copy(gestureHint = PlayerGestureHint(text, ++hintToken, R.drawable.ic_player_volume))

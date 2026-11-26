@@ -5,6 +5,9 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,13 +17,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -32,6 +32,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -51,7 +54,6 @@ import com.subtitleedit.player.PlayerUsbVolumeMode
 import com.subtitleedit.player.usbLabel
 import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.components.AppOption
-import com.subtitleedit.ui.components.AppOptionSelector
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 
 class PlayerUsbSettingsActivity : AppComposeActivity() {
@@ -84,27 +86,53 @@ internal fun PlayerUsbSettingsPage(onBack: () -> Unit, onOpenLogs: () -> Unit) {
     val usingSoftwareFallback = volumeMode == PlayerUsbVolumeMode.HARDWARE && hardwareVolumeUnavailable
     var confirmFixedVolume by rememberSaveable { mutableStateOf(false) }
     var showLogs by rememberSaveable { mutableStateOf(false) }
+    var showSampleRateDialog by rememberSaveable { mutableStateOf(false) }
+    val sampleRateOptions = PlayerUsbSampleRate.entries.map { option ->
+        val label = if (option == PlayerUsbSampleRate.AUTO) {
+            stringResource(R.string.player_usb_sample_rate_auto)
+        } else {
+            val khz = (option.hz / 1000.0).toString().removeSuffix(".0")
+            stringResource(R.string.player_usb_sample_rate_khz, khz)
+        }
+        AppOption(option, label)
+    }
     LaunchedEffect(monitor) { monitor.refresh() }
 
     ModelSettingsScaffold(stringResource(R.string.player_usb_settings_title), onBack) {
-        OutlinedCard(Modifier.fillMaxWidth()) {
+        SettingsTileCard {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (devices.isEmpty()) {
-                        Text(stringResource(R.string.player_usb_no_device), style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            stringResource(R.string.player_usb_no_device),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = settingsPrimaryTextColor(),
+                        )
                     } else {
-                        Text(stringResource(R.string.player_usb_detected_devices), style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            stringResource(R.string.player_usb_detected_devices),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = settingsPrimaryTextColor(),
+                        )
                         devices.forEach { device ->
-                            Text(device.usbLabel(), style = MaterialTheme.typography.bodyMedium,
-                                overflow = TextOverflow.Ellipsis, maxLines = 2)
+                            Text(
+                                device.usbLabel(),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = settingsSecondaryTextColor(),
+                                overflow = TextOverflow.Ellipsis,
+                                maxLines = 2,
+                            )
                         }
                         if (active) {
-                            Text(stringResource(R.string.player_usb_output_active),
-                                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                            Text(
+                                stringResource(R.string.player_usb_output_active),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
                         }
                     }
                 }
@@ -112,22 +140,20 @@ internal fun PlayerUsbSettingsPage(onBack: () -> Unit, onOpenLogs: () -> Unit) {
             }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth().toggleable(enabled, role = Role.Switch,
-                onValueChange = { preferences.usbExclusiveEnabled = it }).padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(stringResource(R.string.player_usb_enable), Modifier.weight(1f),
-                style = MaterialTheme.typography.titleMedium)
-            Switch(checked = enabled, onCheckedChange = null)
+        SettingsTileGroup {
+            SettingsTileSwitchRow(
+                title = stringResource(R.string.player_usb_enable),
+                description = stringResource(R.string.player_usb_output_help),
+                checked = enabled,
+                onCheckedChange = { preferences.usbExclusiveEnabled = it },
+            )
         }
-        Text(stringResource(R.string.player_usb_output_help), style = MaterialTheme.typography.bodyMedium)
 
-        OutlinedCard(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp).selectableGroup()) {
-                Text(stringResource(R.string.player_usb_volume_title), Modifier.padding(4.dp),
-                    style = MaterialTheme.typography.titleSmall)
+        ModelSettingsGroup(title = stringResource(R.string.player_usb_volume_title)) {
+            Column(
+                Modifier.selectableGroup(),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 UsbOutputOption(
                     title = stringResource(R.string.player_usb_volume_software),
                     description = stringResource(R.string.player_usb_volume_software_help),
@@ -153,30 +179,23 @@ internal fun PlayerUsbSettingsPage(onBack: () -> Unit, onOpenLogs: () -> Unit) {
             }
         }
 
-        OutlinedCard(Modifier.fillMaxWidth()) {
-            val options = PlayerUsbSampleRate.entries.map { option ->
-                val label = if (option == PlayerUsbSampleRate.AUTO) {
-                    stringResource(R.string.player_usb_sample_rate_auto)
-                } else {
-                    val khz = (option.hz / 1000.0).toString().removeSuffix(".0")
-                    stringResource(R.string.player_usb_sample_rate_khz, khz)
-                }
-                AppOption(option, label)
-            }
-            AppOptionSelector(
-                label = stringResource(R.string.player_usb_sample_rate_title),
-                value = options.first { it.id == sampleRate },
-                options = options,
+        SettingsTileGroup {
+            SettingsTileRow(
+                title = stringResource(R.string.player_usb_sample_rate_title),
+                value = sampleRateOptions.first { it.id == sampleRate }.label,
                 enabled = enabled,
-                onSelected = { preferences.usbSampleRate = it },
-                modifier = Modifier.padding(12.dp),
+                onClick = { showSampleRateDialog = true },
             )
         }
 
-        OutlinedCard(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp).selectableGroup()) {
-                Text(stringResource(R.string.player_usb_bit_depth_title), Modifier.padding(4.dp),
-                    style = MaterialTheme.typography.titleSmall)
+        ModelSettingsGroup(
+            title = stringResource(R.string.player_usb_bit_depth_title),
+            description = stringResource(R.string.player_usb_bit_depth_help),
+        ) {
+            Column(
+                Modifier.selectableGroup(),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 PlayerUsbBitDepth.entries.forEach { option ->
                     val title = when (option) {
                         PlayerUsbBitDepth.AUTO -> R.string.player_usb_bit_depth_auto
@@ -187,11 +206,60 @@ internal fun PlayerUsbSettingsPage(onBack: () -> Unit, onOpenLogs: () -> Unit) {
                         preferences.usbBitDepth = option
                     }
                 }
-                ModelSettingsHint(stringResource(R.string.player_usb_bit_depth_help), Modifier.padding(4.dp))
             }
         }
 
-        TextButton(onClick = { showLogs = true }) { Text(stringResource(R.string.player_usb_open_logs)) }
+        SettingsTileGroup {
+            SettingsTileRow(
+                title = stringResource(R.string.player_usb_open_logs),
+                onClick = { showLogs = true },
+            )
+        }
+    }
+
+    if (enabled && showSampleRateDialog) {
+        AppDialog(
+            onDismissRequest = { showSampleRateDialog = false },
+            title = { Text(stringResource(R.string.player_usb_sample_rate_title)) },
+            text = {
+                Column(
+                    Modifier.heightIn(max = 400.dp)
+                        .verticalScroll(rememberScrollState())
+                        .selectableGroup()
+                ) {
+                    sampleRateOptions.forEach { option ->
+                        val selected = option.id == sampleRate
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                    MaterialTheme.shapes.medium,
+                                )
+                                .selectable(
+                                    selected = selected,
+                                    role = Role.RadioButton,
+                                    onClick = {
+                                        showSampleRateDialog = false
+                                        preferences.usbSampleRate = option.id
+                                    },
+                                )
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = selected, onClick = null)
+                            Text(option.label, modifier = Modifier.padding(start = 8.dp))
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showSampleRateDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
     }
 
     if (showLogs) UsbDiagnosticsDialog(onBack = { showLogs = false }, onOpenLogs = onOpenLogs)
@@ -255,20 +323,39 @@ private fun UsbOutputOption(
     enabled: Boolean,
     onSelect: () -> Unit,
 ) {
+    val source = remember { MutableInteractionSource() }
     Row(
-        modifier = Modifier.fillMaxWidth().selectable(selected, enabled = enabled,
-            role = Role.RadioButton, onClick = onSelect).padding(vertical = 10.dp, horizontal = 4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = if (description == null) 68.dp else 76.dp)
+            .alpha(if (enabled) 1f else 0.5f)
+            .clip(settingsTileShape(source))
+            .background(settingsTileColor())
+            .selectable(
+                selected = selected,
+                enabled = enabled,
+                interactionSource = source,
+                indication = LocalIndication.current,
+                role = Role.RadioButton,
+                onClick = onSelect,
+            )
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(selected = selected, enabled = enabled, onClick = null)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            val colors = MaterialTheme.colorScheme
-            Text(title, style = MaterialTheme.typography.bodyMedium,
-                color = if (enabled) colors.onSurface else colors.onSurface.copy(alpha = 0.38f))
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = settingsPrimaryTextColor(),
+            )
             description?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall,
-                    color = if (enabled) colors.onSurfaceVariant else colors.onSurface.copy(alpha = 0.38f))
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = settingsSecondaryTextColor(),
+                )
             }
         }
     }
