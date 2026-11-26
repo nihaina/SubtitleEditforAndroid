@@ -1284,7 +1284,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         return level
     }
 
-    private fun showHardwareVolumeBar() {
+    fun showHardwareVolumeBar() {
         _hardwareVolumeBar.value = true
         hardwareVolumeBarJob?.cancel()
         hardwareVolumeBarJob = viewModelScope.launch {
