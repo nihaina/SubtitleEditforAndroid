@@ -48,6 +48,28 @@ body {
   font-family: var(--font);
   font-size: 1rem;
   line-height: 1.75;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* 氛围感渐变背景光晕 */
+body::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100vw, 80rem);
+  height: 45rem;
+  background: radial-gradient(circle at 50% 0%, rgba(14, 88, 200, 0.08) 0%, rgba(14, 88, 200, 0.02) 40%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  body::after {
+    background: radial-gradient(circle at 50% 0%, rgba(176, 198, 255, 0.09) 0%, rgba(176, 198, 255, 0.02) 40%, transparent 70%);
+  }
 }
 
 [hidden] { display: none !important; }
