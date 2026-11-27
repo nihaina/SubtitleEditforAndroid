@@ -6,6 +6,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.app.Notification.ProgressStyle
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
@@ -15,11 +16,13 @@ import android.media.AudioAttributes
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import androidx.annotation.RequiresApi
 import com.subtitleedit.MainActivity
 import com.subtitleedit.R
 import com.subtitleedit.library.MediaLibraryRepository
@@ -334,7 +337,8 @@ class PlayerMediaNotificationService : Service() {
 
     private fun notificationKeyFor(state: PlayerMediaNotificationState): List<Any?> = listOf(
         state.sessionId, state.track.path, state.playing, state.ready, state.error,
-        state.hasPrevious, state.hasNext, state.lyricText.forMediaControls(), details)
+        state.hasPrevious, state.hasNext, state.lyricText.forMediaControls(), details,
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) state.positionMs / 1_000L else null)
 
     private fun buildNotification(state: PlayerMediaNotificationState?): Notification {
         val info = details?.takeIf { it.path == state?.track?.path }
@@ -345,12 +349,24 @@ class PlayerMediaNotificationService : Service() {
             .setContentText(state?.error ?: state?.lyricText.forMediaControls() ?: info?.artist?.takeIf { it.isNotBlank() }
                 ?: info?.album?.takeIf { it.isNotBlank() } ?: getString(R.string.player_media_notification_channel))
             .setContentIntent(openPlayerIntent())
-            .setCategory(Notification.CATEGORY_TRANSPORT)
+            .setCategory(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA)
+                Notification.CATEGORY_PROGRESS else Notification.CATEGORY_TRANSPORT)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setShowWhen(false).setOnlyAlertOnce(true).setOngoing(playing)
-            .setStyle(Notification.MediaStyle().setMediaSession(mediaSession.sessionToken).apply {
-                if (state != null) setShowActionsInCompactView(0, 1, 2)
+            .setStyle(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+                buildLivePlaybackStyle(state)
+            } else {
+                Notification.MediaStyle().setMediaSession(mediaSession.sessionToken).apply {
+                    if (state != null) setShowActionsInCompactView(0, 1, 2)
+                }
             })
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+            builder.setShortCriticalText((info?.title ?: state?.track?.name ?: getString(R.string.app_name)).take(7))
+            builder.addExtras(Bundle().apply {
+                putBoolean(REQUEST_PROMOTED_ONGOING, state?.let(::shouldPromoteLivePlayback) == true)
+                putParcelable(Notification.EXTRA_MEDIA_SESSION, mediaSession.sessionToken)
+            })
+        }
         info?.artwork?.let(builder::setLargeIcon)
         if (state != null) {
             builder.setDeleteIntent(actionIntent(PlayerMediaNotifications.ACTION_STOP, state))
@@ -367,6 +383,26 @@ class PlayerMediaNotificationService : Service() {
         }
         return builder.build()
     }
+
+    @RequiresApi(Build.VERSION_CODES.BAKLAVA)
+    private fun buildLivePlaybackStyle(state: PlayerMediaNotificationState?): ProgressStyle {
+        val durationSeconds = state?.durationMs?.takeIf { it > 0L }
+            ?.div(1_000L)?.coerceAtLeast(1L)?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt()
+        val style = ProgressStyle()
+            .setProgressIndeterminate(durationSeconds == null)
+            .setProgressStartIcon(Icon.createWithResource(
+                this,
+                if (state?.track?.isVideo == true) R.drawable.ic_video_play else R.drawable.ic_music_note,
+            ))
+        if (durationSeconds != null) {
+            style.addProgressSegment(ProgressStyle.Segment(durationSeconds).setColor(getColor(R.color.primary)))
+                .setProgress(state.positionMs.coerceAtLeast(0L).div(1_000L).coerceAtMost(durationSeconds.toLong()).toInt())
+        }
+        return style
+    }
+
+    private fun shouldPromoteLivePlayback(state: PlayerMediaNotificationState): Boolean =
+        state.playing && state.ready && state.error == null && !state.usbStalled && state.durationMs > 0L
 
     private fun actionIntent(action: String, state: PlayerMediaNotificationState): PendingIntent = PendingIntent.getService(
         this, action.hashCode(), Intent(this, PlayerMediaNotificationService::class.java).setAction(action)
@@ -418,6 +454,7 @@ class PlayerMediaNotificationService : Service() {
 
     private companion object {
         const val CHANNEL_ID = "audio_mode_playback"
+        const val REQUEST_PROMOTED_ONGOING = "android.requestPromotedOngoing"
         const val ORIGINAL_ARTIST_KEY = "com.subtitleedit.player.metadata.ORIGINAL_ARTIST"
         const val MAX_LYRIC_CHARS = 500
     }

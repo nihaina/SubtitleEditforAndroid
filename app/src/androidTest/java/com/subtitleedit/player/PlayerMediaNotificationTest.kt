@@ -78,7 +78,23 @@ class PlayerMediaNotificationTest {
             await("external notification title uses the filename") {
                 notification()?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString() == "covered"
             }
-            assertEquals(Notification.CATEGORY_TRANSPORT, requireNotNull(notification()).category)
+            val initialNotification = requireNotNull(notification())
+            if (Build.VERSION.SDK_INT >= 36) {
+                assertEquals(Notification.CATEGORY_PROGRESS, initialNotification.category)
+                assertTrue(initialNotification.extras.getBoolean("android.requestPromotedOngoing"))
+                assertNotNull("Live Update keeps the MediaSession association", sessionToken())
+                await("Live Update publishes elapsed playback progress") {
+                    val progressNotification = notification() ?: return@await false
+                    progressNotification.extras.getInt(Notification.EXTRA_PROGRESS_MAX) > 0 &&
+                        !progressNotification.extras.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE)
+                }
+                onMain { controller.transportControls.seekTo(10_000L) }
+                await("Live Update progress follows media seeks") {
+                    (notification()?.extras?.getInt(Notification.EXTRA_PROGRESS) ?: 0) >= 10
+                }
+            } else {
+                assertEquals(Notification.CATEGORY_TRANSPORT, initialNotification.category)
+            }
             assertTrue("Playback is protected by a foreground service",
                 requireNotNull(notification()).flags and Notification.FLAG_FOREGROUND_SERVICE != 0)
             await("system session reports playing") { controller.playbackState?.state == PlaybackState.STATE_PLAYING }
