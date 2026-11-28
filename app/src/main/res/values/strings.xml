@@ -806,6 +806,7 @@
     <string name="model_import_use_builtin_vad">使用内置模型</string>
     <string name="model_import_demucs_general">通用四轨模型</string>
     <string name="model_import_demucs_ft">FT 单音轨模型</string>
+    <string name="model_import_demucs_ft_subtitle">单音轨任务优先使用对应 FT 模型；未配置时回退通用模型。</string>
     <string name="model_import_general_not_selected">未选择通用四轨模型</string>
     <string name="model_import_general_hint">支持一次推理输出多个音轨</string>
     <string name="model_import_ft_not_selected">未选择 %1$s specialist 模型</string>

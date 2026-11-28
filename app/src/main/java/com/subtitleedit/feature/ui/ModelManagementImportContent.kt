@@ -22,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.LocalContentColor
@@ -526,34 +527,77 @@ private fun DemucsModelImportCard(
 ) {
     ModelImportCard {
         Row(verticalAlignment = Alignment.Top) {
-            Text(
-                text = stringResource(
-                    if (state.useFtModels) R.string.model_import_demucs_ft
-                    else R.string.model_import_demucs_general
-                ),
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            TextButton(
-                onClick = { onAction(DemucsModelImportAction.Configure) },
-                modifier = Modifier.padding(start = 12.dp).height(36.dp)
-            ) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    stringResource(R.string.activity_model_settings_text_08),
+                    text = stringResource(
+                        if (state.useFtModels) R.string.model_import_demucs_ft
+                        else R.string.model_import_demucs_general
+                    ),
+                    style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
-                    softWrap = false
+                    overflow = TextOverflow.Ellipsis
                 )
+                if (!state.useFtModels) {
+                    Text(
+                        text = stringResource(R.string.model_mgmt_llm_file_label),
+                        modifier = Modifier.padding(top = 12.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    ValueField(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                        SelectionContainer {
+                            Text(
+                                text = (state.generalModelValue
+                                    ?: stringResource(R.string.model_import_general_not_selected))
+                                    .substringBefore('\n'),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = settingsSecondaryTextColor(),
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.MiddleEllipsis
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        text = stringResource(R.string.model_import_demucs_ft_subtitle),
+                        modifier = Modifier.padding(top = 6.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = settingsSecondaryTextColor()
+                    )
+                }
+            }
+            Column(
+                modifier = Modifier.padding(start = 12.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                TextButton(
+                    onClick = { onAction(DemucsModelImportAction.Configure) },
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Text(
+                        stringResource(R.string.activity_model_settings_text_08),
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+                TonalPillButton(
+                    onClick = { onAction(DemucsModelImportAction.SelectModelType) },
+                    enabled = state.actionsEnabled,
+                    modifier = Modifier.height(36.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp)
+                ) {
+                    Text(
+                        stringResource(R.string.activity_model_settings_text_09),
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
             }
         }
         if (!state.useFtModels) {
-            DemucsValueWithSwitch(
-                value = state.generalModelValue ?: stringResource(R.string.model_import_general_not_selected),
-                enabled = state.actionsEnabled,
-                onSwitch = { onAction(DemucsModelImportAction.SelectModelType) },
-                modifier = Modifier.padding(top = 8.dp)
-            )
             ModelSelectRow(
                 selectLabel = stringResource(R.string.activity_vocal_separation_settings_text_03),
                 onSelect = { onAction(DemucsModelImportAction.SelectGeneralModel) },
@@ -573,38 +617,37 @@ private fun DemucsModelImportCard(
                 modifier = Modifier.padding(top = 8.dp)
             )
         } else {
-            DemucsSpecialistModelRow(
-                value = state.ftModelValues["vocals"]
-                    ?: stringResource(R.string.model_import_ft_not_selected, "Vocals"),
-                selectLabel = stringResource(R.string.activity_vocal_separation_settings_text_06),
-                enabled = state.actionsEnabled,
-                onSelect = { onAction(DemucsModelImportAction.SelectVocalsModel) },
-                onSwitch = { onAction(DemucsModelImportAction.SelectModelType) },
-                modifier = Modifier.padding(top = 8.dp)
+            HorizontalDivider(
+                modifier = Modifier.padding(top = 12.dp),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
             )
-            listOf(
-                Triple("drums", R.string.activity_vocal_separation_settings_text_08, DemucsModelImportAction.SelectDrumsModel),
-                Triple("bass", R.string.activity_vocal_separation_settings_text_10, DemucsModelImportAction.SelectBassModel),
-                Triple("other", R.string.activity_vocal_separation_settings_text_12, DemucsModelImportAction.SelectOtherModel)
-            ).forEach { (key, label, action) ->
-                DemucsSpecialistModelRow(
-                    value = state.ftModelValues[key]
-                        ?: stringResource(
-                            R.string.model_import_ft_not_selected,
-                            key.replaceFirstChar(Char::uppercase)
-                        ),
-                    selectLabel = stringResource(label),
-                    enabled = state.actionsEnabled,
-                    onSelect = { onAction(action) },
-                    modifier = Modifier.padding(top = 8.dp)
-                )
+            Column(
+                modifier = Modifier.padding(top = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                listOf(
+                    Triple("vocals", R.string.activity_vocal_separation_settings_text_06, DemucsModelImportAction.SelectVocalsModel),
+                    Triple("drums", R.string.activity_vocal_separation_settings_text_08, DemucsModelImportAction.SelectDrumsModel),
+                    Triple("bass", R.string.activity_vocal_separation_settings_text_10, DemucsModelImportAction.SelectBassModel),
+                    Triple("other", R.string.activity_vocal_separation_settings_text_12, DemucsModelImportAction.SelectOtherModel)
+                ).forEach { (key, labelRes, action) ->
+                    val stemTitle = key.replaceFirstChar(Char::uppercase)
+                    DemucsFtStemControl(
+                        stemLabel = stemTitle,
+                        value = state.ftModelValues[key]
+                            ?: stringResource(R.string.model_import_ft_not_selected, stemTitle),
+                        selectLabel = stringResource(labelRes),
+                        enabled = state.actionsEnabled,
+                        onSelect = { onAction(action) }
+                    )
+                }
             }
         }
         Text(
             text = stringResource(R.string.activity_vocal_separation_settings_text_13),
             style = MaterialTheme.typography.bodySmall,
             color = settingsSecondaryTextColor(),
-            modifier = Modifier.padding(top = 8.dp)
+            modifier = Modifier.padding(top = 12.dp)
         )
         HelpLink(onClick = { onAction(DemucsModelImportAction.ShowGuide) })
     }
@@ -839,54 +882,37 @@ private fun ModelResetButton(onClick: () -> Unit, enabled: Boolean) {
 }
 
 @Composable
-private fun DemucsValueWithSwitch(
-    value: String,
-    enabled: Boolean,
-    onSwitch: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        ValueField(Modifier.weight(1f)) {
-            SelectionContainer {
-                Text(
-                    text = value.substringBefore('\n'),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = settingsSecondaryTextColor(),
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.MiddleEllipsis
-                )
-            }
-        }
-        TonalPillButton(
-            onClick = onSwitch,
-            enabled = enabled,
-            modifier = Modifier.padding(start = 12.dp).height(36.dp),
-            contentPadding = PaddingValues(horizontal = 14.dp)
-        ) {
-            Text(
-                stringResource(R.string.activity_model_settings_text_09),
-                maxLines = 1,
-                softWrap = false
-            )
-        }
-    }
-}
-
-@Composable
-private fun DemucsSpecialistModelRow(
+private fun DemucsFtStemControl(
+    stemLabel: String,
     value: String,
     selectLabel: String,
     enabled: Boolean,
     onSelect: () -> Unit,
-    onSwitch: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        ValueField(Modifier.weight(1f)) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = stemLabel,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleSmall,
+                color = settingsPrimaryTextColor(),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            TonalPillButton(
+                onClick = onSelect,
+                enabled = enabled,
+                modifier = Modifier.padding(start = 12.dp).height(36.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp)
+            ) {
+                Text(selectLabel, maxLines = 1, softWrap = false)
+            }
+        }
+        ValueField(Modifier.fillMaxWidth().padding(top = 4.dp)) {
             SelectionContainer {
                 Text(
                     text = value.substringBefore('\n'),
@@ -897,28 +923,6 @@ private fun DemucsSpecialistModelRow(
                     overflow = TextOverflow.MiddleEllipsis
                 )
             }
-        }
-        onSwitch?.let { switch ->
-            TonalPillButton(
-                onClick = switch,
-                enabled = enabled,
-                modifier = Modifier.padding(start = 8.dp).height(36.dp),
-                contentPadding = PaddingValues(horizontal = 14.dp)
-            ) {
-                Text(
-                    stringResource(R.string.activity_model_settings_text_09),
-                    maxLines = 1,
-                    softWrap = false
-                )
-            }
-        }
-        TonalPillButton(
-            onClick = onSelect,
-            enabled = enabled,
-            modifier = Modifier.padding(start = 12.dp).height(36.dp),
-            contentPadding = PaddingValues(horizontal = 14.dp)
-        ) {
-            Text(selectLabel, maxLines = 1, softWrap = false)
         }
     }
 }
